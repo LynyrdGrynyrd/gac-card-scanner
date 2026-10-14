@@ -1,0 +1,28 @@
+# Hugging Face Space (Docker SDK, free CPU basic: 2 vCPU / 16 GB) image for the PUBLIC DEMO of GAC Card Scanner.
+# Public demo mode is forced on (GAC_DEMO=1): synthetic cards, shared login, preview-only exports, wiped every 6 h.
+# The optional AI double-check (Qwen3-VL-4B-Instruct GGUF, Apache-2.0) is downloaded from Hugging Face at START,
+# not baked in, so the image stays small; if the download or llama-server fails, the app runs rules-only (OCR + parser).
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng libglib2.0-0 libgomp1 libgl1 curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# llama.cpp CPU build (MIT), pinned; a failed download only disables the AI double-check
+ARG LLAMA_TAG=b11588
+RUN mkdir -p /opt/llama && (curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" \
+      | tar -xz -C /opt/llama --strip-components=1 && /opt/llama/llama-server --version || echo "llama.cpp download failed: demo will run rules-only")
+# HF Spaces run the container as uid 1000
+RUN useradd -m -u 1000 user
+WORKDIR /home/user/app
+COPY --chown=user requirements.txt .
+RUN pip install -r requirements.txt
+COPY --chown=user app ./app
+COPY --chown=user data/existing_contacts.csv ./data/existing_contacts.csv
+COPY --chown=user tests/synth2 ./tests/synth2
+COPY --chown=user tests/synth2_gt.json ./tests/synth2_gt.json
+COPY --chown=user space/start.sh ./space/start.sh
+RUN chmod +x space/start.sh && mkdir -p data/uploads data/exports models && chown -R user data models
+USER user
+ENV GAC_DEMO=1 GAC_ALLOW_REMOTE_SETUP=0 PORT=7860 LLAMA_DIR=/opt/llama MODELS=/home/user/app/models \
+    LLAMA_THREADS=2 SCAN_WORKERS=1 OMP_NUM_THREADS=2 VLM_URL=http://127.0.0.1:8090
+EXPOSE 7860
+CMD ["./space/start.sh"]

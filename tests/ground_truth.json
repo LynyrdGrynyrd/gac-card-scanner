@@ -1,0 +1,191 @@
+{
+ "card1_left.jpg": {
+  "first_name": "Maria",
+  "last_name": "Delgado",
+  "title": "Vice President, Commercial Lending",
+  "company": "Summit Valley Bank",
+  "emails": [
+   "mdelgado@summitvalleybank.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0142"
+   },
+   {
+    "type": "mobile",
+    "number": "(330) 555-0199"
+   }
+  ],
+  "website": "www.summitvalleybank.com",
+  "address": "200 S Main St, Suite 400, Akron, OH 44308",
+  "social": []
+ },
+ "card2_center.jpg": {
+  "first_name": "Derek",
+  "last_name": "Lawson",
+  "title": "Owner",
+  "company": "Lawson Brothers Construction LLC",
+  "emails": [
+   "derek@lawsonbuilds.com"
+  ],
+  "phones": [
+   {
+    "type": "mobile",
+    "number": "(234) 555-0110"
+   }
+  ],
+  "website": "lawsonbuilds.com",
+  "address": "1450 Canton Rd, Akron, OH 44312",
+  "social": [
+   "linkedin.com/in/dereklawson"
+  ]
+ },
+ "card3_dark.jpg": {
+  "first_name": "Priya",
+  "last_name": "Raman",
+  "title": "Director of Marketing",
+  "company": "Firestone Park Health Clinic",
+  "emails": [
+   "praman@fphealth.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0123"
+   },
+   {
+    "type": "fax",
+    "number": "(330) 555-0124"
+   }
+  ],
+  "website": "www.fphealth.org",
+  "address": "777 E Market St, Akron, OH 44305",
+  "social": [
+   "@fphealthakron"
+  ]
+ },
+ "card4_noisy_rot.jpg": {
+  "first_name": "James",
+  "last_name": "Okafor",
+  "title": "Sales Manager",
+  "company": "Cuyahoga Falls Tire Co.",
+  "emails": [
+   "jokafor@cftire.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0177"
+   },
+   {
+    "type": "mobile",
+    "number": "(330) 555-0188"
+   }
+  ],
+  "website": "www.cftire.com",
+  "address": "2300 State Rd, Cuyahoga Falls, OH 44223",
+  "social": []
+ },
+ "card5_left.jpg": {
+  "first_name": "Emily",
+  "last_name": "Chen",
+  "title": "Founder & CEO",
+  "company": "Rubber City Robotics Inc",
+  "emails": [
+   "emily@rcrobotics.io"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0150"
+   }
+  ],
+  "website": "https://rcrobotics.io",
+  "address": "47 N Main St, Akron, OH 44308",
+  "social": [
+   "linkedin.com/in/emilychen"
+  ]
+ },
+ "card6_center.jpg": {
+  "first_name": "Robert",
+  "last_name": "Hughes",
+  "title": "Managing Partner",
+  "company": "Hughes & Partners Law",
+  "emails": [
+   "rhughes@hugheslaw.com",
+   "info@hugheslaw.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0190"
+   }
+  ],
+  "website": "www.hugheslaw.com",
+  "address": "1 Cascade Plaza, Akron, OH 44308",
+  "social": []
+ },
+ "hard1_twocol.jpg": {
+  "first_name": "Tanya",
+  "last_name": "Brooks",
+  "title": "Head Baker",
+  "company": "Northside Bakehouse",
+  "emails": [
+   "tanya@northsidebakehouse.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0161"
+   }
+  ],
+  "website": "northsidebakehouse.com",
+  "address": "21 Furnace St, Akron, OH 44304",
+  "social": []
+ },
+ "hard2_photo.jpg": {
+  "first_name": "James",
+  "last_name": "Okafor",
+  "title": "Sales Manager",
+  "company": "Cuyahoga Falls Tire Co.",
+  "emails": [
+   "jokafor@cftire.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0177"
+   },
+   {
+    "type": "mobile",
+    "number": "(330) 555-0188"
+   }
+  ],
+  "website": "www.cftire.com",
+  "address": "2300 State Rd, Cuyahoga Falls, OH 44223",
+  "social": []
+ },
+ "hard3_lowres_italic.jpg": {
+  "first_name": "Gerald",
+  "last_name": "Vance",
+  "title": "Senior Tax Advisor",
+  "company": "Vance & Kohl Accounting Group",
+  "emails": [
+   "gvance@vancekohl.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0135"
+   },
+   {
+    "type": "mobile",
+    "number": "(330) 555-0136"
+   }
+  ],
+  "website": "www.vancekohl.com",
+  "address": "3800 Embassy Pkwy, Akron, OH 44333",
+  "social": []
+ }
+}

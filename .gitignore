@@ -1,0 +1,73 @@
+# --- Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.zip
+
+# --- Runtime data: card photos, DB, exports, queue state (personal data, never commit)
+data/*
+# fake CRM sample (fictional people, 555 numbers): needed by tests/unit
+!data/existing_contacts.csv
+*.db
+*.db-*
+*.sqlite*
+*.log
+uploads/
+exports/
+thumbs/
+certs/
+*.pem
+*.key
+.env
+
+# --- AI model files (downloaded by the operator, ~3 GB)
+models/
+*.gguf
+*.onnx.download
+
+# --- Bench: real card photos, corrections (copies of real cards), VLM caches, running bake-off output
+bench/real/
+bench/robust/
+bench/corrections/
+bench/vlm_cache*/
+bench/vlm-bakeoff/
+
+# --- QA: logins and screenshots/exports taken with real or live data
+qa/TEST-LOGINS.md
+qa/*/*.png
+qa/*/*.jpg
+qa/*/*.jpeg
+qa/*/*.webm
+qa/*/screens/
+qa/*/*-shots/
+qa/mctrade-r1-exports/
+qa/fixtures/real*
+qa-reset-bak-*/
+shots/
+audits/raw/
+audits/ui-shots/
+mctrade-dryrun/*.xlsx
+mctrade-dryrun/*.csv
+
+# --- Training build intermediates (large)
+training/video-build/
+
+# --- QA exports and screenshots anywhere under qa/ (taken from the live DB); synthetic fixtures stay
+qa/**/*.csv
+qa/**/*.xlsx
+qa/**/*.vcf
+qa/**/*.png
+qa/**/*.jpg
+!qa/fixtures/**
+!qa/skeptic/fixtures/**
+!qa/skeptic-r3/v/**
+bench/real_gt.json
+bench/*real*.json
+mctrade-dryrun/out/qa-*/
+# --- demo / space build
+models/
+../gac-card-scanner-space/

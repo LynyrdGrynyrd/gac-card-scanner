@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · GAC Card Scanner</title><link rel="icon" href="/static/brand/GAC_logo.png"><link rel="stylesheet" href="/static/ui/ui.css?v=7">
+<style>.auth{max-width:420px;margin:40px auto}.auth img{height:64px}.auth .panel{padding:24px}</style></head>
+<body><main class="wrap" id="main"><div class="auth">
+<img src="/static/brand/GAC_logo.png" alt="Greater Akron Chamber">
+<h1 id="h">Sign in</h1>
+<p class="lead" id="lead">Card Scanner · internal pilot</p>
+<form class="panel" id="f" novalidate>
+  <div id="setupOnly" hidden>
+    <label for="display">Your full name</label><input id="display" autocomplete="name">
+    <label for="initials">Initials <small>(shown on cards you review)</small></label><input id="initials" maxlength="6">
+  </div>
+  <label for="username">Username</label><input id="username" autocomplete="username" autocapitalize="none" required>
+  <label for="password">Password <small id="pwHint" hidden>(at least 10 characters)</small></label><input id="password" type="password" autocomplete="current-password" required aria-describedby="err">
+  <div id="setupOnly2" hidden><label for="password2">Repeat password</label><input id="password2" type="password" autocomplete="new-password"></div>
+  <p class="ferr" id="err" role="alert"></p>
+  <div class="btns"><button class="btn primary" id="go">Sign in</button></div>
+  <p class="small" id="help">Forgot your password? Ask a scanner admin to reset it.</p>
+</form>
+<p class="small"><a href="/privacy">Privacy note</a></p>
+</div></main>
+<footer class="foot"><div class="wrap">Greater Akron Chamber · Card Scanner · <strong>Internal pilot</strong></div></footer>
+<script src="/static/ui/login.js"></script></body></html>

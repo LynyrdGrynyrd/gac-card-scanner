@@ -1,0 +1,20 @@
+# docker compose up -d   ->  open http://localhost:8765 and create the admin account.
+services:
+  scanner:
+    build: .
+    image: gac-card-scanner:pilot
+    restart: unless-stopped
+    ports:
+      # Only this computer can reach the scanner. For phones on the office Wi-Fi, change to "8765:8765"
+      # AND mount a certificate (./certs) so it serves HTTPS. Then turn GAC_ALLOW_REMOTE_SETUP off.
+      - "127.0.0.1:8765:8765"
+    environment:
+      # Inside Docker the browser is not "localhost" to the app, so allow the first-admin setup page.
+      # Safe while the port is bound to 127.0.0.1 above; it is ignored once an admin exists.
+      GAC_ALLOW_REMOTE_SETUP: "1"
+      SCAN_WORKERS: "1"
+    volumes:
+      - gac-data:/srv/gac/data          # database, card photos, export copies (back this up)
+      # - ./certs:/srv/gac/certs:ro     # optional HTTPS: cert.pem + key.pem (python -m app.make_cert, or mkcert)
+volumes:
+  gac-data:

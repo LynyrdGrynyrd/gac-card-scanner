@@ -1,0 +1,1398 @@
+{
+ "s2_00_left_light.jpg": {
+  "first_name": "Shaun",
+  "last_name": "Castro",
+  "title": "Operations Manager",
+  "company": "Glass Law Firm",
+  "department": "Department of Engineering",
+  "emails": [
+   "shaun.castro@glass.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330.555.0157"
+   },
+   {
+    "type": "mobile",
+    "number": "330.555.0176"
+   }
+  ],
+  "website": "www.glass.org",
+  "address": "8330 Hayes Walk Dr, Suite 923, Kent, OH 44280",
+  "cat": [
+   "left",
+   "light",
+   "flat",
+   "suite",
+   "department"
+  ]
+ },
+ "s2_01_center_light_photo.jpg": {
+  "first_name": "Brenda",
+  "last_name": "Lopez",
+  "title": "Vice President, Commercial Lending",
+  "company": "Hunt LLC",
+  "department": "",
+  "emails": [
+   "brenda.lopez@hunt.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216-555-0197"
+   },
+   {
+    "type": "mobile",
+    "number": "330-555-0172"
+   }
+  ],
+  "website": "hunt.com",
+  "address": "4567 Clinton Hollow Blvd, Kent, OH 44210",
+  "cat": [
+   "center",
+   "light",
+   "phone-photo"
+  ]
+ },
+ "s2_02_right_light.jpg": {
+  "first_name": "Donald",
+  "last_name": "Ryan",
+  "title": "Business Development Manager",
+  "company": "Voice Rule Manufacturing Co.",
+  "department": "",
+  "emails": [
+   "dryan@voicerule.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216-555-0102"
+   },
+   {
+    "type": "mobile",
+    "number": "330-555-0105"
+   }
+  ],
+  "website": "www.voicerule.com",
+  "address": "6297 Caitlin Locks St, Cleveland, OH 44100",
+  "cat": [
+   "right",
+   "light",
+   "flat",
+   "caps",
+   "credentials"
+  ]
+ },
+ "s2_03_two-column_light_photo.jpg": {
+  "first_name": "Tami",
+  "last_name": "Valdez",
+  "title": "Business Development Manager",
+  "company": "Power Rate Group",
+  "department": "",
+  "emails": [
+   "tvaldez@powerrate.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "440.555.0161"
+   },
+   {
+    "type": "mobile",
+    "number": "330.555.0113"
+   },
+   {
+    "type": "fax",
+    "number": "216.555.0130"
+   }
+  ],
+  "website": "powerrate.com",
+  "address": "3751 Cindy Village Dr, Suite 294, Fairlawn, OH 44380",
+  "cat": [
+   "two-column",
+   "light",
+   "phone-photo",
+   "caps",
+   "credentials",
+   "suite",
+   "multi-phone"
+  ]
+ },
+ "s2_04_footer-row_light.jpg": {
+  "first_name": "Allison",
+  "last_name": "Brown",
+  "title": "Vice President, Commercial Lending",
+  "company": "Customer Until LLC",
+  "department": "",
+  "emails": [
+   "allison.brown@customeruntil.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216-555-0117"
+   },
+   {
+    "type": "mobile",
+    "number": "216-555-0194"
+   },
+   {
+    "type": "fax",
+    "number": "234-555-0143"
+   }
+  ],
+  "website": "www.customeruntil.org",
+  "address": "P.O. Box 1202, Canton, OH 44793",
+  "cat": [
+   "footer-row",
+   "light",
+   "flat",
+   "script",
+   "credentials",
+   "po-box",
+   "multi-phone"
+  ]
+ },
+ "s2_05_vertical_light_photo.jpg": {
+  "first_name": "Steven",
+  "last_name": "Alexander",
+  "title": "Attorney at Law",
+  "company": "Thousand Deal Manufacturing Co.",
+  "department": "",
+  "emails": [
+   "steven.alexander@thousanddeal.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330-555-0161 ext. 990"
+   }
+  ],
+  "website": "www.thousanddeal.co",
+  "address": "P.O. Box 8530, Kent, OH 44203",
+  "cat": [
+   "vertical",
+   "light",
+   "phone-photo",
+   "extension",
+   "po-box"
+  ]
+ },
+ "s2_06_logo-band_light.jpg": {
+  "first_name": "Adam",
+  "last_name": "Miller",
+  "title": "Principal",
+  "company": "Real Fall Consulting",
+  "department": "",
+  "emails": [
+   "amiller@realfall.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 216 555 0191"
+   },
+   {
+    "type": "work",
+    "number": "1-800-555-0104"
+   }
+  ],
+  "website": "www.realfall.com",
+  "address": "7393 Bright Ville Blvd, Suite 319, Cuyahoga Falls, OH 44248",
+  "cat": [
+   "logo-band",
+   "light",
+   "flat",
+   "qr",
+   "credentials",
+   "suite"
+  ]
+ },
+ "s2_07_left_light_photo.jpg": {
+  "first_name": "Christopher",
+  "last_name": "King",
+  "title": "Financial Advisor",
+  "company": "Son Drug Dental",
+  "department": "",
+  "emails": [
+   "cking@sondrug.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(234) 555-0125"
+   },
+   {
+    "type": "mobile",
+    "number": "(330) 555-0196"
+   }
+  ],
+  "website": "www.sondrug.com",
+  "address": "1796 Johnson Port Pkwy, Kent, OH 44247",
+  "cat": [
+   "left",
+   "light",
+   "phone-photo",
+   "qr",
+   "credentials"
+  ]
+ },
+ "s2_08_center_light.jpg": {
+  "first_name": "Katie",
+  "last_name": "Morales",
+  "title": "HR Director",
+  "company": "Throughout Fill Inc.",
+  "department": "",
+  "emails": [
+   "katie.morales@throughoutfill.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330-555-0144"
+   },
+   {
+    "type": "mobile",
+    "number": "216-555-0170"
+   }
+  ],
+  "website": "www.throughoutfill.com",
+  "address": "6403 Jones Brook St, Hudson, OH 44241",
+  "cat": [
+   "center",
+   "light",
+   "flat"
+  ]
+ },
+ "s2_09_right_light_photo.jpg": {
+  "first_name": "Melanie",
+  "last_name": "Smith",
+  "title": "Operations Manager",
+  "company": "Determine Within Consulting",
+  "department": "",
+  "emails": [
+   "msmith@determinewithi.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 234 555 0138"
+   }
+  ],
+  "website": "www.determinewithi.co",
+  "address": "8575 Theodore Station Dr, Stow, OH 44239",
+  "cat": [
+   "right",
+   "light",
+   "phone-photo"
+  ]
+ },
+ "s2_10_two-column_light.jpg": {
+  "first_name": "Ray",
+  "last_name": "Jones",
+  "title": "Senior Account Executive",
+  "company": "Soto Realty",
+  "department": "",
+  "emails": [
+   "ray.jones@soto.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330.555.0187"
+   },
+   {
+    "type": "fax",
+    "number": "440.555.0113"
+   }
+  ],
+  "website": "soto.com",
+  "address": "P.O. Box 3280, Fairlawn, OH 44319",
+  "cat": [
+   "two-column",
+   "light",
+   "flat",
+   "credentials",
+   "po-box"
+  ]
+ },
+ "s2_11_footer-row_light_photo.jpg": {
+  "first_name": "Marvin",
+  "last_name": "Maynard",
+  "title": "Senior Account Executive",
+  "company": "Son Win Group",
+  "department": "",
+  "emails": [
+   "marvin.maynard@sonwin.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "234.555.0112 ext. 255"
+   },
+   {
+    "type": "mobile",
+    "number": "330.555.0133"
+   }
+  ],
+  "website": "www.sonwin.com",
+  "address": "2977 Dennis Squares Rd, Canton, OH 44724",
+  "cat": [
+   "footer-row",
+   "light",
+   "phone-photo",
+   "caps",
+   "extension"
+  ]
+ },
+ "s2_12_vertical_light.jpg": {
+  "first_name": "Craig",
+  "last_name": "Brown",
+  "title": "Project Engineer",
+  "company": "Subject Message Inc.",
+  "department": "",
+  "emails": [
+   "cbrown@subjectmessage.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 440 555 0154"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 216 555 0101"
+   },
+   {
+    "type": "work",
+    "number": "1-800-555-0125"
+   }
+  ],
+  "website": "www.subjectmessage.co",
+  "address": "2212 Evelyn Field Pkwy, Akron, OH 44341",
+  "cat": [
+   "vertical",
+   "light",
+   "flat",
+   "script",
+   "credentials",
+   "multi-phone"
+  ]
+ },
+ "s2_13_logo-band_light_photo.jpg": {
+  "first_name": "Seth",
+  "last_name": "Lee",
+  "title": "Office Manager",
+  "company": "Sign Specific Group",
+  "department": "",
+  "emails": [
+   "seth.lee@signspecific.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "440.555.0126"
+   },
+   {
+    "type": "mobile",
+    "number": "216.555.0138"
+   },
+   {
+    "type": "work",
+    "number": "1-800-555-0145"
+   }
+  ],
+  "website": "signspecific.org",
+  "address": "5415 Robert Lights Dr, Stow, OH 44297",
+  "cat": [
+   "logo-band",
+   "light",
+   "phone-photo",
+   "caps",
+   "multi-phone"
+  ]
+ },
+ "s2_14_left_dark.jpg": {
+  "first_name": "Darren",
+  "last_name": "Fisher",
+  "title": "HR Director",
+  "company": "Difference A Law Firm",
+  "department": "",
+  "emails": [
+   "darren.fisher@differencea.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(440) 555-0120"
+   }
+  ],
+  "website": "www.differencea.org",
+  "address": "9315 Lin Unions St, Barberton, OH 44209",
+  "cat": [
+   "left",
+   "dark",
+   "flat",
+   "credentials"
+  ]
+ },
+ "s2_15_center_light_photo.jpg": {
+  "first_name": "Brittany",
+  "last_name": "Cuevas",
+  "title": "Insurance Agent",
+  "company": "Smith & Associates",
+  "department": "Division of Research",
+  "emails": [
+   "bcuevas@smith.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 330 555 0174"
+   },
+   {
+    "type": "fax",
+    "number": "+1 234 555 0154"
+   }
+  ],
+  "website": "www.smith.co",
+  "address": "2575 Phillip Walk Blvd, Akron, OH 44340",
+  "cat": [
+   "center",
+   "light",
+   "phone-photo",
+   "caps",
+   "department"
+  ]
+ },
+ "s2_16_right_dark.jpg": {
+  "first_name": "Carolyn",
+  "last_name": "Ray",
+  "title": "Vice President, Commercial Lending",
+  "company": "Williams Law Firm",
+  "department": "",
+  "emails": [
+   "cray@williams.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216.555.0196"
+   }
+  ],
+  "website": "www.williams.net",
+  "address": "5894 Jason Green Rd, Suite 801, Barberton, OH 44289",
+  "cat": [
+   "right",
+   "dark",
+   "flat",
+   "caps",
+   "suite"
+  ]
+ },
+ "s2_17_two-column_dark_photo.jpg": {
+  "first_name": "Albert",
+  "last_name": "Bishop",
+  "title": "Attorney at Law",
+  "company": "Then Fine Construction",
+  "department": "",
+  "emails": [
+   "abishop@thenfine.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0157"
+   }
+  ],
+  "website": "thenfine.org",
+  "address": "5811 Jones Course Ave, Kent, OH 44217",
+  "cat": [
+   "two-column",
+   "dark",
+   "phone-photo"
+  ]
+ },
+ "s2_18_footer-row_light.jpg": {
+  "first_name": "Jason",
+  "last_name": "Fields",
+  "title": "Executive Director",
+  "company": "Smith Manufacturing Co.",
+  "department": "",
+  "emails": [
+   "jfields@smith.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(216) 555-0190"
+   }
+  ],
+  "website": "www.smith.net",
+  "address": "2351 Watson Motorway Ave, Fairlawn, OH 44346",
+  "cat": [
+   "footer-row",
+   "light",
+   "flat",
+   "caps",
+   "credentials"
+  ]
+ },
+ "s2_19_vertical_dark_photo.jpg": {
+  "first_name": "David",
+  "last_name": "Matthews",
+  "title": "Realtor",
+  "company": "There Paper Construction",
+  "department": "Department of Engineering",
+  "emails": [
+   "dmatthews@therepaper.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 216 555 0102"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 234 555 0172"
+   },
+   {
+    "type": "work",
+    "number": "1-800-555-0154"
+   }
+  ],
+  "website": "therepaper.org",
+  "address": "2546 Michelle Falls Dr, Barberton, OH 44297",
+  "cat": [
+   "vertical",
+   "dark",
+   "phone-photo",
+   "multi-phone",
+   "department"
+  ]
+ },
+ "s2_20_logo-band_dark.jpg": {
+  "first_name": "Courtney",
+  "last_name": "Collins",
+  "title": "Insurance Agent",
+  "company": "Perez LLC",
+  "department": "",
+  "emails": [
+   "ccollins@perez.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0153"
+   },
+   {
+    "type": "fax",
+    "number": "(234) 555-0181"
+   }
+  ],
+  "website": "perez.org",
+  "address": "7622 Jessica Estate Dr, Cuyahoga Falls, OH 44290",
+  "cat": [
+   "logo-band",
+   "dark",
+   "flat",
+   "script",
+   "qr",
+   "credentials"
+  ]
+ },
+ "s2_21_left_light_photo.jpg": {
+  "first_name": "Jodi",
+  "last_name": "Shepard",
+  "title": "Branch Manager",
+  "company": "Debate Right LLC",
+  "department": "",
+  "emails": [
+   "jodi.shepard@debateright.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 234 555 0156"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 234 555 0196"
+   }
+  ],
+  "website": "debateright.net",
+  "address": "3247 Khan Rapids Ave, Cuyahoga Falls, OH 44276",
+  "cat": [
+   "left",
+   "light",
+   "phone-photo",
+   "credentials"
+  ]
+ },
+ "s2_22_center_color.jpg": {
+  "first_name": "Christian",
+  "last_name": "Williams",
+  "title": "Owner",
+  "company": "Rodriguez Construction",
+  "department": "",
+  "emails": [
+   "cwilliams@rodriguez.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(234) 555-0173"
+   },
+   {
+    "type": "mobile",
+    "number": "(234) 555-0116"
+   },
+   {
+    "type": "fax",
+    "number": "(216) 555-0178"
+   }
+  ],
+  "website": "www.rodriguez.com",
+  "address": "8466 Allen Squares Ave, Fairlawn, OH 44334",
+  "cat": [
+   "center",
+   "color",
+   "flat",
+   "caps",
+   "qr",
+   "credentials",
+   "multi-phone"
+  ]
+ },
+ "s2_23_right_color_photo.jpg": {
+  "first_name": "Peter",
+  "last_name": "Fisher",
+  "title": "Project Engineer",
+  "company": "West Pick Group",
+  "department": "",
+  "emails": [
+   "peter.fisher@westpick.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(216) 555-0109"
+   },
+   {
+    "type": "mobile",
+    "number": "(440) 555-0186"
+   }
+  ],
+  "website": "www.westpick.net",
+  "address": "5101 Carter Extensions Blvd, Suite 413, Canton, OH 44785",
+  "cat": [
+   "right",
+   "color",
+   "phone-photo",
+   "script",
+   "suite"
+  ]
+ },
+ "s2_24_two-column_light.jpg": {
+  "first_name": "Sarah",
+  "last_name": "Rowland",
+  "title": "Branch Manager",
+  "company": "Martinez Dental",
+  "department": "",
+  "emails": [
+   "srowland@martinez.com",
+   "info@martinez.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(234) 555-0104"
+   },
+   {
+    "type": "mobile",
+    "number": "(440) 555-0198"
+   },
+   {
+    "type": "fax",
+    "number": "(440) 555-0165"
+   }
+  ],
+  "website": "www.martinez.com",
+  "address": "3174 Hansen Walk Blvd, Suite 574, Stow, OH 44211",
+  "cat": [
+   "two-column",
+   "light",
+   "flat",
+   "credentials",
+   "suite",
+   "multi-phone",
+   "multi-email"
+  ]
+ },
+ "s2_25_footer-row_color_photo.jpg": {
+  "first_name": "Christina",
+  "last_name": "Jones",
+  "title": "Principal",
+  "company": "Lewis Bank",
+  "department": "",
+  "emails": [
+   "christina.jones@lewis.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216.555.0198"
+   },
+   {
+    "type": "mobile",
+    "number": "234.555.0145"
+   }
+  ],
+  "website": "www.lewis.com",
+  "address": "6196 Kaitlyn Cliff Ave, Barberton, OH 44213",
+  "cat": [
+   "footer-row",
+   "color",
+   "phone-photo",
+   "caps"
+  ]
+ },
+ "s2_26_vertical_color.jpg": {
+  "first_name": "Joseph",
+  "last_name": "Griffin",
+  "title": "Operations Manager",
+  "company": "As Any Inc.",
+  "department": "",
+  "emails": [
+   "jgriffin@asany.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330.555.0158 ext. 194"
+   }
+  ],
+  "website": "asany.com",
+  "address": "5967 Julian Pines Ave, Fairlawn, OH 44321",
+  "cat": [
+   "vertical",
+   "color",
+   "flat",
+   "caps",
+   "credentials",
+   "extension"
+  ]
+ },
+ "s2_27_logo-band_light_photo.jpg": {
+  "first_name": "Ashley",
+  "last_name": "Anderson",
+  "title": "HR Director",
+  "company": "Cox Group",
+  "department": "",
+  "emails": [
+   "aanderson@cox.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 330 555 0160"
+   }
+  ],
+  "website": "www.cox.net",
+  "address": "P.O. Box 2471, Hudson, OH 44251",
+  "cat": [
+   "logo-band",
+   "light",
+   "phone-photo",
+   "qr",
+   "credentials",
+   "po-box"
+  ]
+ },
+ "s2_28_left_cream.jpg": {
+  "first_name": "Jessica",
+  "last_name": "Boyd",
+  "title": "Office Manager",
+  "company": "Your Challenge Law Firm",
+  "department": "",
+  "emails": [
+   "jessica.boyd@yourchallenge.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "440-555-0172"
+   },
+   {
+    "type": "mobile",
+    "number": "330-555-0109"
+   },
+   {
+    "type": "fax",
+    "number": "234-555-0115"
+   }
+  ],
+  "website": "www.yourchallenge.com",
+  "address": "5028 Sandra Mountains Pkwy, Barberton, OH 44208",
+  "cat": [
+   "left",
+   "cream",
+   "flat",
+   "qr",
+   "credentials",
+   "multi-phone"
+  ]
+ },
+ "s2_29_center_cream_photo.jpg": {
+  "first_name": "Renee",
+  "last_name": "Haynes",
+  "title": "Sales Manager",
+  "company": "Along Against Consulting",
+  "department": "",
+  "emails": [
+   "rhaynes@alongagainst.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(234) 555-0140"
+   },
+   {
+    "type": "mobile",
+    "number": "(440) 555-0102"
+   },
+   {
+    "type": "fax",
+    "number": "(234) 555-0168"
+   }
+  ],
+  "website": "alongagainst.net",
+  "address": "2356 Timothy Street Blvd, Kent, OH 44288",
+  "cat": [
+   "center",
+   "cream",
+   "phone-photo",
+   "qr",
+   "multi-phone"
+  ]
+ },
+ "s2_30_right_light.jpg": {
+  "first_name": "Larry",
+  "last_name": "Taylor",
+  "title": "Managing Partner",
+  "company": "Baby Bag Consulting",
+  "department": "",
+  "emails": [
+   "ltaylor@babybag.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(330) 555-0176"
+   },
+   {
+    "type": "mobile",
+    "number": "(440) 555-0172"
+   },
+   {
+    "type": "fax",
+    "number": "(216) 555-0196"
+   }
+  ],
+  "website": "www.babybag.com",
+  "address": "7591 Payne Street St, Cuyahoga Falls, OH 44267",
+  "cat": [
+   "right",
+   "light",
+   "flat",
+   "multi-phone"
+  ]
+ },
+ "s2_31_two-column_cream_photo.jpg": {
+  "first_name": "Bradley",
+  "last_name": "Mayer",
+  "title": "Financial Advisor",
+  "company": "Since Score Construction",
+  "department": "",
+  "emails": [
+   "bradley.mayer@sincescore.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "234.555.0114"
+   },
+   {
+    "type": "mobile",
+    "number": "440.555.0170"
+   }
+  ],
+  "website": "www.sincescore.org",
+  "address": "8476 Laura Junctions Rd, Akron, OH 44387",
+  "cat": [
+   "two-column",
+   "cream",
+   "phone-photo",
+   "caps",
+   "credentials"
+  ]
+ },
+ "s2_32_footer-row_cream.jpg": {
+  "first_name": "Michael",
+  "last_name": "Jennings",
+  "title": "Founder & CEO",
+  "company": "Lester Consulting",
+  "department": "",
+  "emails": [
+   "mjennings@lester.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 330 555 0183"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 216 555 0131"
+   },
+   {
+    "type": "fax",
+    "number": "+1 440 555 0107"
+   }
+  ],
+  "website": "lester.org",
+  "address": "5160 Raymond Burgs Dr, Akron, OH 44397",
+  "cat": [
+   "footer-row",
+   "cream",
+   "flat",
+   "multi-phone"
+  ]
+ },
+ "s2_33_vertical_light_photo.jpg": {
+  "first_name": "Michelle",
+  "last_name": "Armstrong",
+  "title": "Executive Director",
+  "company": "Weber Inc.",
+  "department": "",
+  "emails": [
+   "michelle.armstrong@weber.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 330 555 0129"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 234 555 0105"
+   },
+   {
+    "type": "fax",
+    "number": "+1 330 555 0194"
+   }
+  ],
+  "website": "weber.com",
+  "address": "3776 Gray Bridge Rd, Suite 665, Medina, OH 44253",
+  "cat": [
+   "vertical",
+   "light",
+   "phone-photo",
+   "script",
+   "suite",
+   "multi-phone"
+  ]
+ },
+ "s2_34_logo-band_cream.jpg": {
+  "first_name": "Chelsea",
+  "last_name": "Miller",
+  "title": "Realtor",
+  "company": "Purpose Business Manufacturing Co.",
+  "department": "",
+  "emails": [
+   "chelsea.miller@purposebusines.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(216) 555-0107"
+   }
+  ],
+  "website": "www.purposebusines.net",
+  "address": "6448 Hobbs Stream Dr, Barberton, OH 44234",
+  "cat": [
+   "logo-band",
+   "cream",
+   "flat",
+   "qr"
+  ]
+ },
+ "s2_35_left_light_photo.jpg": {
+  "first_name": "Mark",
+  "last_name": "Villa",
+  "title": "Office Manager",
+  "company": "Benson Law Firm",
+  "department": "",
+  "emails": [
+   "mvilla@benson.co",
+   "info@benson.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216.555.0140"
+   },
+   {
+    "type": "fax",
+    "number": "234.555.0135"
+   }
+  ],
+  "website": "www.benson.co",
+  "address": "530 Alexander Villages Ave, Stow, OH 44269",
+  "cat": [
+   "left",
+   "light",
+   "phone-photo",
+   "caps",
+   "credentials",
+   "multi-email"
+  ]
+ },
+ "s2_36_center_light.jpg": {
+  "first_name": "Amber",
+  "last_name": "Stone",
+  "title": "Vice President, Commercial Lending",
+  "company": "Robertson Construction",
+  "department": "",
+  "emails": [
+   "astone@robertson.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216.555.0185"
+   },
+   {
+    "type": "mobile",
+    "number": "216.555.0154"
+   }
+  ],
+  "website": "www.robertson.net",
+  "address": "4594 Burke Orchard Ave, Suite 512, Kent, OH 44298",
+  "cat": [
+   "center",
+   "light",
+   "flat",
+   "qr",
+   "credentials",
+   "suite"
+  ]
+ },
+ "s2_37_right_light_photo.jpg": {
+  "first_name": "Andrew",
+  "last_name": "Bernard",
+  "title": "Owner",
+  "company": "Rodriguez Construction",
+  "department": "",
+  "emails": [
+   "andrew.bernard@rodriguez.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216-555-0103"
+   }
+  ],
+  "website": "rodriguez.co",
+  "address": "4300 Scott Branch Pkwy, Fairlawn, OH 44349",
+  "cat": [
+   "right",
+   "light",
+   "phone-photo",
+   "credentials"
+  ]
+ },
+ "s2_38_two-column_light.jpg": {
+  "first_name": "Micheal",
+  "last_name": "Thomas",
+  "title": "Business Development Manager",
+  "company": "Population Degree Inc.",
+  "department": "",
+  "emails": [
+   "micheal.thomas@populationdegr.co"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "440.555.0187"
+   },
+   {
+    "type": "mobile",
+    "number": "234.555.0120"
+   }
+  ],
+  "website": "www.populationdegr.co",
+  "address": "5474 Karen Junctions Rd, Barberton, OH 44240",
+  "cat": [
+   "two-column",
+   "light",
+   "flat",
+   "credentials"
+  ]
+ },
+ "s2_39_footer-row_light_photo.jpg": {
+  "first_name": "Donna",
+  "last_name": "Ramos",
+  "title": "Senior Account Executive",
+  "company": "Wait Effort Manufacturing Co.",
+  "department": "",
+  "emails": [
+   "donna.ramos@waiteffort.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 440 555 0106"
+   },
+   {
+    "type": "mobile",
+    "number": "+1 440 555 0132"
+   }
+  ],
+  "website": "waiteffort.net",
+  "address": "7408 Sullivan Glen Dr, Cuyahoga Falls, OH 44220",
+  "cat": [
+   "footer-row",
+   "light",
+   "phone-photo",
+   "credentials"
+  ]
+ },
+ "s2_40_vertical_light.jpg": {
+  "first_name": "James",
+  "last_name": "Jordan",
+  "title": "Project Engineer",
+  "company": "Shaffer Inc.",
+  "department": "",
+  "emails": [
+   "james.jordan@shaffer.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 216 555 0103"
+   },
+   {
+    "type": "fax",
+    "number": "+1 330 555 0139"
+   }
+  ],
+  "website": "www.shaffer.com",
+  "address": "4696 Nicole Lights Rd, Hudson, OH 44215",
+  "cat": [
+   "vertical",
+   "light",
+   "flat"
+  ]
+ },
+ "s2_41_logo-band_light_photo.jpg": {
+  "first_name": "Jeffrey",
+  "last_name": "Mccall",
+  "title": "Vice President, Commercial Lending",
+  "company": "Determine Century Consulting",
+  "department": "",
+  "emails": [
+   "jmccall@determinecentu.org"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216.555.0180"
+   },
+   {
+    "type": "mobile",
+    "number": "330.555.0161"
+   },
+   {
+    "type": "fax",
+    "number": "216.555.0171"
+   },
+   {
+    "type": "work",
+    "number": "1-800-555-0108"
+   }
+  ],
+  "website": "www.determinecentu.org",
+  "address": "P.O. Box 9372, Cleveland, OH 44172",
+  "cat": [
+   "logo-band",
+   "light",
+   "phone-photo",
+   "qr",
+   "po-box",
+   "multi-phone"
+  ]
+ },
+ "s2_42_left_light.jpg": {
+  "first_name": "Paula",
+  "last_name": "Williams",
+  "title": "HR Director",
+  "company": "Attack Factor LLC",
+  "department": "",
+  "emails": [
+   "pwilliams@attackfactor.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 440 555 0139"
+   }
+  ],
+  "website": "attackfactor.com",
+  "address": "5982 Daniel Mountains St, Cuyahoga Falls, OH 44231",
+  "cat": [
+   "left",
+   "light",
+   "flat",
+   "credentials"
+  ]
+ },
+ "s2_43_center_light_photo.jpg": {
+  "first_name": "Joshua",
+  "last_name": "Lewis",
+  "title": "Attorney at Law",
+  "company": "Job Idea Bank",
+  "department": "",
+  "emails": [
+   "jlewis@jobidea.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "216-555-0127"
+   },
+   {
+    "type": "mobile",
+    "number": "234-555-0169"
+   }
+  ],
+  "website": "www.jobidea.net",
+  "address": "4584 Powers Stravenue St, Fairlawn, OH 44312",
+  "cat": [
+   "center",
+   "light",
+   "phone-photo",
+   "qr",
+   "credentials"
+  ]
+ },
+ "s2_44_right_light.jpg": {
+  "first_name": "Mary",
+  "last_name": "Hendrix",
+  "title": "Project Engineer",
+  "company": "Local Full Law Firm",
+  "department": "",
+  "emails": [
+   "mhendrix@localfull.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "+1 330 555 0115"
+   }
+  ],
+  "website": "www.localfull.com",
+  "address": "6205 Maria Harbors Pkwy, Suite 731, Stow, OH 44256",
+  "cat": [
+   "right",
+   "light",
+   "flat",
+   "suite"
+  ]
+ },
+ "s2_45_two-column_light_photo.jpg": {
+  "first_name": "Monique",
+  "last_name": "Williams",
+  "title": "Insurance Agent",
+  "company": "Erickson Bank",
+  "department": "",
+  "emails": [
+   "monique.williams@erickson.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "(234) 555-0196"
+   },
+   {
+    "type": "mobile",
+    "number": "(234) 555-0123"
+   }
+  ],
+  "website": "www.erickson.net",
+  "address": "5137 Parker Turnpike Ave, Fairlawn, OH 44351",
+  "cat": [
+   "two-column",
+   "light",
+   "phone-photo"
+  ]
+ },
+ "s2_46_footer-row_light.jpg": {
+  "first_name": "Anne",
+  "last_name": "Davidson",
+  "title": "Financial Advisor",
+  "company": "Interview Look Group",
+  "department": "",
+  "emails": [
+   "anne.davidson@interviewlook.net"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "330-555-0153"
+   },
+   {
+    "type": "mobile",
+    "number": "440-555-0162"
+   },
+   {
+    "type": "fax",
+    "number": "234-555-0168"
+   }
+  ],
+  "website": "www.interviewlook.net",
+  "address": "1653 Angel Village Rd, Suite 454, Stow, OH 44228",
+  "cat": [
+   "footer-row",
+   "light",
+   "flat",
+   "suite",
+   "multi-phone"
+  ]
+ },
+ "s2_47_vertical_light_photo.jpg": {
+  "first_name": "Joseph",
+  "last_name": "Maxwell",
+  "title": "Owner",
+  "company": "Style Anyone Bank",
+  "department": "",
+  "emails": [
+   "jmaxwell@styleanyone.com"
+  ],
+  "phones": [
+   {
+    "type": "work",
+    "number": "234-555-0101"
+   }
+  ],
+  "website": "www.styleanyone.com",
+  "address": "4568 Sean Roads St, Suite 452, Stow, OH 44245",
+  "cat": [
+   "vertical",
+   "light",
+   "phone-photo",
+   "suite"
+  ]
+ }
+}

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Card Scanner · Greater Akron Chamber</title>
+<link rel="icon" href="/static/brand/GAC_logo.png">
+<link rel="stylesheet" href="/static/ui/ui.css?v=7">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap bar">
+    <a href="#upload" class="brand"><img src="/static/brand/GAC_logo.png" alt="Greater Akron Chamber"><span>Card Scanner</span></a>
+    <nav aria-label="Main">
+      <a href="#upload" data-nav="upload">Scan cards</a>
+      <a href="#queue" data-nav="queue">Review queue <span id="pendingBadge" class="badge" hidden></span></a>
+      <a href="#export" data-nav="export">Export</a>
+      <a href="#admin" data-nav="admin" id="navAdmin" hidden>Admin</a>
+    </nav>
+    <div class="who"><button type="button" class="btn small ghost" id="undoBtn" hidden title="Undo your last action (U)">↶ Undo</button><span id="whoText"></span> <button class="link" id="pwChange">Password</button> · <button class="link" id="logout">Sign out</button></div>
+  </div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+
+<section id="v-upload" class="view" aria-labelledby="h-up">
+  <h1 id="h-up">Scan business cards</h1>
+  <p class="lead">Add photos of business cards. Each card is read automatically and goes to the review queue. Nothing is sent to MC Trade; you export a file when you're ready.</p>
+  <div id="drop" class="drop">
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg>
+    <strong id="dropHead">Drag photos or a whole folder here</strong>
+    <span id="dropHelp">or use a button below. JPG or PNG photos, one card per photo.</span>
+    <div class="btns">
+      <button type="button" class="btn primary" id="bPhotos">Choose photos</button>
+      <button type="button" class="btn" id="bFolder">Choose a folder</button>
+      <button type="button" class="btn mobile-only" id="bCam">Take a photo</button>
+    </div>
+    <span class="small">Folder button doesn't open? Open the folder, select all photos (Ctrl+A / ⌘A) with "Choose photos", or drag the folder here.</span>
+    <input id="fPhotos" type="file" accept="image/*" multiple hidden>
+    <input id="fFolder" type="file" webkitdirectory directory multiple hidden>
+    <input id="fCam" type="file" accept="image/*" capture="environment" hidden>
+  </div>
+  <div class="opts">
+    <label for="batchName">Name this batch <small>(optional, e.g. "Oct 13 Business After Hours")</small></label>
+    <input id="batchName" maxlength="60" placeholder="Event or date">
+    <details><summary>Advanced settings</summary>
+      <label for="engine">Reading method</label>
+      <select id="engine"><option value="auto">Standard (recommended)</option>
+        <option value="ollama">AI reader (only if IT installed it; slower)</option></select>
+    </details>
+  </div>
+  <div id="batch" class="panel" hidden>
+    <div class="batchhead">
+      <h2 id="batchTitle">Batch progress</h2>
+      <span id="batchSummary" aria-live="polite"></span>
+    </div>
+    <div class="progress" role="progressbar" aria-label="Batch progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="batchBar"><div></div></div>
+    <p class="small" id="batchEta"></p>
+    <ul id="batchList" class="filelist"></ul>
+    <p class="small" id="batchLegend" hidden><span class="flag low">Check</span> = something needs a second look (shown on the review screen). <span class="flag bad">Not added</span> = file was skipped, see reason.</p>
+    <div class="btns"><a href="#queue" class="btn primary" id="toQueue" hidden>Review this batch →</a>
+      <button class="btn" id="clearBatch" hidden>Start a new batch</button></div>
+  </div>
+</section>
+
+<section id="v-queue" class="view" aria-labelledby="h-q" hidden>
+  <div class="row between"><h1 id="h-q">Review queue</h1>
+    <div class="btns"><button class="btn ok" id="bulkApprove" disabled>Approve selected</button>
+      <button class="btn danger" id="bulkReject" disabled>Reject selected</button></div></div>
+  <div class="filters" role="group" aria-label="Filters">
+    <div class="seg" role="tablist" aria-label="Status" id="statusTabs">
+      <button role="tab" data-s="pending" aria-selected="true">Pending <span></span></button>
+      <button role="tab" data-s="approved" aria-selected="false">Approved <span></span></button>
+      <button role="tab" data-s="rejected" aria-selected="false">Rejected <span></span></button>
+      <button role="tab" data-s="" aria-selected="false">All <span></span></button>
+    </div>
+    <div class="fbatch"><label for="fBatch" class="inline">Batch</label><input id="fBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="12"><select id="fBatch"><option value="">All batches</option></select></div>
+    <label class="chk"><input type="checkbox" id="fAtt"> Needs attention only</label>
+    <label class="chk"><input type="checkbox" id="fDup"> Possible duplicates</label>
+    <label class="chk"><input type="checkbox" id="fNew"> Not yet exported</label>
+    <label class="sr" for="fText">Search</label><input type="search" id="fText" placeholder="Search name, company, email or #id">
+  </div>
+  <div class="row tools">
+    <button class="btn small" id="archiveBatch" disabled>Archive this batch</button>
+    <label class="chk"><input type="checkbox" id="fArch"> Show archived cards</label>
+  </div>
+  <div class="tablewrap">
+  <table class="q">
+    <caption class="sr">Cards in the review queue</caption>
+    <thead><tr><th scope="col"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th scope="col"><span class="sr">Photo</span></th><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Confidence</th><th scope="col">Needs attention</th><th scope="col">Status</th></tr></thead>
+    <tbody id="qBody"></tbody>
+  </table>
+  </div>
+  <p id="qEmpty" class="empty" hidden></p>
+  <p id="qLoading" class="empty" hidden>Loading cards…</p>
+</section>
+
+<section id="v-review" class="view" aria-labelledby="h-r" hidden>
+  <div class="row between">
+    <h1 id="h-r">Review card</h1>
+    <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Next: next card (J)" aria-keyshortcuts="j">Next →</button></div>
+  </div>
+  <div class="review">
+    <figure class="imgbox"><img id="rImg" alt="Photo of the business card"><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
+      <div class="backbox"><a id="backLink" href="#" target="_blank" hidden>Open back of card</a> <label for="backFile" class="btn small">Add back of card…</label><input type="file" id="backFile" accept="image/*" capture="environment" class="sr"></div></figcaption>
+      <details><summary>Text read from the card</summary><pre id="rRaw"></pre></details>
+      <details id="rHistWrap"><summary>History</summary><ol id="rHist" class="hist"></ol></details></figure>
+    <form id="rForm" class="panel" autocomplete="off" novalidate>
+      <div class="row between"><span id="rStatus" class="pill"></span><span id="rConf"></span></div>
+      <div id="rDecided" class="small"></div>
+      <div id="rDupQ" class="alert" hidden></div>
+      <div id="rDupC" class="alert" hidden></div>
+      <div id="rErr" class="alert bad" role="alert" hidden></div>
+      <div id="rWarn" class="alert info" hidden></div>
+      <div id="rCons" class="alert" role="status" hidden></div>
+      <div id="rAI" class="alert info" role="status" hidden></div>
+      <div class="grid2" id="fields">
+        <div class="f"><label for="first_name">First name <span class="req">required*</span></label><input id="first_name" data-c="name" aria-describedby="e_name"></div>
+        <div class="f"><label for="last_name">Last name</label><input id="last_name" data-c="name"></div>
+        <p class="ferr wide" id="e_name"></p>
+        <div class="f"><label for="title">Job title</label><input id="title" data-c="title"></div>
+        <div class="f"><label for="company">Company</label><input id="company" data-c="company"></div>
+        <div class="f wide"><label for="emails">Email(s) <small>separate with commas</small></label><input id="emails" type="text" inputmode="email" data-c="emails" aria-describedby="e_emails"><p class="ferr" id="e_emails"></p></div>
+        <div class="f wide"><label for="phones">Phone(s) <small>one per line, e.g. "mobile: 330-555-0100" (work / mobile / fax)</small></label><textarea id="phones" rows="3" data-c="phones" aria-describedby="e_phones"></textarea><p class="ferr" id="e_phones"></p></div>
+        <div class="f"><label for="website">Website</label><input id="website" data-c="website"></div>
+        <div class="f"><label for="social">Social links <small>space separated</small></label><input id="social"></div>
+        <div class="f wide" id="addrBox"><label for="address">Address</label><input id="address" data-c="address"></div>
+        <div class="f wide"><label for="note">Note <small>(optional, saved with the card)</small></label><input id="note"></div>
+      </div>
+      <p class="legend small" id="srcLegend">Fields without a tag were read from the printed text. Tags show other sources (QR code, AI, back of card, edited).</p>
+      <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow fields were hard to read. Please compare them with the photo.</p>
+      <div class="btns actions">
+        <button type="button" class="btn ok" id="bApprove">Approve <kbd>A</kbd></button>
+        <button type="button" class="btn danger" id="bReject">Reject <kbd>R</kbd></button>
+        <button type="button" class="btn" id="bSave">Save changes</button>
+        <button type="button" class="btn ghost" id="bPending">Move back to pending</button>
+        <button type="button" class="btn ghost" id="bDelete" hidden>Delete permanently…</button>
+      </div>
+      <p class="hint">Shortcuts (when not typing): <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>J</kbd> next · <kbd>K</kbd> previous · <kbd>Esc</kbd> leave a field. Edits are saved when you approve or reject.</p>
+    </form>
+  </div>
+</section>
+
+<section id="v-export" class="view" aria-labelledby="h-e" hidden>
+  <h1 id="h-e">Export</h1>
+  <p class="lead">Download cards as a file. The file is saved to this computer's <b>Downloads</b> folder; nothing is uploaded anywhere.</p>
+  <label for="exStatus">Which cards?</label>
+  <select id="exStatus"><option value="approved_new">Approved, not yet exported (recommended)</option><option value="approved">All approved cards (includes ones exported before)</option><option value="all">All cards in the queue</option><option value="pending">Pending cards only</option><option value="rejected">Rejected cards only (admin)</option></select>
+  <label for="exBatch">Which batch (event)?</label>
+  <select id="exBatch"><option value="">All batches</option></select>
+  <p id="exInfo" class="muted" aria-live="polite"></p>
+  <div id="exDup" class="alert bad" hidden></div>
+  <div class="tiles">
+    <button type="button" class="tile" data-ex="xlsx"><b>MC Trade import (Excel)</b><span>For importing into MC Trade. You get the import file plus a <em>…-READ-ME.txt</em> and an <em>…-extra-columns.csv</em> (and an <em>…-UPDATES.xlsx</em> when some cards update existing MC Trade contacts). Read the READ ME first: the column names still need to be matched to GAC's MC Trade template once.</span></button>
+    <button type="button" class="tile" data-ex="csv"><b>Spreadsheet (CSV)</b><span>Opens in Excel or Google Sheets. Includes who reviewed each card.</span></button>
+    <button type="button" class="tile" data-ex="vcf"><b>Contacts (vCard)</b><span>Import into Outlook, Gmail or a phone.</span></button>
+  </div>
+  <p class="small"><button type="button" class="link" id="exPreview">Preview the MC Trade Excel file</button> (dry run: nothing is marked as exported and no history is written).</p>
+  <div id="exDone" class="alert ok" role="status" hidden></div>
+  <h2 class="mt">Export history</h2>
+  <p class="small">Every export is listed here. Download a copy again while it is kept (see the retention setting).</p>
+  <div class="tablewrap"><table class="q plain"><caption class="sr">Export history</caption>
+    <thead><tr><th scope="col">When</th><th scope="col">By</th><th scope="col">Format</th><th scope="col">Cards</th><th scope="col">File</th></tr></thead><tbody id="exHist"></tbody></table></div>
+  <p class="btns" id="exHistMore" hidden><button type="button" class="btn small" id="exHistMoreBtn">Show 10 more</button><button type="button" class="btn small ghost" id="exHistAllBtn">Show all</button> <span class="small" id="exHistCount"></span></p>
+</section>
+
+<section id="v-admin" class="view" aria-labelledby="h-a" hidden>
+  <h1 id="h-a">Admin</h1>
+  <div class="seg" role="tablist" aria-label="Admin sections" id="adminTabs">
+    <button role="tab" data-t="users" aria-selected="true">Reviewers</button><button role="tab" data-t="settings" aria-selected="false">Settings</button><button role="tab" data-t="audit" aria-selected="false">Audit log</button>
+  </div>
+  <div id="t-users" class="panel">
+    <h2>Reviewers</h2>
+    <div class="tablewrap"><table class="q plain"><caption class="sr">Reviewer accounts</caption><thead><tr><th scope="col">Name</th><th scope="col">Username</th><th scope="col">Initials</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead><tbody id="uBody"></tbody></table></div>
+    <h3>Add a reviewer</h3>
+    <form id="uForm" class="grid2" novalidate>
+      <div class="f"><label for="uDisplay">Full name</label><input id="uDisplay" required></div>
+      <div class="f"><label for="uName">Username</label><input id="uName" autocapitalize="none" required></div>
+      <div class="f"><label for="uIni">Initials</label><input id="uIni" maxlength="6"></div>
+      <div class="f"><label for="uRole">Role</label><select id="uRole"><option value="reviewer">Reviewer</option><option value="admin">Admin (can manage reviewers and settings)</option></select></div>
+      <div class="f wide"><label for="uPw">Temporary password <small>(10+ characters; they'll be asked to change it)</small></label><input id="uPw" type="text" autocomplete="off"></div>
+      <p class="ferr wide" id="uErr"></p>
+      <div class="wide"><button class="btn primary" id="uAdd">Add reviewer</button></div>
+    </form>
+  </div>
+  <div id="t-settings" class="panel" hidden>
+    <h2>AI double-check</h2>
+    <p>Cards are read quickly first. If a card looks uncertain, a slower local AI model (running on this computer only) double-checks it in the background and suggests corrections to names, companies, titles and addresses; nothing changes until a person accepts a suggestion. Cards a person has already edited or decided are never changed.</p>
+    <label class="chk"><input type="checkbox" id="sAI"> Double-check uncertain cards with the local AI model</label>
+    <p class="small" id="sAIStatus"></p>
+    <div class="f"><label for="sAff">MC Trade affiliation code (AffCode1; must already exist in MC Trade exactly)</label><input id="sAff" maxlength="40"></div>
+    <div class="f"><label for="sPh">Phone format in the MC Trade file</label><select id="sPh"><option value="gac">330-555-0181 (GAC style)</option><option value="e164">+13305550181 (E.164)</option></select></div>
+    <label class="chk"><input type="checkbox" id="sCorr"> Keep corrected cards as test examples (off by default). When on, a <b>copy of the card photo and approved details</b> is saved in bench/corrections to measure accuracy; it follows the photo retention period and is deleted with the card. See the Privacy note.</label>
+    <h2 class="mt">Privacy &amp; retention</h2>
+    <p>Card photos are only needed while a card is being reviewed. Deleting them after a set time limits what is stored. The typed contact details are kept.</p>
+    <label class="chk"><input type="checkbox" id="sOn"> Automatically delete old card photos and export copies</label>
+    <div class="grid2">
+      <div class="f"><label for="sImg">Delete card photos after (days)</label><input id="sImg" type="number" min="0" max="3650" inputmode="numeric"></div>
+      <div class="f"><label for="sExp">Delete stored export copies after (days)</label><input id="sExp" type="number" min="0" max="3650" inputmode="numeric"></div>
+    </div>
+    <p class="small" id="sPrev"></p>
+    <div class="btns"><button class="btn primary" id="sSave">Save settings</button><button class="btn" id="sRun">Delete old photos now</button><a class="btn ghost" href="/privacy" target="_blank">Read the privacy note</a></div>
+    <p class="small">The check also runs automatically every hour while the scanner is running.</p>
+    <h2 class="mt">Pilot test data</h2>
+    <p>Archive every card currently in the queue (all statuses), for example after a training session. Archived cards are hidden from the queue and exports but kept in the database.</p>
+    <div class="btns"><button class="btn ghost" id="archiveAll">Archive all test data…</button></div>
+  </div>
+  <div id="t-audit" class="panel" hidden>
+    <h2>Audit log</h2>
+    <div class="row"><label class="sr" for="aQ">Search the audit log</label><input type="search" id="aQ" placeholder="Search: initials, card #, export, login…" style="max-width:360px"><a class="btn small" id="aCsv" href="/api/admin/audit?fmt=csv&limit=5000">Download as CSV</a></div>
+    <div class="tablewrap"><table class="q plain"><caption class="sr">Audit log</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Type</th><th scope="col">Card</th><th scope="col">What happened</th></tr></thead><tbody id="aBody"></tbody></table></div>
+  </div>
+</section>
+
+</main>
+<dialog id="zoomDlg" aria-label="Enlarged card"><img id="zImg" alt="Enlarged business card"><form method="dialog"><button class="btn">Close</button></form></dialog>
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <form method="dialog" id="dlgForm">
+    <h2 id="dlgTitle"></h2><div id="dlgBody"></div>
+    <div id="dlgInputWrap" hidden><label for="dlgInput" id="dlgInputLabel"></label><input id="dlgInput"></div>
+    <p class="ferr" id="dlgErr"></p>
+    <div class="btns" id="dlgBtns"></div>
+  </form>
+</dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<footer class="foot"><div class="wrap">Greater Akron Chamber · Card Scanner · <strong>Internal pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a></div></footer>
+<script src="/static/ui/ui.js?v=7"></script>
+</body>
+</html>

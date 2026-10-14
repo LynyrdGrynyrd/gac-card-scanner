@@ -1,0 +1,285 @@
+"""Local logins for the pilot: named reviewers, PBKDF2-hashed passwords, admin role, cookie sessions.
+No external identity provider; everything lives in the same SQLite DB (tables users, sessions, settings, auth_log)."""
+import os, re, time, hmac, hashlib, secrets, json
+from fastapi import APIRouter, Body, Request
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
+from . import store, demo
+
+router = APIRouter()
+STATIC = os.path.join(os.path.dirname(__file__), "static")
+COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000
+PUBLIC_PREFIX = ("/static/", "/api/auth/")
+PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo"}
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+def db():
+    c = store.db()
+    c.execute("""CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE, display TEXT,
+      initials TEXT, role TEXT DEFAULT 'reviewer', pw TEXT, active INTEGER DEFAULT 1, created REAL, must_change INTEGER DEFAULT 0)""")
+    c.execute("CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER, created REAL, expires REAL, ip TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS auth_log(id INTEGER PRIMARY KEY, ts REAL, username TEXT, event TEXT, ip TEXT)")
+    return c
+
+# ---------------- settings
+DEFAULTS = {"image_retention_days": "30", "export_retention_days": "30", "retention_enabled": "1", "ai_check_enabled": "1", "corrections_enabled": "0", "mctrade_affcode": "CardScan-Pilot", "phone_format": "gac"}
+def get_setting(k):
+    r = db().execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
+    return r[0] if r else DEFAULTS.get(k)
+def set_setting(k, v):
+    with db() as c: c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, str(v)))
+
+# ---------------- passwords
+def hash_pw(pw):
+    salt = secrets.token_bytes(16)
+    return f"pbkdf2_sha256${ITER}${salt.hex()}${hashlib.pbkdf2_hmac('sha256', pw.encode(), salt, ITER).hex()}"
+def check_pw(pw, stored):
+    try:
+        _, it, salt, h = stored.split("$")
+        return hmac.compare_digest(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), int(it)).hex(), h)
+    except Exception: return False
+def pw_problem(pw):
+    if len(pw or "") < 10: return "Password must be at least 10 characters."
+    return None
+
+def _initials(display):
+    return "".join(p[0] for p in display.split()[:3]).upper() or "?"
+
+def create_user(username, display, password, role="reviewer", initials=None, must_change=False):
+    username = username.strip().lower()
+    if not username or not username.replace(".", "").replace("-", "").replace("_", "").isalnum(): raise ValueError("Username: letters, numbers, . - _ only.")
+    p = pw_problem(password)
+    if p: raise ValueError(p)
+    if role not in ("admin", "reviewer"): raise ValueError("Role must be admin or reviewer.")
+    ini = (initials or _initials(display or username)).upper()[:6]
+    with db() as c:
+        if c.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone(): raise ValueError("That username already exists.")
+        return c.execute("INSERT INTO users(username,display,initials,role,pw,created,must_change) VALUES(?,?,?,?,?,?,?)",
+                         (username, display or username, ini, role, hash_pw(password), time.time(), int(must_change))).lastrowid
+
+def user_count(): return db().execute("SELECT COUNT(*) FROM users").fetchone()[0]
+def pub(u): return {k: u[k] for k in ("id", "username", "display", "initials", "role", "active", "created", "must_change")}
+
+def alog(username, event, ip=None):
+    if demo.enabled(): ip = None   # public demo: no record of visitors' addresses
+    with db() as c: c.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), username, event, ip))
+
+def current_user(request: Request):
+    tok = request.cookies.get(COOKIE)
+    if not tok: return None
+    c = db(); r = c.execute("SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.active=1",
+                            (hashlib.sha256(tok.encode()).hexdigest(), time.time())).fetchone()
+    if not r: return None
+    with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (time.time() + SESSION_HOURS * 3600, hashlib.sha256(tok.encode()).hexdigest()))
+    return dict(r)
+
+def _client(request): return request.client.host if request.client else ""
+
+SEC_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+                               "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=()"}
+UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
+MAX_BODY = 26 * 1024 * 1024   # one photo (25 MB) + form overhead; checked before the body is read
+
+CSRF_COOKIE = "gac_csrf"; CSRF_HEADER = "x-csrf-token"
+CSRF_EXEMPT = {"/api/auth/login", "/api/auth/setup"}       # no session yet; protected by Origin/Referer + password
+def csrf_for(tok):
+    """Per-session CSRF token (double-submit): readable cookie, echoed back by the page in X-CSRF-Token."""
+    return hashlib.sha256(b"gac-csrf:" + tok.encode()).hexdigest()[:40]
+
+def _no_origin(request):
+    return not (request.headers.get("origin") or request.headers.get("referer"))
+
+def _cross_origin(request):
+    """CSRF defence in depth: a state-changing request whose Origin (or Referer) names another host:port is refused.
+    SameSite=Lax alone does not stop other sites on the same host/LAN name (e.g. another app on another port)."""
+    src = request.headers.get("origin") or request.headers.get("referer")
+    if not src or src == "null": return src == "null"
+    from urllib.parse import urlsplit
+    u = urlsplit(src)   # scheme counts too: http://host:port is a different origin from https://host:port
+    return (u.scheme.lower(), u.netloc.lower()) != (request.url.scheme.lower(), (request.headers.get("host") or "").lower())
+
+async def middleware(request: Request, call_next):
+    p = request.url.path
+    if demo.enabled():
+        r = demo.refuse(request)
+        if r is not None:
+            for k, v in SEC_HEADERS.items(): r.headers.setdefault(k, v)
+            return r
+    if request.method in UNSAFE:
+        if _cross_origin(request):
+            return JSONResponse({"error": "Cross-site request refused."}, 403, headers=SEC_HEADERS)
+        if _no_origin(request) and not (p == "/api/scan" and _client(request) in LOOPBACK):
+            return JSONResponse({"error": "Request refused: no Origin or Referer header."}, 403, headers=SEC_HEADERS)
+        tok = request.cookies.get(COOKIE)
+        if tok and p not in CSRF_EXEMPT and not hmac.compare_digest(request.headers.get(CSRF_HEADER, ""), csrf_for(tok)):
+            return JSONResponse({"error": "This page is out of date (security token missing). Reload the page and try again.", "need": "reload"}, 403, headers=SEC_HEADERS)
+    try: clen = int(request.headers.get("content-length") or 0)
+    except ValueError: clen = 0
+    if clen > MAX_BODY: return JSONResponse({"error": "Upload is too large (limit 25 MB per photo)."}, 413, headers=SEC_HEADERS)
+    resp = await _route(request, call_next)
+    for k, v in SEC_HEADERS.items(): resp.headers.setdefault(k, v)
+    ctype = resp.headers.get("content-type", "")
+    if p.startswith("/api/") or ctype.startswith("text/html"): resp.headers["Cache-Control"] = "no-store"   # Back after sign-out must not show the app
+    tok = request.cookies.get(COOKIE)
+    if tok and getattr(request.state, "user", None) and request.cookies.get(CSRF_COOKIE) != csrf_for(tok):
+        resp.set_cookie(CSRF_COOKIE, csrf_for(tok), httponly=False, samesite="strict", secure=request.url.scheme == "https", max_age=SESSION_HOURS * 3600, path="/")
+    return resp
+
+async def _route(request: Request, call_next):
+    p = request.url.path
+    if p in PUBLIC or p.startswith(PUBLIC_PREFIX):
+        return await call_next(request)
+    # machine API kept open on loopback only (benchmarks / scripts on the same computer)
+    if p == "/api/scan" and _client(request) in LOOPBACK:
+        return await call_next(request)
+    u = current_user(request)
+    if not u:
+        if p.startswith("/api/") or request.method != "GET":
+            return JSONResponse({"error": "Please sign in.", "need": "login"}, 401)
+        return RedirectResponse("/setup" if user_count() == 0 else "/login?next=" + __import__("urllib.parse").parse.quote(p, safe="/"), 303)
+    request.state.user = u
+    if (p.startswith("/api/admin/") or p.startswith("/sync/")) and u["role"] != "admin":
+        return JSONResponse({"error": "Admins only."}, 403)
+    resp = await call_next(request)
+    resp.headers["X-GAC-User"] = str(u["id"])   # lets the page notice when another tab signed this browser in as someone else
+    return resp
+
+_fails = {}
+@router.get("/login")
+def login_page():
+    if user_count() == 0: return RedirectResponse("/setup", 303)
+    if demo.enabled(): return demo.page(os.path.join(STATIC, "ui", "login.html"), login=True)
+    return FileResponse(os.path.join(STATIC, "ui", "login.html"), headers={"Cache-Control": "no-cache"})
+
+@router.get("/setup")
+def setup_page(request: Request):
+    if user_count() > 0: return RedirectResponse("/login", 303)
+    return FileResponse(os.path.join(STATIC, "ui", "login.html"), headers={"Cache-Control": "no-cache"})
+
+def _start_session(request, uid):
+    tok = secrets.token_urlsafe(32)
+    with db() as c:
+        c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
+        c.execute("INSERT INTO sessions(token,user_id,created,expires,ip) VALUES(?,?,?,?,?)",
+                  (hashlib.sha256(tok.encode()).hexdigest(), uid, time.time(), time.time() + SESSION_HOURS * 3600, "" if demo.enabled() else _client(request)))
+    return tok
+
+def _set_cookie(resp, request, tok):
+    resp.set_cookie(COOKIE, tok, httponly=True, samesite="lax", secure=request.url.scheme == "https", max_age=SESSION_HOURS * 3600, path="/")
+    resp.set_cookie(CSRF_COOKIE, csrf_for(tok), httponly=False, samesite="strict", secure=request.url.scheme == "https", max_age=SESSION_HOURS * 3600, path="/")
+    return resp
+
+@router.get("/api/auth/policy")
+def policy(): return {"image_retention_days": get_setting("image_retention_days"), "retention_enabled": get_setting("retention_enabled") == "1"}
+
+@router.get("/api/auth/state")
+def state(request: Request):
+    u = current_user(request)
+    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "setup_allowed": _client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1"}
+
+@router.post("/api/auth/setup")
+def setup(request: Request, body: dict = Body(...)):
+    if user_count() > 0: return JSONResponse({"error": "Setup was already done. Please sign in."}, 409)
+    if _client(request) not in LOOPBACK and os.getenv("GAC_ALLOW_REMOTE_SETUP") != "1":
+        return JSONResponse({"error": "First-time setup must be done on the computer running the scanner (http://localhost:8765)."}, 403)
+    try: uid = create_user(body.get("username", ""), body.get("display", ""), body.get("password", ""), "admin", body.get("initials"))
+    except ValueError as e: return JSONResponse({"error": str(e)}, 422)
+    alog(body.get("username"), "setup_admin_created", _client(request))
+    return _set_cookie(JSONResponse({"ok": True}), request, _start_session(request, uid))
+
+@router.post("/api/auth/login")
+def login(request: Request, body: dict = Body(...)):
+    un = (body.get("username") or "").strip().lower(); ip = _client(request)
+    f = _fails.get(un, [])
+    f = [t for t in f if t > time.time() - 300]
+    if len(f) >= 5: return JSONResponse({"error": "Too many wrong passwords. Wait 5 minutes or ask an admin to reset it."}, 429)
+    r = db().execute("SELECT * FROM users WHERE username=?", (un,)).fetchone()
+    if not r or not r["active"] or not check_pw(body.get("password") or "", r["pw"]):
+        f.append(time.time()); _fails[un] = f; alog(un, "login_failed", ip)
+        return JSONResponse({"error": "Wrong username or password."}, 401)
+    _fails.pop(un, None); alog(un, "login", ip)
+    return _set_cookie(JSONResponse({"ok": True, "user": pub(dict(r))}), request, _start_session(request, r["id"]))
+
+@router.post("/api/auth/logout")
+def logout(request: Request):
+    tok = request.cookies.get(COOKIE)
+    if tok:
+        with db() as c: c.execute("DELETE FROM sessions WHERE token=?", (hashlib.sha256(tok.encode()).hexdigest(),))
+    r = JSONResponse({"ok": True}); r.delete_cookie(COOKIE, path="/"); return r
+
+@router.post("/api/me/password")
+def change_pw(request: Request, body: dict = Body(...)):
+    u = request.state.user
+    if not check_pw(body.get("old") or "", u["pw"]): return JSONResponse({"error": "Current password is wrong."}, 422)
+    p = pw_problem(body.get("new"))
+    if p: return JSONResponse({"error": p}, 422)
+    keep = hashlib.sha256((request.cookies.get(COOKIE) or "").encode()).hexdigest()
+    with db() as c:
+        c.execute("UPDATE users SET pw=?, must_change=0 WHERE id=?", (hash_pw(body["new"]), u["id"]))
+        c.execute("DELETE FROM sessions WHERE user_id=? AND token!=?", (u["id"], keep))  # sign out other devices
+    alog(u["username"], "password_changed", _client(request)); return {"ok": True}
+
+# ---------------- admin: users
+@router.get("/api/admin/users")
+def list_users(): return [pub(dict(r)) for r in db().execute("SELECT * FROM users ORDER BY role, username")]
+
+@router.post("/api/admin/users")
+def add_user(request: Request, body: dict = Body(...)):
+    try: uid = create_user(body.get("username", ""), body.get("display", ""), body.get("password", ""), body.get("role", "reviewer"), body.get("initials"), must_change=True)
+    except ValueError as e: return JSONResponse({"error": str(e)}, 422)
+    alog(request.state.user["username"], f"created user {body.get('username')} ({body.get('role','reviewer')})", _client(request)); return {"id": uid}
+
+@router.post("/api/admin/users/{uid}")
+def edit_user(uid: int, request: Request, body: dict = Body(...)):
+    me = request.state.user
+    r = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not r: return JSONResponse({"error": "No such user."}, 404)
+    with db() as c:
+        if "password" in body:
+            p = pw_problem(body["password"])
+            if p: return JSONResponse({"error": p}, 422)
+            c.execute("UPDATE users SET pw=?, must_change=1 WHERE id=?", (hash_pw(body["password"]), uid))
+            c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+            _fails.pop(r["username"], None)   # a reset by an admin also lifts the wrong-password lock
+        if "active" in body:
+            if uid == me["id"] and not body["active"]: return JSONResponse({"error": "You can't deactivate yourself."}, 422)
+            c.execute("UPDATE users SET active=? WHERE id=?", (int(bool(body["active"])), uid))
+            if not body["active"]: c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        if "role" in body and body["role"] in ("admin", "reviewer"):
+            if uid == me["id"] and body["role"] != "admin": return JSONResponse({"error": "You can't remove your own admin role."}, 422)
+            c.execute("UPDATE users SET role=? WHERE id=?", (body["role"], uid))
+    what = []
+    if "active" in body:   # its own audit row, so "deactivated" can't be misread as "activated"
+        alog(me["username"], f"{'reactivated' if body['active'] else 'deactivated'} user {r['username']}", _client(request))
+        if len(body) == 1: return {"ok": True}
+    if "role" in body: what.append(f"role set to {body['role']}")
+    if "password" in body: what.append("password reset (lock lifted)")
+    what += [k for k in body if k not in ("active", "role", "password")]
+    alog(me["username"], f"updated user {r['username']}: {', '.join(what)}", _client(request))
+    return {"ok": True}
+
+@router.get("/api/admin/settings")
+def get_settings(): return {k: get_setting(k) for k in DEFAULTS}
+
+SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
+                 "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples",
+                 "mctrade_affcode": "MC Trade affiliation code", "phone_format": "Phone format"}
+def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith("_enabled") else (v or "(empty)")
+
+@router.post("/api/admin/settings")
+def save_settings(request: Request, body: dict = Body(...)):
+    before = get_settings()
+    for k in DEFAULTS:
+        if k in body:
+            v = str(body[k]).strip()
+            if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Days must be a whole number 1–3650 (0 would delete photos of cards nobody has reviewed yet)."}, 422)
+            if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
+            if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Phone format must be gac or e164."}, 422)
+            set_setting(k, v)
+    after = get_settings(); diff = [k for k in DEFAULTS if before[k] != after[k]]
+    if diff:   # only real changes are logged, in words; a save with no change logs nothing
+        alog(request.state.user["username"], "settings changed: " + "; ".join(f"{SETTING_NAMES.get(k, k)}: {_sv(k, before[k])} → {_sv(k, after[k])}" for k in diff), _client(request))
+    return get_settings() | {"_changed": diff}
