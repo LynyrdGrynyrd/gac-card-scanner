@@ -1,5 +1,6 @@
 import sqlite3, json, time, os
-DB = os.path.join(os.path.dirname(__file__), "..", "data", "cards.db")
+from . import paths
+DB = paths.data("cards.db")
 def db():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
     c.execute("""CREATE TABLE IF NOT EXISTS cards(id INTEGER PRIMARY KEY, created REAL, status TEXT DEFAULT 'pending',

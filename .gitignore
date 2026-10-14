@@ -71,3 +71,7 @@ mctrade-dryrun/out/qa-*/
 # --- demo / space build
 models/
 ../gac-card-scanner-space/
+packaging/build/
+packaging/windows/MicrosoftEdgeWebview2Setup.exe
+build/
+dist/

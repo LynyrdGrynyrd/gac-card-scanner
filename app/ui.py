@@ -10,7 +10,8 @@ from . import store, export, mctrade_sync, auth
 
 router = APIRouter()
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-DATA = os.path.join(os.path.dirname(__file__), "..", "data")
+from . import paths
+DATA = paths.DATA
 UP = os.path.join(DATA, "uploads"); EXP = os.path.join(DATA, "exports")
 INBOX = os.path.join(DATA, "inbox")   # accepted-but-not-yet-read uploads; survives a crash/restart and is re-queued at start
 DONE = os.path.join(DATA, "jobs_done")   # small result records so an open browser can still look a job up after a restart (24 h)
@@ -864,7 +865,7 @@ def _recheck_approved(cid, f, rv, why):
     return True
 
 # ---------------------------------------------------------------- reviewer corrections -> labelled benchmark data
-CORR = os.environ.get("CORRECTIONS_DIR", os.path.join(os.path.dirname(__file__), "..", "bench", "corrections"))
+CORR = os.environ.get("CORRECTIONS_DIR", paths.data("corrections") if os.environ.get("GAC_DATA_DIR") else os.path.join(os.path.dirname(__file__), "..", "bench", "corrections"))
 GT_KEYS = ("first_name", "last_name", "title", "company", "department", "emails", "phones", "website", "address")
 def save_correction(cid, final):
     """When a card a person edited is approved, keep (photo, approved fields) as a labelled example in bench/corrections/.

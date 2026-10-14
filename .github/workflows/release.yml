@@ -1,0 +1,120 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  PYTHON_VERSION: "3.12"
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - name: Version
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"; [[ "$GITHUB_REF_TYPE" == tag ]] || V="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          echo "GAC_VERSION=$V" >> $GITHUB_ENV
+      - name: Python deps
+        run: pip install -r requirements.lock.txt pyinstaller pywebview
+      - name: Tesseract (UB-Mannheim build via Chocolatey) -> packaging/build/tesseract
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $src = "C:\Program Files\Tesseract-OCR"
+          if (!(Test-Path "$src\tesseract.exe")) { throw "tesseract not installed" }
+          $dst = "packaging\build\tesseract"; New-Item -ItemType Directory -Force $dst | Out-Null
+          Get-ChildItem $src -File | Where-Object { $_.Extension -in ".exe",".dll" -and $_.Name -notlike "unins*" } | Copy-Item -Destination $dst
+          Copy-Item "$src\doc\*" $dst -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force "$dst\tessdata" | Out-Null
+          Copy-Item "$src\tessdata\eng.traineddata","$src\tessdata\osd.traineddata" "$dst\tessdata\"
+          & "$dst\tesseract.exe" --version
+      - name: PyInstaller
+        run: pyinstaller packaging/gac.spec --noconfirm
+      - name: Smoke test (bundle)
+        run: python packaging/smoke_test.py "dist/GAC Card Scanner/GAC Card Scanner.exe"
+      - name: WebView2 bootstrapper
+        shell: pwsh
+        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile packaging\windows\MicrosoftEdgeWebview2Setup.exe
+      - name: Inno Setup installer
+        shell: pwsh
+        run: |
+          if (!(Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source; if (!$iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyAppVersion=$env:GAC_VERSION" packaging\windows\installer.iss
+          if ($LASTEXITCODE) { throw "iscc failed" }
+      - name: Installer smoke test (silent install, run, uninstall)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\GAC-Card-Scanner-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$env:RUNNER_TEMP\gacinst" -Wait
+          python packaging/smoke_test.py "$env:RUNNER_TEMP\gacinst\GAC Card Scanner.exe"
+          if ($LASTEXITCODE) { throw "installed app smoke test failed" }
+          Start-Process "$env:RUNNER_TEMP\gacinst\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/GAC-Card-Scanner-Setup-*.exe
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, arch: arm64 }
+          - { runner: macos-15-intel, arch: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Version
+        run: |
+          V="${GITHUB_REF_NAME#v}"; [[ "$GITHUB_REF_TYPE" == tag ]] || V="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          echo "GAC_VERSION=$V" >> $GITHUB_ENV
+      - name: Python deps
+        run: |
+          cp requirements.lock.txt /tmp/req.txt
+          # onnxruntime stopped shipping Intel-mac wheels after 1.23
+          if [ "${{ matrix.arch }}" = x86_64 ]; then sed -i '' 's/^onnxruntime==.*/onnxruntime==1.23.2/' /tmp/req.txt; fi
+          pip install -r /tmp/req.txt pyinstaller pywebview
+      - name: Tesseract (Homebrew, dylibs relocated) -> packaging/build/tesseract
+        run: bash packaging/macos/bundle_tesseract.sh
+      - name: PyInstaller
+        run: pyinstaller packaging/gac.spec --noconfirm
+      - name: Ad-hoc sign
+        run: codesign --force --deep --sign - "dist/GAC Card Scanner.app"
+      - name: Smoke test (bundle)
+        run: python packaging/smoke_test.py "dist/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner"
+      - name: DMG
+        run: bash packaging/macos/make_dmg.sh "dist/GAC Card Scanner.app" "dist/GAC-Card-Scanner-${GAC_VERSION}-macos-${{ matrix.arch }}.dmg"
+      - name: DMG smoke test (mount, run from the image)
+        run: |
+          DMG=$(ls dist/*.dmg); MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
+          python packaging/smoke_test.py "$MNT/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner"; rc=$?
+          hdiutil detach "$MNT"; exit $rc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.dmg
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - run: ls -la out && (cd out && sha256sum * > SHA256SUMS.txt) && cat out/SHA256SUMS.txt
+      - name: GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --title "GAC Card Scanner $GITHUB_REF_NAME" \
+            --notes "Desktop installers. Windows: run GAC-Card-Scanner-Setup-*.exe (SmartScreen: More info > Run anyway). macOS: open the .dmg for your Mac (Apple silicon = arm64, Intel = x86_64), drag to Applications, then right-click > Open the first time. See the README for details."
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        with: { name: all-installers, path: out }

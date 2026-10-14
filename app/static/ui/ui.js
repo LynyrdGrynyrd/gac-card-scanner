@@ -663,7 +663,7 @@ async function exportInfo() {
     return r;
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
 }
-$("#exPreview").onclick = () => { location.href = `/api/export/xlsx?preview=1&status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`; };
+$("#exPreview").onclick = () => { (window.gacDownload || (u => location.href = u))(`/api/export/xlsx?preview=1&status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`); };
 $("#exStatus").onchange = exportInfo; $("#exBatch").onchange = exportInfo;
 let exHistShow = 10;
 $("#exHistMoreBtn").onclick = () => { exHistShow += 10; loadExportHistory(); };
@@ -723,7 +723,7 @@ async function loadAdmin() {
   if (adminTab === "settings") {
     const st = await call("/api/admin/settings"), pv = await call("/api/admin/retention/preview");
     $("#sOn").checked = st.retention_enabled === "1"; $("#sAI").checked = st.ai_check_enabled === "1"; $("#sCorr").checked = st.corrections_enabled === "1"; $("#sAff").value = st.mctrade_affcode || ""; $("#sPh").value = st.phone_format || "gac";
-    call("/api/ai/status").then(a => $("#sAIStatus").textContent = a.available ? "✓ The AI model is running on this computer." : "The AI model is not running right now, so cards are only read the fast way. See HANDOFF.md → “AI double-check” to start it."); $("#sImg").value = st.image_retention_days; $("#sExp").value = st.export_retention_days;
+    aiHelperRefresh(); call("/api/ai/status").then(a => $("#sAIStatus").textContent = a.available ? "✓ The AI model is running on this computer." : "The AI model is not running right now, so cards are only read the fast way. Use “Download AI helper” below (desktop app) or see HANDOFF.md → “AI double-check”."); $("#sImg").value = st.image_retention_days; $("#sExp").value = st.export_retention_days;
     $("#sPrev").textContent = `${pv.photos_stored} card photo(s) stored. ${pv.would_delete} are older than ${pv.days} days${pv.enabled ? " and will be deleted at the next check" : " (automatic deletion is off)"}.`;
   }
   if (adminTab === "audit") loadAudit();
@@ -752,3 +752,24 @@ async function loadAudit() {
 (async () => { await loadMe(); route(); refreshCounts(); refreshUndo(); })();
 setInterval(() => { if (!document.hidden) refreshCounts(); }, 15000);
 $(".skip").onclick = e => { e.preventDefault(); $("#main").focus(); };   // the hash is the router: don't navigate to "#main"
+
+// ---- Desktop "AI helper" download/start/stop (Admin > Settings). Shown only in the packaged desktop app.
+var aiHelperTimer = null;
+async function aiHelperRefresh() {
+  let s; try { s = await call("/api/admin/ai-helper"); } catch (e) { return; }
+  const box = $("#aiHelper"); if (!box) return;
+  box.hidden = !(s.desktop || s.installed) || !s.supported;
+  const busyNow = s.phase === "downloading" || s.phase === "verifying";
+  const pct = s.total ? Math.floor(100 * s.done / s.total) : 0;
+  $("#aiHelperMsg").textContent = s.phase === "error" ? "Download failed: " + s.error :
+    busyNow ? (s.phase === "verifying" ? "Checking " : "Downloading ") + (s.file || "") + (s.total ? ` (${pct}%, ${(s.done / 1e9).toFixed(2)} of ${(s.total / 1e9).toFixed(2)} GB)` : "…") :
+    s.installed ? (s.running ? "AI helper installed and running (it can take a minute to load)." : "AI helper installed but stopped.") :
+    `Optional: download the local AI helper (about ${s.size_gb} GB, runs only on this computer). Scanning works without it.`;
+  $("#aiHelperBar").hidden = !busyNow; $("#aiHelperBar").value = pct;
+  $("#aiHelperDl").hidden = s.installed || busyNow; $("#aiHelperStart").hidden = !s.installed || s.running;
+  $("#aiHelperStop").hidden = !s.running; $("#aiHelperRm").hidden = !s.installed || busyNow;
+  clearTimeout(aiHelperTimer); if (busyNow || (s.running && !box.hidden)) aiHelperTimer = setTimeout(aiHelperRefresh, busyNow ? 1500 : 8000);
+}
+for (const [id, path] of [["#aiHelperDl", "download"], ["#aiHelperStart", "start"], ["#aiHelperStop", "stop"], ["#aiHelperRm", "remove"]])
+  if ($(id)) $(id).onclick = async () => { if (path === "remove" && !confirm("Delete the downloaded AI helper files?")) return;
+    try { await post("/api/admin/ai-helper/" + path, {}); } catch (e) { toast(e.message, 5000); } aiHelperRefresh(); };
