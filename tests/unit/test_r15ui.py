@@ -170,7 +170,7 @@ def test_blank_wipe_only_for_whole_form(env):
     assert store.get(a)["fields"]["company"] == "" and store.get(a)["fields"]["emails"] == []
 
 def test_phone_extension_export_form():
-    """User decision (round 15): an extension stays in the same cell as '330-494-6170 x4271' in every export."""
+    """User decision (round 15): an extension stays in the same cell as '330-555-0170 x4271' in every export."""
     from app import mctrade_export as M, export as E
-    for v in ("(330) 494-6170 ext. 4271", "330-494-6170, x4271", "+1 330.494.6170 Ext: 4271", "330-494-6170 #4271"):
-        assert M.phone(v) == "330-494-6170 x4271" and E._ph(v) == "330-494-6170 x4271", v
+    for v in ("(330) 555-0170 ext. 4271", "330-555-0170, x4271", "+1 330.555.0170 Ext: 4271", "330-555-0170 #4271"):
+        assert M.phone(v) == "330-555-0170 x4271" and E._ph(v) == "330-555-0170 x4271", v

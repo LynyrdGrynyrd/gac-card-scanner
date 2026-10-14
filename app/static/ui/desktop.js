@@ -11,7 +11,9 @@
     return m ? decodeURIComponent(m[1]) : decodeURIComponent((url.split("?")[0].split("/").pop()) || "download"); };
   const blobs = new Map(); const _cou = URL.createObjectURL.bind(URL);   // CSP blocks fetch(blob:), so keep the Blob itself
   URL.createObjectURL = o => { const u = _cou(o); if (o instanceof Blob) { blobs.set(u, o); setTimeout(() => blobs.delete(u), 120000); } return u; };
-  async function saveUrl(url, name) {
+  let chain = Promise.resolve();   // v0.2.1: Save dialogs one after another (an export saves 3 files)
+  const saveUrl = (url, name) => { const p = chain.then(() => saveUrl1(url, name)); chain = p.catch(() => {}); return p; };
+  async function saveUrl1(url, name) {
     if (blobs.has(url)) { const where = await window.pywebview.api.save_file(name || "download", b64(await blobs.get(url).arrayBuffer()));
       if (where && typeof toast === "function") toast("Saved: " + where, 4000); return; }
     const res = await fetch(url, {credentials: "same-origin"});
@@ -26,6 +28,9 @@
     if (!isDesk()) return;
     const a = ev.target.closest && ev.target.closest("a[href]"); if (!a) return;
     const href = a.getAttribute("href") || "";
+    if (/^\/static\/.*\.pdf(\?|#|$)/i.test(href) && window.pywebview.api.open_url) {   // Help PDFs: system browser, not a webview download
+      ev.preventDefault(); window.pywebview.api.open_url(href.split("#")[0]); return;
+    }
     if (a.hasAttribute("download") || /^\/api\/(export|exports)\b/.test(href)) {
       ev.preventDefault(); saveUrl(a.href, a.getAttribute("download") || "").catch(e => typeof toast === "function" && toast(e.message, 5000));
     }

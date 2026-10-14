@@ -79,7 +79,7 @@ def test_refused_admin_rows_typed_and_worded(env):
 
 def test_xlsx_international_fax_matches_csv(env):
     from app import mctrade_export as mx
-    assert mx.phone("+442079460958") == "+44 20 7946 0958" and mx.phone("330-494-6170 x4271") == "330-494-6170 x4271"
+    assert mx.phone("+442079460958") == "+44 20 7946 0958" and mx.phone("330-555-0170 x4271") == "330-555-0170 x4271"
     assert mx.phone("+442079460958", "e164") == "+442079460958"
 
 def test_check_website_only_exported_rows(env):

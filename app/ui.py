@@ -2240,7 +2240,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
              "No GAC template uploaded: the column headers are the scanner's DEFAULT set and are UNVERIFIED until GAC's template is uploaded (Admin > Settings)."),
             (f"Scanner fields with no column in this template (in the companion CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
             f"AffCode1 = '{aff}' (Admin > Settings). The code must already exist in MC Trade exactly, or the file is refused.",
-            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; an extension stays in the same cell, written like 330-494-6170 x4271)'}; addresses are split into street/city/state/zip.",
+            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; an extension stays in the same cell, written like 330-555-0170 x4271)'}; addresses are split into street/city/state/zip.",
             ("Website: the card's website is in the import file's " + ", ".join(h for h in hdr if mx.canonical(h) in ("Website", "IndWebsite")) + " column (and in the companion CSV)."
              if any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h) else
              "Website: this template has NO website column, so websites are only in the companion CSV (not imported)."),

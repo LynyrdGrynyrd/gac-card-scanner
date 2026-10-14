@@ -1,11 +1,11 @@
 import csv, io
-def _ph(n):   # round 15: one phone form in every export: "330-494-6170 x4271" (extension kept in the same cell)
+def _ph(n):   # round 15: one phone form in every export: "330-555-0170 x4271" (extension kept in the same cell)
     from . import mctrade_export as _mx
     return _mx.phone(n)
 def _csvph(n):
     """Round 16 (skeptic r15 L1): an international number written as '+442079460958' turns into 4.42E+11 in Excel (the '+'
     is lost). In the CSV it is written in the international spaced form '+44 20 7946 0958', which Excel keeps as text,
-    like the US '330-494-6170' form. US/GAC-style numbers are unchanged."""
+    like the US '330-555-0170' form. US/GAC-style numbers are unchanged."""
     import re
     v = _ph(n)
     if not re.fullmatch(r"\+\d{7,15}", v or ""): return v

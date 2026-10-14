@@ -56,15 +56,21 @@ def _dlg(kind):
 
 class Api:
     """Exposed to the page as window.pywebview.api (see app/static/ui/desktop.js)."""
-    def __init__(self, url, d): self.url, self.d, self.win = url, d, None
+    def __init__(self, url, d):
+        self.url, self.d, self.win, self.last_dir = url, d, None, None
+        self._lock = threading.Lock()
     def save_file(self, name, b64data):
-        import webview
-        name = os.path.basename(name or "download")
-        r = self.win.create_file_dialog(_dlg('SAVE'), directory=os.path.expanduser("~/Downloads"), save_filename=name)
-        if not r: return ""
-        path = r if isinstance(r, str) else r[0]
-        with open(path, "wb") as f: f.write(base64.b64decode(b64data))
-        return path
+        # v0.2.1: one Save dialog at a time (an export saves 3 files back to back; parallel dialogs lost the companions),
+        # each opening in the folder the previous one was saved to
+        with self._lock:
+            name = os.path.basename(name or "download")
+            start = self.last_dir if self.last_dir and os.path.isdir(self.last_dir) else os.path.expanduser("~/Downloads")
+            r = self.win.create_file_dialog(_dlg('SAVE'), directory=start, save_filename=name)
+            if not r: return ""
+            path = r if isinstance(r, str) else r[0]
+            self.last_dir = os.path.dirname(path)
+            with open(path, "wb") as f: f.write(base64.b64decode(b64data))
+            return path
     def pick_folder(self):
         import webview
         r = self.win.create_file_dialog(_dlg('FOLDER'))
@@ -79,6 +85,11 @@ class Api:
                 if len(out) >= 500: return out
         return out
     def open_in_browser(self): webbrowser.open(self.url)
+    def open_url(self, path):   # v0.2.1: Help PDF links open in the system browser (webviews can't show/download PDFs reliably)
+        from urllib.parse import urlsplit
+        path = str(path or "")
+        if not path.startswith("/static/") or ".." in path or "//" in path: return False
+        u = urlsplit(self.url); webbrowser.open(f"{u.scheme}://{u.netloc}{path}"); return True
     def open_data_folder(self): _open_folder(self.d)
 
 def main(argv=None):

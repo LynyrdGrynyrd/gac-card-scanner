@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.1 (2026-10-14)
+Hotfix for the desktop app (Windows, Mac).
+
+- **Exports save again in the desktop app.** In v0.2.0 the app's security policy blocked the desktop helper script, so the Excel/CSV/READ-ME files of an export (and other downloads) never reached your computer. They now open a Save dialog, one file after another, each starting in the folder you picked last. The app also no longer drops downloads it can't route through the Save dialog.
+- **If you exported with v0.2.0**, the cards were marked exported and the scanner kept its own copy: your files are in the app data folder (File → Open data folder) under `exports`, and on the Export page under past exports.
+- **Help PDF links work in the desktop app.** The printable guide opens in your normal browser.
+- **The version line shows the build's commit** instead of "version 0.2.0 (unknown)".
+- The example phone number in the docs and tests is now the made-up `330-555-0170 x4271`.
+- Public demo mode: the review page no longer reloads itself over and over.
+
 ## v0.2.0 (2026-10-14)
 Brings the desktop app up to date with the pilot's review rounds 6–17. Highlights from rounds 15–17:
 
@@ -16,7 +26,7 @@ Brings the desktop app up to date with the pilot's review rounds 6–17. Highlig
 - Reviewer pages no longer contain admin-only markup; the audit log shows the reviewer's username.
 
 ### Export content
-- Phone extensions are exported as `330-494-6170 x4271`.
+- Phone extensions are exported as `330-555-0170 x4271`.
 - International phone numbers are kept in the MC Trade Excel.
 - Exported rows whose website could not be confirmed carry a **CHECK WEBSITE** warning.
 

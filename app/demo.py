@@ -43,7 +43,8 @@ def _login_box():
 def page(path, login=False):
     """The static page with the demo banner (and the demo login on the sign-in page) inserted."""
     from fastapi.responses import HTMLResponse
-    s = open(path, encoding="utf-8").read()
+    from . import auth   # v0.2.1: same ?v=<fingerprint> asset URLs as the normal pages (else ui.js reloads itself in a loop)
+    s = auth.versioned_html(path).body.decode("utf-8")
     s = s.replace("<body>", "<body>" + _banner(), 1)
     if login: s = s.replace('<form class="panel" id="f"', _login_box() + '<form class="panel" id="f"', 1)
     return HTMLResponse(s, headers={"Cache-Control": "no-cache"})
