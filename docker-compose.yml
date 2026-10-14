@@ -5,8 +5,7 @@ services:
     image: gac-card-scanner:pilot
     restart: unless-stopped
     ports:
-      # Only this computer can reach the scanner. For phones on the office Wi-Fi, change to "8765:8765"
-      # AND mount a certificate (./certs) so it serves HTTPS. Then turn GAC_ALLOW_REMOTE_SETUP off.
+      # Only this computer can reach the scanner. Phone mode (Scan with phone) does not work in Docker as shipped: see docs/PHONE-MODE.md
       - "127.0.0.1:8765:8765"
     environment:
       # Inside Docker the browser is not "localhost" to the app, so allow the first-admin setup page.

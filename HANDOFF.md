@@ -48,8 +48,9 @@ flowchart LR
 # dev (Linux/Mac)
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # + system tesseract-ocr
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8765 --reload
-# HTTPS for phones
-.venv/bin/python -m app.make_cert && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8765 --ssl-certfile certs/cert.pem --ssl-keyfile certs/key.pem
+# Round 9: bind 127.0.0.1 (the default in start.command / start.bat). Phones use phone mode, which opens its own
+# LAN listener (PHONE_PORT, default 8766) only while a pairing is live. Open the WHOLE app to the LAN only on purpose:
+GAC_HOST=0.0.0.0 ./start.command      # or: .venv/bin/uvicorn app.main:app --host "${GAC_HOST:-127.0.0.1}" --port 8765
 # Docker
 docker compose up -d --build     # http://localhost:8765, data in volume gac-data
 docker compose exec scanner python -m app.admin create-admin admin "Admin Name"

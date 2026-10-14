@@ -1,5 +1,5 @@
 @echo off
-REM Optional AI double-check: run the llama-server command from HANDOFF.md (models folder), port 8090.
+REM Optional AI double-check: double-click start-ai-checker.bat (models folder), port 8090.
 REM GAC Card Scanner - double-click to start (Windows). Leave this window open while you work.
 title GAC Card Scanner (internal pilot)
 cd /d "%~dp0"
@@ -9,13 +9,13 @@ set SCHEME=http
 set HOST=127.0.0.1
 if not "%GAC_HOST%"=="" set HOST=%GAC_HOST%
 set SSL=
+REM Round 9: this computer only (127.0.0.1) by default, with or without certificates. Phone mode opens its own small
+REM LAN listener for the phone page. Set GAC_HOST=0.0.0.0 to open the whole app to the network on purpose.
 if exist "certs\cert.pem" if exist "certs\key.pem" (
   set SCHEME=https
-  set HOST=0.0.0.0
   set SSL=--ssl-certfile certs\cert.pem --ssl-keyfile certs\key.pem
-  echo Phone access is ON ^(https^). Phones on the same Wi-Fi can use the scanner.
-  echo If Windows asks about the firewall, allow access on PRIVATE networks only.
 )
+if "%HOST%"=="127.0.0.1" (echo Listening on this computer only. Phones: use Upload - Scan with a phone.) else (echo !! GAC_HOST=%HOST%: the whole scanner is reachable from the network. If Windows asks about the firewall, allow PRIVATE networks only.)
 set URL=%SCHEME%://localhost:%PORT%/ui
 where py >nul 2>nul && (set PY=py -3) || (set PY=python)
 %PY% --version >nul 2>nul

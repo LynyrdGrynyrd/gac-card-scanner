@@ -1,8 +1,7 @@
 #!/bin/bash
-# Turns on phone access: creates an HTTPS certificate so phones on the same Wi-Fi can use the scanner and camera.
-cd "$(dirname "$0")" || exit 1
-if [ ! -x .venv/bin/python ]; then echo "Run start.command once first (it installs the components)."; read -r -p "Press Enter..."; exit 1; fi
-.venv/bin/python -m app.make_cert
-echo; echo "Now close the scanner window (if open) and double-click start.command again."
-echo "To turn phone access off again, delete the 'certs' folder."
+# RETIRED (round 11). Phones no longer need the whole scanner on the Wi-Fi or an HTTPS certificate.
+echo "Phone scanning is now built in: in the scanner, open Scan cards -> 'Scan with phone' and scan the QR code"
+echo "with the phone (same office Wi-Fi). The scanner opens a short-lived phone link on port 8766 only while"
+echo "a pairing is live. See docs/PHONE-MODE.md. (Advanced: 'python -m app.make_cert' still creates a"
+echo "certificate for live camera preview; it is optional.)"
 read -r -p "Press Enter to close..."

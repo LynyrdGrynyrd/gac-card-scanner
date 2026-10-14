@@ -1,5 +1,5 @@
 ; Inno Setup script: builds GAC-Card-Scanner-Setup-<version>.exe from the PyInstaller onedir output.
-; iscc /DMyAppVersion=0.1.0 packaging\windows\installer.iss
+; iscc /DMyAppVersion=0.2.0 packaging\windows\installer.iss
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif

@@ -76,10 +76,12 @@ Exports are **blocked** while two cards in the same export look like the same pe
 
 ## 7. Exporting to MC Trade
 1. **Export** page → choose **Approved, not yet exported** (recommended). The page shows how many cards will be included.
-2. Pick your event in **Which batch (event)?**. With **All batches**, duplicates from *anyone's* batch block the export. Then click **MC Trade import (Excel)** → confirm. Three files are saved to **Downloads**, named after the batch, e.g. `GAC-contacts-for-MC-Trade-new-approved-Spring-Expo-2026-10-15_1430.xlsx`:
-   - the **.xlsx import file**: exactly the columns of MC Trade's import template (one sheet, no extra tabs or columns), **one row per person**. Phones are written as `330-555-0181` and addresses are split into street, city, state and zip. Admins can change the phone style (or switch to `+13305550181`) and the **AffCode1** affiliation code (default `CardScan-Pilot`) under Admin → Settings. To match GAC's real template exactly, an admin saves it as `data/mctrade_template.xlsx`; its header row is then used as is.
+2. Pick your event in **Which batch (event)?**. With **All batches**, duplicates from *anyone's* batch block the export. Then click **MC Trade import (Excel)** → confirm. Three or four files are saved to **Downloads**, named after the batch, e.g. `GAC-MCTrade-new-Spring-Expo-2026-10-15_1430.xlsx`. The **.xlsx import file is the file you import into MC Trade**:
+   - the **.xlsx import file**: exactly the columns of MC Trade's import template (one sheet, no extra tabs or columns), **one row per person**. Phones are written as `330-555-0181` and addresses are split into street, city, state and zip. Admins can change the phone style (or switch to `+13305550181`) and the **AffCode1** affiliation code (default `CardScan-Pilot`) under Admin → Settings. To match GAC's real template exactly, an admin uploads it under **Admin → Settings → Upload GAC's MC Trade template** (saved as `data/mctrade_template.xlsx`); its header row is then used as is.
    - **…-extra-columns.csv**: everything that isn't in the template (second email, credentials, department, notes, reviewer, batch, *NeedsAttention*) plus every card that was **left out** and why ("FIX FIRST", "same person as card #…").
    - **…-READ-ME.txt**: what to check before importing.
+   - **GAC-MCTrade-…-UPDATES.xlsx** (only when some cards update existing MC Trade profiles): one row per Profile ID, a **separate** import. A card is never in both files; cards with an uncertain Profile ID, or a "create new" person who already exists, are left out as NEEDS REVIEW.
+   - Before importing, click **Check against MC Trade (dry run)** on the Export page: a match report (UPDATE / CREATE / NEEDS REVIEW), offline, no terminal needed.
 3. Import the .xlsx in MC Trade (Admin → Import Profiles), trying two rows first. Then **delete the files from Downloads**.
 
 **Formula guard (CSV only):** a cell gets a leading `'` only when a spreadsheet would run it as a formula: it starts with `=`, `@`, a tab or a carriage return, or with `+`/`-` followed by something that is not a plain number or phone number. `+1 330-555-0181` and `-5` stay as they are; `+SUM(1)` becomes `'+SUM(1)`. The Excel file needs no prefix because every cell is stored as text. CSV files start with a UTF-8 BOM so Excel shows accents correctly.
@@ -100,11 +102,10 @@ Also available: **Spreadsheet (CSV)**, with reviewer columns, and **Contacts (vC
 ![Audit log](shots/18_admin_audit.png)
 
 ## 9. Phones
-1. On the scanner computer, double-click **enable-phone-access** (once), then restart the scanner.
-2. The window shows an address like `https://192.168.1.25:8765`. Open it on a phone on the **same office Wi-Fi**.
-3. The phone warns that the connection "is not private". This is expected for a certificate made on our own computer: tap **Advanced → Proceed** (Android) or **Show Details → visit this website** (iPhone).
-4. Sign in and use **Take a photo**.
-- Windows may ask about the firewall: allow **Private networks** only.
+1. In the scanner, open **Scan cards → Scan with phone** and scan the QR code with a phone on the **same office Wi-Fi**.
+2. Take photos on the phone; they arrive in this batch. Stop the pairing when done (the link expires after 15 minutes anyway).
+- Windows may ask about the firewall: allow **Private networks** only (port 8766).
+- Not available when running under Docker as shipped. The old `enable-phone-access` scripts are retired.
 - iPhones can't pick a whole folder; select photos instead.
 - To turn phone access off, delete the `certs` folder and restart.
 
@@ -120,7 +121,7 @@ Also available: **Spreadsheet (CSV)**, with reviewer columns, and **Contacts (vC
 | Need to back up | Copy the `data` folder while the scanner is stopped. It contains the database (`cards.db`), photos and export copies. |
 
 ## "AI checking…" / "AI-checked"
-If a card was hard to read, a local AI model may re-read it in the background. You can keep working. It never changes the card: differences show up as **suggestions** you accept or keep. A check usually takes under a minute when the model is free. If the model is busy the card says **AI busy**, and after 10 minutes of waiting the check is skipped. Rejected, approved and exported cards are skipped automatically. You never need to wait for it to approve. Nothing leaves this computer.
+If a card was hard to read, a local AI model may re-read it in the background. You can keep working. It never changes the card: differences show up as **suggestions** you accept or keep. A check takes about 45 seconds of AI model time per card (median of 48 measured checks; 9 in 10 within about 75 seconds), plus any wait in the AI line: cards are checked one at a time, so with others ahead it takes longer (the card shows its place in line). If the model is busy the card says **AI busy**; a background check that waits more than 30 minutes is skipped (ask again any time). The AI checks the **saved** card, so save your edits first. Rejected, approved and exported cards are skipped automatically. You never need to wait for it to approve. Nothing leaves this computer.
 
 ## Changes after tester round 2
 - **First name is required** to approve. Values that clearly aren't an email or phone (e.g. `12`, `name@@`) can't be approved, not even with "Approve anyway".
@@ -134,10 +135,10 @@ If a card was hard to read, a local AI model may re-read it in the background. Y
 - Use **one browser (or browser profile) per person**. If someone else signs in in the same browser, open tabs show a red warning.
 
 ## Round-5 changes (Oct 13, 2026)
-- **Look-alikes in other people's batches no longer block approval.** They show as a warning in the orange box. Only a duplicate in *your own batch* or the *same photo* blocks it. With several look-alikes, one button marks them all: **None of these are the same person**.
+- **Look-alikes in other people's batches no longer block approval.** They show as a warning in the orange box. Only a duplicate in *your own batch* blocks it (a same photo in another batch only warns). If the other-batch card is already **approved** with the same email, phone or photo, Approve asks you to confirm once (so one person isn't sent to MC Trade twice). With several look-alikes, one button marks them all: **None of these are the same person** (saved on your card only).
 - **Formula-like text** (starting with = + - @) and **HTML code** (also written as `&lt;…&gt;`) in a contact field can't be approved; fix the field first. Older cards with it are left out of the MC Trade file as "FIX FIRST".
 - **MC Trade Excel:** cards marked "update the existing contact" go to a separate **…-UPDATES.xlsx** (with the MC Trade Profile ID), not into the new-profiles file. Two cards of the same person are combined into one row (a mobile or fax from the second card is kept). Colleagues sharing info@ stay separate, and so do people you marked as different. A person's website is in the extra-columns CSV (Website is an organisation column in MC Trade).
-- **Preview the MC Trade Excel file** (Export page) downloads the file without marking anything as exported.
+- **Preview the MC Trade files** (Export page) downloads the file without marking anything as exported.
 - **Back of card:** if the back shows a different person's name, the scanner asks before adding anything.
 - Notes are now in a card's History. File names are shorter. The batch filter has a search box.
 - Admin: Reset password also lifts a sign-in lock. Photo deletion needs at least 1 day and never deletes photos of cards still pending. "Archive all test data" needs CLEAR in capitals.

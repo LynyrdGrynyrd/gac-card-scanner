@@ -22,7 +22,7 @@ def db():
     return c
 
 # ---------------- settings
-DEFAULTS = {"image_retention_days": "30", "export_retention_days": "30", "retention_enabled": "1", "ai_check_enabled": "1", "corrections_enabled": "0", "mctrade_affcode": "CardScan-Pilot", "phone_format": "gac"}
+DEFAULTS = {"image_retention_days": "30", "export_retention_days": "30", "retention_enabled": "1", "ai_check_enabled": "1", "corrections_enabled": "0", "mctrade_affcode": "CardScan-Pilot", "phone_format": "gac", "mctrade_updates_enabled": "0", "phone_mode_allowed": "1", "update_check_enabled": "1"}
 def get_setting(k):
     r = db().execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
     return r[0] if r else DEFAULTS.get(k)
@@ -121,6 +121,7 @@ async def middleware(request: Request, call_next):
     if clen > MAX_BODY: return JSONResponse({"error": "Upload is too large (limit 25 MB per photo)."}, 413, headers=SEC_HEADERS)
     resp = await _route(request, call_next)
     for k, v in SEC_HEADERS.items(): resp.headers.setdefault(k, v)
+    if p.startswith("/api/"): resp.headers["X-GAC-Asset"] = asset_version()   # round 9: an open tab sees the app was updated
     ctype = resp.headers.get("content-type", "")
     if p.startswith("/api/") or ctype.startswith("text/html"): resp.headers["Cache-Control"] = "no-store"   # Back after sign-out must not show the app
     tok = request.cookies.get(COOKIE)
@@ -152,7 +153,27 @@ _fails = {}
 def login_page():
     if user_count() == 0: return RedirectResponse("/setup", 303)
     if demo.enabled(): return demo.page(os.path.join(STATIC, "ui", "login.html"), login=True)
-    return FileResponse(os.path.join(STATIC, "ui", "login.html"), headers={"Cache-Control": "no-cache"})
+    return versioned_html(os.path.join(STATIC, "ui", "login.html"))
+
+_AV = {}
+def asset_version():
+    """Round 9 (reviewer r9): short fingerprint of the page code (ui.js, ui.css, login.js). Asset URLs carry it, so a new
+    version is never served from an old cache, and the API sends it so an open tab can reload itself."""
+    import hashlib
+    fs = [os.path.join(STATIC, "ui", n) for n in ("ui.js", "ui.css", "login.js")]
+    key = tuple(os.path.getmtime(f) if os.path.isfile(f) else 0 for f in fs)
+    if _AV.get("key") != key:
+        h = hashlib.sha1()
+        for f in fs:
+            if os.path.isfile(f): h.update(open(f, "rb").read())
+        _AV.update(key=key, v=h.hexdigest()[:10])
+    return _AV["v"]
+def versioned_html(path):
+    import re as _re
+    from fastapi.responses import HTMLResponse
+    html = open(path, encoding="utf-8").read(); v = asset_version()
+    html = _re.sub(r'(/static/ui/(?:ui\.js|ui\.css|login\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 @router.get("/setup")
 def setup_page(request: Request):
@@ -264,21 +285,52 @@ def edit_user(uid: int, request: Request, body: dict = Body(...)):
 @router.get("/api/admin/settings")
 def get_settings(): return {k: get_setting(k) for k in DEFAULTS}
 
+@router.get("/api/admin/backup-status")
+def backup_status():
+    """Round 11 (manager-r10 L-r10-1): the same-disk backup warning is shown in Admin > Settings, not only in the server log."""
+    from . import backup as _b
+    return {"dir": _b.backup_dir(), "same_disk": _b.same_disk(), "enabled": os.getenv("GAC_BACKUP", "1") != "0"}
+
 SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
-                 "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples",
-                 "mctrade_affcode": "MC Trade affiliation code", "phone_format": "Phone format"}
-def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith("_enabled") else (v or "(empty)")
+                 "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples", "mctrade_updates_enabled": "Allow 'update existing MC Trade contact'",
+                 "mctrade_affcode": "MC Trade affiliation code", "phone_format": "Phone format",
+                 "phone_mode_allowed": "Scan with phone", "update_check_enabled": "Check for updates"}
+def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled", "_allowed")) else (v or "(empty)")
 
 @router.post("/api/admin/settings")
 def save_settings(request: Request, body: dict = Body(...)):
     before = get_settings()
+    # round 15 (manager r14 H-r14-1): optimistic locking. The Settings page sends "_seen" = the values it showed. A setting the
+    # person did not touch is left as it is now (never reset to the old value on screen); a setting they changed that ANOTHER
+    # admin changed meanwhile is refused with 409 and nothing is saved.
+    seen = body.get("_seen") if isinstance(body.get("_seen"), dict) else None
+    # round 16 (manager r15 H-1): a save without "_seen" (or without the shown value of a setting it sends) is refused with 428,
+    # not applied blindly; every refusal is an audit row (M-1)
+    unseen = [k for k in DEFAULTS if k in body and (seen is None or k not in seen)]
+    if unseen:
+        alog(request.state.user["username"], "refused (stale admin page): settings save without the values the page showed (" + ", ".join(SETTING_NAMES.get(k, k) for k in unseen[:12]) + "): nothing was saved", _client(request))
+        return JSONResponse({"error": "This save didn't say which values it was made from (_seen). Nothing was saved: reload Admin → Settings and try again.",
+                             "need": "version_required", "thing": "settings", "keys": unseen}, 428)
+    if seen is not None:
+        clash = [k for k in DEFAULTS if k in body and k in seen and str(body[k]).strip() != str(seen[k]) and before[k] != str(seen[k])]
+        if clash:
+            r = db().execute("SELECT ts, username FROM auth_log WHERE event LIKE 'settings changed:%' ORDER BY id DESC LIMIT 1").fetchone()
+            who = f" by {r['username']} at {time.strftime('%H:%M', time.localtime(r['ts']))}" if r else ""
+            alog(request.state.user["username"], "refused (stale admin page): settings save of " + ", ".join(SETTING_NAMES.get(k, k) for k in clash) + f" (another admin changed it{who}): nothing was saved", _client(request))
+            return JSONResponse({"error": "Another admin changed " + ", ".join(SETTING_NAMES.get(k, k) for k in clash) + who +
+                                 " after you opened this page. Nothing was saved: reload Admin → Settings, check their change, then try again.",
+                                 "need": "stale_admin", "thing": "settings", "keys": clash, "now": {k: before[k] for k in clash}}, 409)
+        body = {k: v for k, v in body.items() if not (k in DEFAULTS and k in seen and str(v).strip() == str(seen[k]))}
     for k in DEFAULTS:
         if k in body:
             v = str(body[k]).strip()
             if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Days must be a whole number 1–3650 (0 would delete photos of cards nobody has reviewed yet)."}, 422)
             if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
             if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Phone format must be gac or e164."}, 422)
+            if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
             set_setting(k, v)
+    if get_setting("phone_mode_allowed") != "1":
+        from . import phone; phone.revoke_all()      # turning phone mode off closes the LAN listener at once
     after = get_settings(); diff = [k for k in DEFAULTS if before[k] != after[k]]
     if diff:   # only real changes are logged, in words; a save with no change logs nothing
         alog(request.state.user["username"], "settings changed: " + "; ".join(f"{SETTING_NAMES.get(k, k)}: {_sv(k, before[k])} → {_sv(k, after[k])}" for k in diff), _client(request))

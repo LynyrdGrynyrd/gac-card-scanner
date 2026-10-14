@@ -6,6 +6,9 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 NAME = "GAC Card Scanner"
 datas = [(os.path.join(ROOT, "app", "static"), "app/static"),
          (os.path.join(ROOT, "data", "existing_contacts.csv"), "data"),
+         (os.path.join(ROOT, "mctrade-dryrun", "column_map.json"), "mctrade-dryrun"),
+         (os.path.join(ROOT, "mctrade-dryrun", "dryrun.py"), "mctrade-dryrun"),
+         (os.path.join(ROOT, "VERSION"), "."),
          (os.path.join(ROOT, "packaging", "icon.png"), "packaging"),
          (os.path.join(ROOT, "LICENSE"), "."), (os.path.join(ROOT, "THIRD-PARTY-NOTICES.md"), ".")]
 tess = os.path.join(ROOT, "packaging", "build", "tesseract")

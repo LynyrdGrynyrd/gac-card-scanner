@@ -13,4 +13,7 @@ else
   MOD=Qwen3VL-4B-Instruct-Q4_K_M.gguf; PROJ=mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
 fi
 [ -f "$MOD" ] || { echo "Model file $MOD not found in $M - AI double-check stays off (scanning still works)."; exit 0; }
-exec "./$SRV" -m "$MOD" --mmproj "$PROJ" -c 4096 -t 8 --host 127.0.0.1 --port 8090 --image-max-tokens 768
+# -np 1: the app sends one AI check at a time, so one slot. -c 2048 fits image (<=~450 tokens at 640 px) + prompt + answer.
+# --cache-ram 0: llama.cpp otherwise keeps up to 8 GB of prompt cache in RAM (caused out-of-memory kills on a 16 GB machine).
+# Threads: GAC_AI_THREADS (default 8; use the number of performance cores).
+exec "./$SRV" -m "$MOD" --mmproj "$PROJ" -c 2048 -np 1 --cache-ram 0 -t "${GAC_AI_THREADS:-8}" --host 127.0.0.1 --port 8090 --image-max-tokens "${GAC_AI_IMAGE_TOKENS:-768}"

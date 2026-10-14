@@ -1,4 +1,5 @@
 # --- Python / tooling
+.venv
 .venv/
 __pycache__/
 *.pyc
@@ -75,3 +76,10 @@ packaging/build/
 packaging/windows/MicrosoftEdgeWebview2Setup.exe
 build/
 dist/
+
+# --- Bench caches and sweep outputs (derived from real cards)
+bench/ai_reason_cache.json
+bench/ocr_text_cache.json
+bench/sweep/
+backups/
+/COMMIT

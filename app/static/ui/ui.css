@@ -109,7 +109,7 @@ dialog{border:0;border-radius:10px;padding:10px;max-width:95vw}dialog img{max-wi
 .hist{font-size:.85rem;padding-left:18px;margin:6px 0}.hist li{margin:3px 0}
 .reasons{margin:0;padding-left:16px;font-size:.85rem}.reasons li{margin:1px 0}
 .q td.att{min-width:180px}
-dialog#dlg{max-width:520px;width:92vw;padding:20px}dialog#dlg h2{margin-top:0}
+dialog#dlg{max-width:520px;width:92vw;padding:20px}dialog#dlg.wide{max-width:min(1000px,96vw)}dialog#dlg.wide .aidiff td,dialog#dlg.wide .aidiff th{overflow-wrap:anywhere}dialog#dlg h2{margin-top:0}
 .pill.archived{background:#e5e5e5;color:#444}
 button.tile{font:inherit;text-align:left;border:0}
 .actions{border-top:1px solid var(--line);padding-top:12px}
@@ -161,3 +161,30 @@ a{color:var(--teal-d);text-underline-offset:2px}a:visited{color:var(--teal-d)}
 }
 /* SPA view change moves focus to the heading (not interactive): no focus ring needed there */
 h1[tabindex="-1"]:focus{outline:none}
+
+.upd{background:#fff6d6;border:1px solid #e0c060;border-radius:8px;padding:8px 12px;margin-top:8px}
+.phonegrid{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}.phonegrid img{background:#fff;border:1px solid #ddd;border-radius:8px}
+
+/* round 8 */
+.pill.dirty{background:#fde68a;color:#78350f;border:1px solid #b45309;font-weight:600;margin-left:.5em;vertical-align:middle}
+.f.hinted input,.f.hinted textarea{border-color:#b45309;box-shadow:0 0 0 1px #b45309 inset;background:#fff8e6}
+.fhint{color:#8a4b00;font-size:.85em;margin:.2em 0 0}
+#rRisk ul{margin:.3em 0 0 1.2em;padding:0}
+
+/* round 9 (reviewer r9): per-field unsaved marker */
+#fields .f.unsaved > label::after{content:" · not saved yet";color:#b45309;font-weight:700;font-size:.85em}
+#fields .f.unsaved input,#fields .f.unsaved textarea,#fields .f.unsaved select{border-left:4px solid #e8a33a}
+/* round 11 (part-timer r4): checkboxes are never stretched like text boxes ("Show other people's batches too") */
+input[type=checkbox],input[type=radio]{width:auto;height:auto;min-height:0;padding:0;margin:0 .4em 0 0;vertical-align:middle;flex:none}
+#toast.show{z-index:2000}   /* round 11 (reviewer r10): the toast Undo button takes the click, not the row behind it */
+.filelist{max-height:none;overflow:visible}   /* round 13 (reviewer r11): no inner scroll that cuts off the last row; the page scrolls */
+
+/* round 14: small spinner */
+.spin{display:inline-block;width:.9em;height:.9em;border:2px solid #9aa;border-top-color:transparent;border-radius:50%;animation:gacspin 1s linear infinite;vertical-align:-2px}
+@keyframes gacspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+/* round 14 (reviewer r12): the toast sits at the bottom, clear of the sticky header, so its Undo button always takes the click */
+#toast{top:auto;bottom:24px;max-width:min(92vw,720px)}#toast.show{z-index:5000}
+#rForm.loading input, #rForm.loading textarea, #rForm.loading select { background: #f3f4f6; color: #9ca3af; cursor: wait; }   /* round 16 (part-timer r15): read-only until the card is loaded */
+/* round 17 (reviewer r16 N5): the toast (and its Undo) sits above the footer, never under it, and stays clickable while it fades */
+#toast{bottom:84px;z-index:5000}

@@ -46,7 +46,7 @@ def test_xlsx_template_dedupe_companions(env):
     assert rev.post(f"/api/cards/{b}", json={"status": "rejected"}).status_code == 200
     r = adm.get("/api/export/xlsx?status=approved&batch=r4x"); assert r.status_code == 200, r.text
     wb = load_workbook(io.BytesIO(r.content)); assert wb.sheetnames == ["Sheet1"]; ws = wb.active
-    hdr = [c.value for c in ws[1]]; assert hdr == list(M.headers()[0])
+    hdr = [c.value or "" for c in ws[1]]; assert hdr == list(M.headers()[0])
     rows = [[c.value for c in x] for x in ws.iter_rows(min_row=2)]
     assert sum(1 for x in rows if "tia@rowe.io" in x) == 1                                   # one row per person
     row = rows[0]; g = lambda h: row[hdr.index(h)]

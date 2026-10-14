@@ -3,9 +3,13 @@
 import io, os, json, time
 from conftest import Client
 
+import itertools
+_PH = itertools.count(2000)
 def mk(ui, store, **f):
+    # round 7: a unique phone per test card by default (approved cards in other batches with the same phone now ask for a
+    # cross-batch confirm, skeptic R7-4); pass phones=... to share one on purpose
     base = {"first_name": "Ann", "last_name": "Lee", "title": "CFO", "company": "Acme Inc", "emails": ["ann@acme.com"],
-            "phones": [{"type": "work", "number": "330-555-0101"}], "website": "acme.com", "address": "1 Main St, Akron, OH 44308", "social": []}
+            "phones": [{"type": "work", "number": f"330-555-{next(_PH):04d}"}], "website": "acme.com", "address": "1 Main St, Akron, OH 44308", "social": []}
     base.update(f); cid = store.add("test", "raw", base, ""); ui.set_meta(cid, batch="b1", batch_label="B1"); return cid
 
 def test_validate_rules(env):
@@ -14,7 +18,8 @@ def test_validate_rules(env):
     assert ui.validate({"first_name": "A", "emails": ["a@b.co"], "phones": []}) == {}
     assert "phones" in ui.hard_errors({"phones": [{"number": "12"}]})
     assert "emails" in ui.hard_errors({"emails": ["not-an-email@@"]})
-    assert ui.hard_errors({"first_name": "Jane", "emails": ["jane@example"]}) == {}
+    assert "emails" in ui.hard_errors({"first_name": "Jane", "emails": ["jane@example"]})   # round 7: no TLD is a hard error
+    assert ui.hard_errors({"first_name": "Jane", "emails": [], "phones": []}) == {}             # 'no email or phone' stays soft
     assert "name" in ui.hard_errors({"first_name": " ", "last_name": "Roe", "emails": ["jane@example.com"]})   # blank first name: hard block          # soft only: can be overridden with a reason
     assert ui.phone_ok("+1 (330) 555-0101") and not ui.phone_ok("555-01")
 
@@ -44,7 +49,7 @@ def test_upload_guards(env):
 
 def test_override_flag_and_export(env):
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
-    cid = mk(ui, st, emails=["jane@example"], first_name="Jane", last_name="Roe", company="Roe LLC", phones=[], credentials="CPA", department="Tax")
+    cid = mk(ui, st, emails=[], first_name="Jane", last_name="Roe", company="Roe LLC", phones=[], credentials="CPA", department="Tax")
     r = rev.post(f"/api/cards/{cid}", json={"status": "approved", "crm_action": "create_new"}); assert r.status_code == 422
     r = rev.post(f"/api/cards/{cid}", json={"status": "approved", "override_reason": "confirmed", "crm_action": "create_new"}); assert r.status_code == 200, r.text
     assert any(a["code"] == "override" for a in r.json()["attention"])
@@ -74,8 +79,9 @@ def test_ai_no_change_keeps_card_and_suggestions_when_reviewed(env, monkeypatch,
     st.update(cid, status="approved", reviewer="RR", note="")
     ui._ai_run(cid, ["title"]); m = ui.meta(cid); det = json.loads(m["ai_detail"])
     assert m["ai_status"] == "suggested" and det["diff"]["title"]["to"] == "Manager" and st.get(cid)["fields"]["title"] == "Mgr"
-    r = env["rev"].post(f"/api/cards/{cid}/ai-decide", json={"choices": {"title": "accept"}}); assert r.status_code == 200
-    assert st.get(cid)["fields"]["title"] == "Manager"
+    # round 6 (skeptic R6-6): a suggestion never overwrites an APPROVED card's value
+    r = env["rev"].post(f"/api/cards/{cid}/ai-decide", json={"choices": {"title": "accept"}}); assert r.status_code == 409
+    assert st.get(cid)["fields"]["title"] == "Mgr"
     os.remove(p)
 
 def test_recover_requeues_inbox(env, monkeypatch):

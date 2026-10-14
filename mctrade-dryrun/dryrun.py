@@ -95,18 +95,27 @@ def read_export(path):
         if not (new_layout or old_layout) or "IndLastName" not in hdr:
             raise SystemExit(f"{path}: not a scanner MC Trade export (expected IndLastName + IndWorkPhone/IndAddress1 columns, got {hdr[:8]}…). Nothing written.")
         extra = {}   # round 4+: audit columns live in the companion <name>-extra-columns.csv next to the xlsx
-        ep = os.path.splitext(path)[0] + "-extra-columns.csv"
+        base = os.path.splitext(path)[0]; base = base[:-len("-UPDATES")] if base.endswith("-UPDATES") else base
+        ep = base + "-extra-columns.csv"      # the UPDATES companion shares the main file's extra-columns CSV
+        if not os.path.isfile(ep) and "-MCTrade-" in base and "-MCTrade-new-" not in base and os.path.isfile(base.replace("-MCTrade-", "-MCTrade-new-") + "-extra-columns.csv"):
+            ep = base.replace("-MCTrade-", "-MCTrade-new-") + "-extra-columns.csv"
         if new_layout and os.path.isfile(ep):
             with open(ep, newline="", encoding="utf-8-sig") as fh:
                 for er in csv.DictReader(fh):
                     er = {k: unguard((v or "").strip()) for k, v in er.items()}
-                    if er.get("InImportFile") == "yes": extra[(low(er.get("FirstName")), low(er.get("LastName")))] = er
+                    if er.get("InImportFile") in ("yes", "updates file"):   # keyed by name + email: the scan id belongs to THIS row
+                        em = low((er.get("AllEmails") or "").split(";")[0])
+                        extra[(low(er.get("FirstName")), low(er.get("LastName")), em)] = er
+                        extra.setdefault((low(er.get("FirstName")), low(er.get("LastName"))), []).append(er)
         elif new_layout: print(f"NOTE: {ep} not found: reviewer/batch/website/extra phones are not available for this run.")
         for v in it:
             if not any(v): continue
             r = {h: unguard(x) for h, x in zip(hdr, v)}
             if new_layout:
-                ex = extra.get((low(r.get("IndFirstName")), low(r.get("IndLastName")))) or {}
+                fl = (low(r.get("IndFirstName")), low(r.get("IndLastName")))
+                ex = extra.get(fl + (low(r.get("IndEmail")),))
+                if ex is None:   # no email match: only use a name match when it is unambiguous (never guess a card number)
+                    cand = extra.get(fl) or []; ex = cand[0] if len(cand) == 1 else {}
                 for k in ("ScanCardID", "AllPhones", "AllEmails", "ReviewedBy", "Batch", "MCTradeAction", "NeedsAttention"): r.setdefault(k, ex.get(k, ""))
                 r["IndPhone"] = r.get("IndWorkPhone", ""); r["WebAddress"] = r.get("Website") or ex.get("Website", "")
                 tail = " ".join(x for x in (r.get("IndState") or "", r.get("IndZip") or "") if x)
@@ -289,6 +298,13 @@ def main(argv=None):
     ap.add_argument("--run", default=datetime.datetime.now().strftime("%Y-%m-%d_%H%M"))
     a = ap.parse_args(argv)
     cmap = json.load(open(a.map))
+    exports = list(a.export)
+    for f in a.export:   # the scanner writes 'update existing' rows to a separate <name>-UPDATES.xlsx: read it too (mctrade-r3 R3-7a)
+        b0 = os.path.splitext(f)[0]   # the app names it without '-new-' (GAC-MCTrade-new-X.xlsx -> GAC-MCTrade-X-UPDATES.xlsx)
+        for u in (b0 + "-UPDATES.xlsx", b0.replace("-MCTrade-new-", "-MCTrade-") + "-UPDATES.xlsx"):
+            if f.lower().endswith(".xlsx") and not f.endswith("-UPDATES.xlsx") and os.path.isfile(u) and u not in exports:
+                exports.append(u); print("Also reading the updates companion:", u); break
+    a.export = exports
     cards = [c for f in a.export for c in read_export(f)]
     skipped = [c for c in cards if c["status"] != "approved"]; cards = [c for c in cards if c["status"] == "approved"]
     people, orgs, pick, is_sample = read_crm(a.crm)
@@ -320,7 +336,7 @@ def main(argv=None):
             new_ind.append(v)
             if r["c"]["company"] and not r["org"] and norg(r["c"]["company"]) not in org_names:
                 org_names.add(norg(r["c"]["company"])); dom = (r["c"]["emails"] or ["@"])[0].split("@")[-1]
-                new_org.append({"org_name": r["c"]["company"], "email": "", "work_phone": v["work_phone"],
+                new_org.append({"org_name": r["c"]["company"], "email": "", "work_phone": "",   # a person's direct line is not the organisation's number (R3-7c)
                                 "website": r["c"]["website"], **split_address(r["c"]["address"]), "affcode1": a.affcode})   # website never guessed from the email domain (a department subdomain is not the org site)
         elif r["dec"] == "UPDATE":
             p = r["target"]; d = diffs(v, p); r["diffs"] = d

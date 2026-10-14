@@ -18,8 +18,11 @@ try:
 except ImportError:  # pragma: no cover
     from consistency import address_state, phone_state, STATES, FREE
 
-TLD_FIX = {"con": "com", "cm": "com", "corn": "com", "c0m": "com", "om": "com", "comm": "com", "co m": "com", "vom": "com", "xom": "com",
+# round 6: .om (Oman) and .cm (Cameroon) are real country domains, so they get no one-click "fix" (skeptic R6-7)
+TLD_FIX = {"con": "com", "corn": "com", "c0m": "com", "comm": "com", "co m": "com", "vom": "com", "xom": "com",
            "cpm": "com", "nte": "net", "ner": "net", "met": "net", "ogr": "org", "orq": "org", "0rg": "org", "edi": "edu", "eud": "edu"}
+REAL_PROVIDERS = {"ymail.com", "rocketmail.com", "gmx.com", "gmx.net", "mail.com", "me.com", "mac.com", "live.com", "msn.com",
+                  "yahoo.co.uk", "hotmail.co.uk", "proton.me", "protonmail.com", "zoho.com", "fastmail.com", "aim.com", "verizon.net", "cox.net"}
 PROVIDERS = ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "comcast.net", "sbcglobal.net", "att.net"]
 TITLE_WORDS = {"president", "director", "manager", "ceo", "cfo", "coo", "cto", "vp", "owner", "founder", "engineer", "sales", "partner",
                "attorney", "consultant", "specialist", "coordinator", "executive", "officer", "chairman", "secretary", "treasurer",
@@ -27,6 +30,31 @@ TITLE_WORDS = {"president", "director", "manager", "ceo", "cfo", "coo", "cto", "
 COMPANY_WORDS = {"inc", "llc", "ltd", "corp", "corporation", "company", "co", "gmbh", "group", "services", "solutions", "bank",
                  "university", "college", "hospital", "association", "industries", "enterprises", "international", "llp"}
 
+LOOKALIKE = {"rnbber": "rubber", "rubbcr": "rubber", "mian": "main", "akrn": "akron", "akton": "akron", "clevcland": "cleveland",
+             "managcr": "manager", "dlrector": "director", "presldent": "president", "cornpany": "company", 
+             "gloup": "group", "grnup": "group", "servlces": "services", "assoclates": "associates", "ohlo": "ohio", "strcet": "street",
+             "avenuc": "avenue", "sulte": "suite", "unlversity": "university", "hospltal": "hospital", "insurancc": "insurance",
+             # round 11 (reviewer r10): more common-word look-alikes (OCR letter swaps rn/m, l/i, c/e, 0/o, dropped letters)
+             "akran": "akron", "akorn": "akron", "akrom": "akron", "arkon": "akron", "cantn": "canton", "cantom": "canton",
+             "clevland": "cleveland", "clevelnd": "cleveland", "colurnbus": "columbus", "colmbus": "columbus", "ohi0": "ohio",
+             "manger": "manager", "rnanager": "manager", "dlrector": "director", "drector": "director", "presdent": "president",
+             "presidnet": "president", "coordlnator": "coordinator", "specialst": "specialist", "assistnt": "assistant",
+             "consultnt": "consultant", "ofice": "office", "offlce": "office", "rnarketing": "marketing", "markting": "marketing",
+             "salse": "sales", "servces": "services", "solutlons": "solutions", "solutons": "solutions", "technolgy": "technology",
+             "technologles": "technologies", "industrles": "industries", "internatlonal": "international", "natlonal": "national",
+             "assoc1ates": "associates", "partnres": "partners", "pariners": "partners", "constructlon": "construction",
+             "rnanufacturing": "manufacturing", "manufactring": "manufacturing", "engineerlng": "engineering", "dlstrict": "district",
+             "chamher": "chamber", "charnber": "chamber", "cornmerce": "commerce", "comrnerce": "commerce", "cmmerce": "commerce",
+             "rnain": "main", "maln": "main", "strect": "street", "steet": "street", "streeet": "street", "avenne": "avenue",
+             "bouleverd": "boulevard", "parkwav": "parkway", "parkwy": "parkway", "plaza": None, "sute": "suite", "flor": "floor",
+             "fl0or": "floor", "bldg": None, "rubher": "rubber", "rubbar": "rubber", "tlre": "tire", "tirc": "tire",
+             "bakcry": "bakery", "bakeiy": "bakery", "robotlcs": "robotics", "roboties": "robotics", "analytlcs": "analytics",
+             "hcalth": "health", "heaith": "health", "rnedical": "medical", "medlcal": "medical", "dental": None, "bnak": "bank",
+             "credlt": "credit", "unlon": "union", "lnsurance": "insurance", "realtv": "realty", "propertles": "properties"}
+LOOKALIKE = {k: v for k, v in LOOKALIKE.items() if v}
+GLUE = ["coffee", "bank", "group", "law", "park", "street", "suite", "city", "robotics", "hardware", "health", "partners", "services",
+        "solutions", "company", "realty", "insurance", "dental", "medical", "market", "events", "analytics"]
+CAMEL_OK = {"iPhone", "eBay", "YouTube", "LinkedIn", "PayPal", "FedEx", "WordPress", "JavaScript", "McDonald", "PowerPoint", "HubSpot"}
 def _lev(a, b):
     if a == b: return 0
     if abs(len(a) - len(b)) > 3: return 9
@@ -42,10 +70,44 @@ def _osa(a, b):
     return d[-1][-1]
 def _dom(s):
     s = (s or "").lower().strip(); s = re.sub(r"^https?://", "", s).split("/")[0]
-    return s[4:] if s.startswith("www.") else s
+    if s.startswith("www.") : return s[4:]
+    if s.startswith("www") and "." in s[3:] and len(s) > 8: return s[3:]   # round 12: "wwwsummit…" (dot lost) compares like www.summit…
+    return s
 def _a(s):
     import unicodedata
     return re.sub(r"[^a-z]", "", unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower())
+def _digit_reading(w):
+    """Round 15 (manager r14 L-r14-1): 'R1O' is R + a number '10', not 'RIO'. A run of digits and digit-look-alike letters
+    (O o I l S) that touches a word END and holds a real digit is read as a number; a single digit between letters
+    ('C0LUMBUS') is read as a letter."""
+    m = re.search(r"[0-9OoIlS]*\d[0-9OoIlS]*$", w) or re.match(r"^[0-9OoIlS]*\d[0-9OoIlS]*", w)
+    if m and len(m.group(0)) >= 2:
+        run = m.group(0).translate(str.maketrans("OoIlS", "00115"))
+        return w[:m.start()] + run + w[m.end():]
+    return re.sub(r"(?<=[A-Za-z])0|0(?=[A-Za-z])", "O", re.sub(r"(?<=[A-Za-z])1|1(?=[A-Za-z])", "I", w))
+
+SUSPICIOUS_WEB = ("phish", "login", "verify", "secure-", "account-", "password", "wallet", "free-", "bonus", "casino", "malware", "evil", "hack")
+SUSPICIOUS_HOSTS = ("bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "000webhostapp.com", "ngrok.io", "ngrok-free.app", "blogspot.com")
+def website_check(f):
+    """Round 15 (mctrade r14 M2): the website must be a valid domain; warn when it matches neither the email domain nor the
+    company, or has suspicious words/hosts. Review hints only, never a block."""
+    out = []; w = (f.get("website") or "").strip()
+    if not w: return out
+    host = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0].split("?")[0].split(":")[0]
+    host = host[4:] if host.startswith("www.") else host
+    if not re.fullmatch(r"(?:xn--)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.(?:xn--)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(?:[a-z]{2,24}|xn--[a-z0-9-]+)", host or ""):
+        return [_sug("website_invalid", "website", f"Website “{w}” is not a valid web address: check it against the photo")]
+    bad = [x for x in SUSPICIOUS_WEB if x in host] + [x for x in SUSPICIOUS_HOSTS if host == x or host.endswith("." + x)]
+    if bad: out.append(_sug("website_suspicious", "website", f"Website “{w}” looks suspicious ({', '.join(bad)}): confirm it is really printed on the card before approving"))
+    core = host.rsplit(".", 1)[0].split(".")[-1]
+    doms = [e.split("@", 1)[1].lower() for e in f.get("emails") or [] if "@" in e]
+    comp = re.sub(r"[^a-z0-9]", "", (f.get("company") or "").lower())
+    if doms and not any(d == host or d.endswith("." + host) or host.endswith("." + d) for d in doms):
+        words = [x for x in re.findall(r"[a-z0-9]{3,}", (f.get("company") or "").lower()) if x not in ("inc", "llc", "the", "and", "company", "corp", "group")]
+        if not (comp and (core in comp or any(x in core for x in words))):
+            out.append(_sug("website_mismatch", "website", f"Website “{w}” matches neither the email domain ({', '.join(dict.fromkeys(doms))}) nor the company: check it against the photo"))
+    return out
+
 def _sug(code, field, text, suggestion=None): return {"code": code, "field": field, "text": text, "suggestion": suggestion}
 
 def check(f):
@@ -62,7 +124,7 @@ def check(f):
         base, tld = d.rsplit(".", 1)
         if tld in TLD_FIX:
             fix = f"{lp}@{base}.{TLD_FIX[tld]}"; out.append(_sug("email_tld", "emails", f"“.{tld}” is probably “.{TLD_FIX[tld]}”", fix)); d = f"{base}.{TLD_FIX[tld]}"
-        if d not in PROVIDERS:
+        if d not in PROVIDERS and d not in REAL_PROVIDERS:   # ymail.com is Yahoo's real domain, not a misread gmail.com
             near = [p for p in PROVIDERS if _lev(d, p) <= (2 if len(p) > 9 else 1)]
             if near: out.append(_sug("email_provider", "emails", f"“{d}” looks like a misread “{near[0]}”", f"{lp}@{near[0]}"))
         # email vs website
@@ -86,7 +148,21 @@ def check(f):
             if la not in pats:
                 for p in full:
                     if len(p) >= 5 and len(la) == len(p) and _lev(la, p) == 1:   # substitution/transposition only (middle initials are insertions)
-                        out.append(_sug("email_name", "name", f"Email “{e}” is one letter off the name “{f.get('first_name')} {f.get('last_name')}”: check the spelling of both")); break
+                        out.append(_sug("email_name", "emails", f"Email “{e}” is one letter off the name “{f.get('first_name')} {f.get('last_name')}”: check the spelling of both")); break
+    # round 12 (coordinator r4 N1 / reviewer r10): a garbled website, and .co vs .com between website and email
+    rw = (f.get("website") or "").strip().lower(); rw_ = re.sub(r"^https?://", "", rw)
+    if rw_ and (re.match(r"^www(?!\.)", rw_) or "." not in rw_):
+        out.append(_sug("website_format", "website", f"Website “{f.get('website')}” looks misread (a dot is missing)", ("www." + rw_[3:]) if rw_.startswith("www") and "." in rw_[3:] else None))
+    if web:
+        for e in emails:
+            d = e.lower().rsplit("@", 1)[-1]
+            if "." not in d or d == web: continue
+            wb, wt = web.rsplit(".", 1) if "." in web else (web, ""); db_, dt = d.rsplit(".", 1)
+            if wb == db_ and {wt, dt} == {"co", "com"}:
+                bad, good = ("website", f"{wb}.com") if wt == "co" else ("emails", e[: -len(dt)] + "com")
+                out.append(_sug("tld_co", bad, f"Website “{web}” and email “{e}” differ only in .co / .com: one is probably misread", good if bad == "emails" else ("www." + good)))
+                break
+        if any(x["code"] == "tld_co" for x in out): out = [x for x in out if x["code"] != "email_web"]
     # phones
     st = address_state(f.get("address"))
     for p in f.get("phones") or []:
@@ -105,19 +181,56 @@ def check(f):
     # name
     for k in ("first_name", "last_name"):
         v = f.get(k) or ""
-        if re.search(r"[\d@/]|www|\.com", v, re.I): out.append(_sug("name_sanity", "name", f"{k.replace('_', ' ').title()} “{v}” contains digits or web text"))
-        elif v and v.lower().strip(".,") in TITLE_WORDS | COMPANY_WORDS: out.append(_sug("name_sanity", "name", f"“{v}” looks like a title/company word, not a name"))
+        if re.search(r"[\d@/]|www|\.com", v, re.I): out.append(_sug("name_sanity", k, f"{k.replace('_', ' ').title()} “{v}” contains digits or web text"))
+        elif v and v.lower().strip(".,") in (TITLE_WORDS | COMPANY_WORDS if k == "first_name" else TITLE_WORDS - {"sales", "agent", "partner"}): out.append(_sug("name_sanity", "name", f"“{v}” looks like a title/company word, not a name"))
     if fn and fn == ln: out.append(_sug("name_sanity", "name", "First and last name are identical"))
     if f.get("first_name") and ln and len(ln) == 1: out.append(_sug("name_sanity", "name", f"Last name “{f.get('last_name')}” is a single letter"))
     t = f.get("title") or ""
     if re.search(r"@|www\.|\.com\b|\d{3}[-. )]\d{3}", t, re.I):
         out.append(_sug("title_sanity", "title", f"Title “{t}” looks like it contains other text (phone/email/address)"))
+    # round 7 (part-timer r1): words glued by OCR, e.g. 'StSuite 210', 'Squarecoffee', 'CityRobotics'
+    for k, label in (("company", "Company"), ("address", "Address"), ("title", "Title")):
+        v = f.get(k) or ""
+        g = re.search(r"\b(?:[A-Z][a-z]+|[a-z]{2,})[A-Z][a-z]+", v) or next((m for m in re.finditer(r"\b([A-Z][a-z]{3,})(" + "|".join(GLUE) + r")\b", v)), None)
+        if g and not re.fullmatch(r"(?:Mc|Mac|De|La|Le|Van|Von|O)[A-Z][a-z]+", g.group(0)) and g.group(0) not in CAMEL_OK:
+            out.append(_sug("glued_words", k, f"{label} “{g.group(0)}” looks like two words run together: check the spacing"))
+    # round 7 (reviewer r7): OCR look-alike letters in common words ('Rnbber' -> 'Rubber', 'Mian St' -> 'Main St')
+    for k, label in (("company", "Company"), ("title", "Title"), ("address", "Address")):
+        v = f.get(k) or ""
+        fixed, words = v, []   # round 11 (reviewer r10): every misread word is listed ("Mian St, Akrn" -> both), in one hint
+        for w in re.findall(r"[A-Za-z]{3,}", v):
+            fix = LOOKALIKE.get(w.lower())
+            if fix:
+                good = fix.capitalize() if w[0].isupper() else fix
+                words.append(f"“{w}” is probably “{good}”"); fixed = re.sub(r"\b" + re.escape(w) + r"\b", good, fixed)
+        if words: out.append(_sug("ocr_lookalike", k, f"{label}: " + "; ".join(words) + " (letters misread)", fixed))
+    # round 11 (reviewer r10): a street address with a city but no state / zip
+    ad = (f.get("address") or "").strip()
+    if ad and re.match(r"^\d+\s", ad) and "," in ad and not re.search(r"\b[A-Z]{2}\b\.?\s*\d{5}(-\d{4})?\s*$|\b\d{5}(-\d{4})?\s*$", ad):
+        out.append(_sug("addr_incomplete", "address", "Address has no state and/or zip code: check the photo"))
+    # round 8 (part-timer r2): 'Akron. OH 44308' -> a misread comma before the state
+    a_ = f.get("address") or ""
+    mm = re.search(r"\b([A-Z][a-z]{2,})\. ([A-Z]{2})\b(?=\s*(?:\d{5}|$))", a_)
+    if mm: out.append(_sug("addr_punct", "address", f"Address “{mm.group(0)}”: the “.” before the state is probably a misread “,”", a_.replace(mm.group(0), f"{mm.group(1)}, {mm.group(2)}")))
     c = f.get("company") or ""
     if c and (fn or ln) and _a(c) in (fn + ln, ln + fn) and len(_a(c)) > 3:
         out.append(_sug("company_sanity", "company", "Company is the same as the person's name"))
     elif re.search(r"@|\d{3}[-. )]\d{3}[-. ]\d{4}", c):
         out.append(_sug("company_sanity", "company", f"Company “{c}” contains an email or phone number"))
-    return out
+    # round 13 (manager r11 L-r11-1): a digit/letter mix-up inside a company word ("R1O Testworks": 1 / O)
+    for w_ in re.findall(r"[A-Za-z0-9]+", c):
+        if re.search(r"[A-Za-z]", w_) and re.search(r"\d", w_) and re.search(r"(?<=\d)[OoIlS]|[OoIlS](?=\d)|(?<=[A-Za-z])[015](?=[A-Za-z])|[01](?=[OoIl])|(?<=[OoIl])[01]", w_):
+            fx = _digit_reading(w_)
+            alt = re.sub(r"(?<=[A-Za-z])0|0(?=[A-Za-z])", "O", re.sub(r"(?<=[A-Za-z])1|1(?=[A-Za-z])", "I", w_))
+            both = [x for x in dict.fromkeys([fx, alt]) if x != w_]
+            out.append(_sug("company_digits", "company", f"Company word “{w_}” mixes digits and letters (0/O, 1/I/l, 5/S): check it against the photo"
+                            + (f" (it may read “{both[0]}”" + (f" or “{both[1]}”" if len(both) > 1 else "") + ")" if both else ""), c.replace(w_, fx) if fx != w_ else None)); break
+    if not any(x["field"] == "website" and x["code"] == "email_web" for x in out): out += website_check(f)
+    seen, uniq = set(), []   # round 11 (reviewer r10): each hint once
+    for x in out:
+        key = (x["field"], x["text"])
+        if key not in seen: seen.add(key); uniq.append(x)
+    return uniq
 
 def apply(f):
     """Attach suggestions under f['suggestions']; does not touch values, confidence or needs_review."""

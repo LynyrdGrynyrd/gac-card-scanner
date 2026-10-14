@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#00467f">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<title>Scan cards · GAC Card Scanner</title>
+<link rel="manifest" href="/m/manifest.webmanifest"><link rel="apple-touch-icon" href="/m/icon-192.png"><link rel="stylesheet" href="/m/phone.css"></head>
+<body>
+<header class="top"><b>GAC Card Scanner</b><span id="exp" class="small"></span></header>
+<main class="wrap">
+  <p class="small" id="who"></p>
+  <label for="batch">Batch name <small>(optional)</small></label>
+  <input id="batch" maxlength="60" placeholder="e.g. Oct 13 Business After Hours" autocomplete="off">
+  <div id="live" hidden>
+    <div class="cam"><video id="video" playsinline muted></video><div class="guide" aria-hidden="true"></div></div>
+    <button class="btn primary big" id="snap" type="button">Capture</button>
+  </div>
+  <div class="sides">
+    <figure class="side" id="sideFront"><img id="pFront" alt=""><figcaption>Front <span class="req">required</span></figcaption>
+      <button class="btn primary" id="bFront" type="button">📷 Front</button></figure>
+    <figure class="side" id="sideBack"><img id="pBack" alt=""><figcaption>Back <small>(optional)</small></figcaption>
+      <button class="btn" id="bBack" type="button">📷 Back</button></figure>
+  </div>
+  <input id="fFront" type="file" accept="image/*" capture="environment" hidden>
+  <input id="fBack" type="file" accept="image/*" capture="environment" hidden>
+  <button class="btn primary big" id="send" type="button" disabled>Send card to computer</button>
+  <p id="msg" role="status" aria-live="polite"></p>
+  <h2>Sent from this phone <span id="count" class="badge">0</span></h2>
+  <ul id="list" class="list"></ul>
+  <details class="small"><summary>Camera tips</summary>
+    <p>Lay the card flat on a dark surface, fill the frame, avoid glare. The computer straightens and crops the card automatically.</p>
+    <p id="camNote"></p></details>
+</main>
+<script src="/m/phone.js"></script></body></html>

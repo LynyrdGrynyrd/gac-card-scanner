@@ -33,12 +33,18 @@ def test_dedup_respects_keep_apart_and_merges_details():
     r = M.build([a, b], "X", "gac", NOERR)
     assert len(r["rows"]) == 1 and r["rows"][0][1]["IndCellPhone"] == "216-555-0188" and r["rows"][0][1]["IndFax"] == "216-555-0199"
     assert "same person as card #62" in r["left"][0][1]
+    # round 6: 'different people' can't split cards with identical email+phone+company; they are exported once and flagged
     r = M.build([a, b], "X", "gac", NOERR, kept=lambda x, y: {x, y} == {62, 34})
+    assert len(r["rows"]) == 1 and r["conflicts"]
+    c2 = _card(35, **(f | {"emails": ["ann.g@other.org"], "phones": [{"type": "work", "number": "216-555-0777"}]}))
+    r = M.build([a, c2], "X", "gac", NOERR, kept=lambda x, y: {x, y} == {62, 35})
     assert len(r["rows"]) == 2
 
-def test_update_existing_goes_to_updates_file(env):
+def test_update_existing_goes_to_updates_file(env, monkeypatch):
+    import os
+    monkeypatch.setenv("MCTRADE_CRM_EXPORT", os.path.join(os.path.dirname(__file__), "fake_real_contacts.csv"))   # a synthetic "real" list (round 8: the SAMPLE file is refused as real)
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
-    cid = mk(ui, st, first_name="Robert", last_name="Hughes", company="Hughes & Partners Law", emails=["rhughes@hugheslaw.com"],
+    cid = mk(ui, st, first_name="Robert", last_name="Hughes", company="Hughes & Partners Law", emails=["robert.hughes@hpl-test.example"],
              phones=[{"type": "work", "number": "330-555-0190"}]); ui.set_meta(cid, batch="r5u", batch_label="R5U")
     assert _approve(rev, cid, crm_action="update_existing").status_code == 200, _approve(rev, cid, crm_action="update_existing").text
     r = adm.get("/api/export/xlsx?status=approved&batch=r5u"); assert r.status_code == 200
@@ -46,7 +52,7 @@ def test_update_existing_goes_to_updates_file(env):
     assert "updates.xlsx" in r.headers["X-Companions"]
     u = adm.get(f"/api/exports/{r.headers['X-Export-Id']}/companion/updates.xlsx"); assert u.status_code == 200
     uw = load_workbook(io.BytesIO(u.content)).active; hdr = [c.value for c in uw[1]]; row = [c.value for c in uw[2]]
-    assert row[hdr.index("ProfileID")] == "1004" and row[hdr.index("MemberSince")] == "1/1/1900"
+    assert row[hdr.index("ProfileID")] == "990004" and row[hdr.index("MemberSince")] in (None, "")   # round 9 (manager-r9 M-r9-2): blank in update rows
 
 def test_formula_and_html_refused_at_approval(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
@@ -73,7 +79,7 @@ def test_short_filenames(env):
 # ---- skeptic
 def test_reapprove_keeps_override(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
-    cid = mk(ui, st, first_name="Zeb", last_name="Quarrington", emails=["zeb@quarrington"])
+    cid = mk(ui, st, first_name="Zeb", last_name="Quarrington", emails=[], phones=[])   # soft problem only (no email or phone)
     assert _approve(rev, cid, override_reason="QA: domain confirmed").status_code == 200
     r = rev.post(f"/api/cards/{cid}", json={"status": "approved"}); assert r.status_code == 200
     assert r.json()["override"]["reason"] == "QA: domain confirmed"
@@ -112,7 +118,15 @@ def test_cross_batch_lookalike_does_not_block_approval(env):
     a = mk(ui, st, first_name="Cross", last_name="Batch", emails=["cb@x.io"]); ui.set_meta(a, batch="other", batch_label="Other")
     assert _approve(rev, a).status_code == 200
     b = mk(ui, st, first_name="Cross", last_name="Batch", emails=["cb@x.io"]); ui.set_meta(b, batch="mine", batch_label="Mine")
-    r = rev.post("/api/cards-bulk", json={"ids": [b], "status": "approved"}); assert b in r.json()["updated"], r.json()
+    # round 6 (skeptic R6-3): an APPROVED same-email card elsewhere needs an explicit confirm; bulk skips it and says why
+    # round 7 (newcomer r7 F2): bulk approve INCLUDES it, with a warning; a single approve still asks to confirm
+    # round 9 (coordinator N7): bulk asks first (409, nothing changed), then approves with confirm_cross_batch
+    r0 = rev.post("/api/cards-bulk", json={"ids": [b], "status": "approved"}); assert r0.status_code == 409 and r0.json()["lookalikes"][0]["id"] == b
+    r = rev.post("/api/cards-bulk", json={"ids": [b], "status": "approved", "confirm_cross_batch": True}).json(); assert b in r["updated"] and r["warnings"][0]["id"] == b, r
+    assert any(h["action"] == "cross_batch_confirmed" for h in ui.history(b))
+    c = mk(ui, st, first_name="Cross", last_name="Batch", emails=["cb@x.io"]); ui.set_meta(c, batch="mine2", batch_label="Mine2")
+    r = _approve(rev, c); assert r.status_code == 409 and r.json()["need"] == "confirm_cross_batch"
+    assert _approve(rev, c, confirm_cross_batch=True).status_code == 200
     c = mk(ui, st, first_name="Cross", last_name="Batch", emails=["cb@x.io"]); ui.set_meta(c, batch="other", batch_label="Other")
     assert _approve(rev, c).status_code == 409                                                   # same batch still blocks
 

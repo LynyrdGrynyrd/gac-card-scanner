@@ -4,12 +4,17 @@
 cd "$(dirname "$0")" || exit 1
 PORT=8765
 echo "=== Greater Akron Chamber · Card Scanner (internal pilot) ==="
+# Round 9: the scanner listens on THIS computer only (127.0.0.1) by default, with or without certificates.
+# Phone mode (Upload → "Scan with a phone") opens its own small LAN listener just for the phone page while a pairing
+# is live. To open the whole app to the network on purpose, start it with GAC_HOST=0.0.0.0 (or a LAN address).
+HOST="${GAC_HOST:-127.0.0.1}"
 if [ -f certs/cert.pem ] && [ -f certs/key.pem ]; then
-  SCHEME=https; HOST=0.0.0.0; SSL="--ssl-certfile certs/cert.pem --ssl-keyfile certs/key.pem"
-  echo "Phone access is ON (https). Phones on the same Wi-Fi can use the scanner."
+  SCHEME=https; SSL="--ssl-certfile certs/cert.pem --ssl-keyfile certs/key.pem"
 else
-  SCHEME=http; HOST="${GAC_HOST:-127.0.0.1}"; SSL=""   # only this computer; GAC_HOST=0.0.0.0 to open it up
+  SCHEME=http; SSL=""
 fi
+if [ "$HOST" = "127.0.0.1" ] || [ "$HOST" = "localhost" ]; then echo "Listening on this computer only ($HOST). Phones: use Upload -> Scan with a phone.";
+else echo "!! GAC_HOST=$HOST: the whole scanner is reachable from the network. Unset GAC_HOST to go back to this computer only."; fi
 URL="$SCHEME://localhost:$PORT/ui"
 if curl -ks "$SCHEME://localhost:$PORT/health" >/dev/null 2>&1; then echo "Already running."; open "$URL"; exit 0; fi
 PY=$(command -v python3)

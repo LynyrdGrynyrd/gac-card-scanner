@@ -1,9 +1,5 @@
 @echo off
-REM Turns on phone access: creates an HTTPS certificate so phones on the same Wi-Fi can use the scanner and camera.
-cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (echo Run start.bat once first ^(it installs the components^). & pause & exit /b 1)
-".venv\Scripts\python.exe" -m app.make_cert
-echo.
-echo Now close the scanner window ^(if open^) and double-click start.bat again.
-echo To turn phone access off again, delete the "certs" folder.
+REM RETIRED (round 11). Phone scanning is built in: Scan cards - "Scan with phone", then scan the QR code.
+echo Phone scanning is now built in: in the scanner, open Scan cards - "Scan with phone" and scan the QR code
+echo with the phone (same office Wi-Fi). It uses port 8766 only while a pairing is live. See docs\PHONE-MODE.md.
 pause

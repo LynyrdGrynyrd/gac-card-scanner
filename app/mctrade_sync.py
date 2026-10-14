@@ -14,13 +14,21 @@ except ImportError:
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "data", "existing_contacts.csv")
 DRY_RUN = True  # hard-coded; there is intentionally no live code path
 
+from functools import lru_cache
 def _digits(s): return re.sub(r"\D", "", s or "")[-10:]
-def _norm(s): return re.sub(r"[^a-z0-9]", "", (s or "").lower())
-def _nname(s): return " ".join(re.sub(r"[^a-z ]", "", (s or "").lower()).split())
+@lru_cache(maxsize=65536)   # round 13 (reviewer r11): pure string helpers are cached; the queue list called them ~100k times
+def fold(s):
+    """Round 11 (mctrade-r7 F3): accents are folded before names are compared ('María Délgado' = 'Maria Delgado')."""
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(ch))
+@lru_cache(maxsize=65536)
+def _norm(s): return re.sub(r"[^a-z0-9]", "", fold(s).lower())
+@lru_cache(maxsize=65536)
+def _nname(s): return " ".join(re.sub(r"[^a-z ]", "", fold(s).lower()).split())
 def load_existing(path=SAMPLE):
     with open(path) as fh: return list(csv.DictReader(fh))
 
-def match(fields, existing=None):
+def match(fields, existing=None, near_names=False):
     existing = existing if existing is not None else load_existing()
     emails = {e.lower() for e in fields.get("emails", [])}
     phones = {_digits(p["number"]) for p in fields.get("phones", [])}
@@ -35,7 +43,8 @@ def match(fields, existing=None):
         if ns > 0.85: score += 0.25*ns; why.append(f"name~{ns:.2f}")
         cs = _ratio(co, _norm(r["organization"])) if co else 0
         if cs > 0.7: score += 0.15*cs; why.append(f"org~{cs:.2f}")
-        if score >= 0.3: res.append({"profile_id": r["profile_id"], "name": f"{r['first_name']} {r['last_name']}",
+        # round 9 (mctrade-r6 F1): an exact First+Last alone (0.25) is a match too
+        if score >= 0.3 or ns >= 0.99 or (near_names and ns >= 0.9): res.append({"profile_id": r["profile_id"], "name": f"{r['first_name']} {r['last_name']}",
                                      "organization": r["organization"], "score": round(min(score,1),2), "why": why})
     return sorted(res, key=lambda x: -x["score"])
 

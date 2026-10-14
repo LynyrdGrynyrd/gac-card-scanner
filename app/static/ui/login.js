@@ -28,7 +28,7 @@ const nextUrl=()=>{let n=new URLSearchParams(location.search).get('next')||'';
     if(!s.setup_allowed){$('#err').textContent='Setup must be done on the computer running the scanner: open http://localhost:8765 there.';$('#go').disabled=true}
   }
   $('#f').onsubmit=async e=>{
-    e.preventDefault();$('#err').textContent='';$('#password').removeAttribute('aria-invalid');const b=$('#go');b.disabled=true;b.setAttribute('aria-busy','true');
+    e.preventDefault();$('#err').textContent='';$('#password').removeAttribute('aria-invalid');const b=$('#go');b.disabled=true;b.setAttribute('aria-busy','true');const bt=b.textContent;b.textContent=s.needs_setup?'Creating…':'Signing in…';$('#err').setAttribute('role','status');
     try{
       let url='/api/auth/login',body={username:$('#username').value,password:$('#password').value};
       if(s.needs_setup){
@@ -38,8 +38,9 @@ const nextUrl=()=>{let n=new URLSearchParams(location.search).get('next')||'';
       }
       const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await r.json();if(!r.ok)throw new Error(j.error||'Sign-in failed');
+      try{sessionStorage.whoSigned='1'}catch(e){}  // round 15: signed in in THIS tab, no 'who is scanning?' question
       location.href=nextUrl();
-    }catch(x){$('#err').textContent=x.message;$('#password').setAttribute('aria-invalid','true');$('#password').select();b.disabled=false;b.removeAttribute('aria-busy')}
+    }catch(x){$('#err').textContent=x.message;$('#password').setAttribute('aria-invalid','true');$('#password').select();b.disabled=false;b.removeAttribute('aria-busy');b.textContent=bt}
   };
   $('#username').focus();
 })();

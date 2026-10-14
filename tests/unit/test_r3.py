@@ -43,10 +43,13 @@ def test_edit_or_merge_into_approved_rechecks(env):
     assert r.status_code == 200 and r.json()["status"] == "pending" and "moved back to pending" in r.json()["notice"]
     assert any(h["action"] == "back_to_pending" for h in r.json()["history"])
     t = mk(ui, st, first_name="Mar", last_name="Del", emails=["mar@del.io"], company="Del Co"); assert _approve(rev, t).status_code == 200
-    s = mk(ui, st, first_name="Mar", last_name="Del", emails=["no-at-sign"], phones=[{"type": "work", "number": "9"}], company="Del Co")
+    s = mk(ui, st, first_name="Mar", last_name="Del", emails=["no-at-sign", "mar.home@del.io"], phones=[{"type": "work", "number": "9"}], company="Del Co")
     ui.set_meta(s, back_image="back_s.jpg")
     assert rev.post(f"/api/cards/{s}", json={"merge_into": t}).status_code == 200
-    assert st.get(t)["status"] == "pending" and ui.meta(t)["back_image"] == "back_s.jpg"   # re-checked; back photo carried over
+    # round 12 (coordinator r4 #3): the invalid email/phone are no longer merged in, so the approved card has no new problem
+    # and stays approved; the valid extra email and the back photo are carried over
+    assert st.get(t)["status"] == "approved" and ui.meta(t)["back_image"] == "back_s.jpg"
+    assert st.get(t)["fields"]["emails"] == ["mar@del.io", "mar.home@del.io"]
 
 def test_first_name_hard_and_all_errors_at_once(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
@@ -58,9 +61,10 @@ def test_first_name_hard_and_all_errors_at_once(env):
 
 def test_keep_both_per_match_and_true_duplicates(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
-    a = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd"); ui.set_meta(a, batch="kb")
-    b = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd"); ui.set_meta(b, batch="kb")    # same batch, same email
-    c = mk(ui, st, first_name="James", last_name="Okafor", emails=["jo@other.org"], company="Ok Ltd"); ui.set_meta(c, batch="other")
+    PH = [{"type": "work", "number": "330-555-0101"}]   # shared line (mk gives unique phones since round 7)
+    a = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(a, batch="kb")
+    b = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(b, batch="kb")    # same batch, same email
+    c = mk(ui, st, first_name="James", last_name="Okafor", emails=["jo@other.org"], company="Ok Ltd", phones=PH); ui.set_meta(c, batch="other")
     d = rev.get(f"/api/cards/{a}").json()["dupes"]["queue"]
     assert {x["card_id"]: x["strong"] for x in d if x["card_id"] in (b, c)} == {b: True, c: False}
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [b]}); assert r.status_code == 409 and r.json()["need"] == "true_duplicate"
@@ -102,9 +106,9 @@ def test_sync_admin_only_and_already_scanned(env):
     b = io.BytesIO(); Image.effect_noise((900, 500), 60).convert("RGB").save(b, "JPEG")
     from app import ui
     ui.set_meta(999999, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest())  # orphan meta has no card: ignored
-    cid = mk(ui, env["store"]); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo")
+    cid = mk(ui, env["store"]); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo", batch="b-expo")
     ui.log(cid, "QN", "scanned", None, "pending", {"file": "x.jpg"})
-    r = rev.post("/api/jobs", files={"image": ("x.jpg", b.getvalue(), "image/jpeg")}); assert r.status_code == 409
+    r = rev.post("/api/jobs", data={"batch": "b-expo"}, files={"image": ("x.jpg", b.getvalue(), "image/jpeg")}); assert r.status_code == 409
     assert "by QN on" in r.json()["error"] and "Expo" in r.json()["error"]
 
 def test_hard_delete_scrubs_merge_history_and_jobs(env):

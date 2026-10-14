@@ -125,7 +125,7 @@ flowchart LR
   A[Phone camera / upload] --> B[FastAPI /scan]
   B --> C{Engine}
   C -->|default| D[Preprocess + Tesseract 5]
-  C -->|optional| E[Ollama Qwen3-VL]
+  C -->|optional| E[llama.cpp llama-server: Qwen3-VL-4B GGUF]
   E -.fallback.-> D
   D --> F[Parser: regex + phonenumbers + heuristics]
   E --> G[VLM JSON]

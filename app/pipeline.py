@@ -37,4 +37,6 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
             v = vlm_result if vlm_result is not None else vlm.extract(data, r["text"])
             f = merge.merge(f, v, r["text"]); f["sources"]["vlm"] = os.getenv("VLM_NAME", "qwen3-vl-4b")
         except Exception as e: f["sources"]["vlm_error"] = str(e)[:200]
+    if os.getenv("REALCARD_POSTFIX", "1") == "1":
+        from . import postfix; f = postfix.apply(f)
     return {"engine": r["engine"], "text": r["text"], "fields": f}

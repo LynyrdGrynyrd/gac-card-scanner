@@ -1,15 +1,27 @@
-import os, uuid
+import os, uuid, contextlib
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from . import store
 from fastapi.staticfiles import StaticFiles
-from . import ui as _ui, auth as _auth
+from . import ui as _ui, auth as _auth, phone as _phone, updates as _updates
 
-app = FastAPI(title="GAC Card Scanner (pilot)", docs_url=None, redoc_url=None, openapi_url=None)  # no public API explorer
+@contextlib.asynccontextmanager
+async def _lifespan(_app):
+    # Everything with side effects runs here, when uvicorn SERVES the app, never on import (round 6).
+    _startup_checks(); _ai_banner(); _ui.start_workers(); _updates.check_in_background()
+    yield
+app = FastAPI(title="GAC Card Scanner (pilot)", lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)  # no public API explorer
+@app.get("/static/ui/GAC-Card-Scanner-Help-Guide.pdf", include_in_schema=False)
+def help_pdf():   # round 8 (newcomer r8): the printable guide opens in the browser (inline), it is not forced to download
+    p = os.path.join(os.path.dirname(__file__), "static", "ui", "GAC-Card-Scanner-Help-Guide.pdf")
+    return FileResponse(p, media_type="application/pdf", headers={"Content-Disposition": 'inline; filename="GAC-Card-Scanner-Help-Guide.pdf"', "Cache-Control": "no-cache"})
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+app.add_exception_handler(_ui.BadId, lambda request, e: _ui.bad_id_response(e))   # round 13: strict card ids -> 422
 app.include_router(_auth.router)
 from . import ai_helper as _aih
 app.include_router(_aih.router)
+app.include_router(_phone.router)
+app.include_router(_updates.router)
 app.include_router(_ui.router)  # also answers the retired legacy URLs (redirect or 410)
 app.middleware("http")(_auth.middleware)  # sign-in required everywhere except /login, /setup, /static, /health
 from . import paths
@@ -46,7 +58,8 @@ def _ai_up():
 @app.get("/health")
 def health():
     up = _ai_up()
-    return {"ok": True, "ai_checker": "online" if up else "offline",
+    from . import updates as _up
+    return {"ok": True, "version": _up.current_version(), "commit": _up.current_commit(), "ai_checker": "online" if up else "offline",
             **({} if up else {"ai_note": "AI checker offline: start it from Admin > Settings > AI helper (desktop app) or start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + "). Scanning still works."})}
 
 def _startup_checks():

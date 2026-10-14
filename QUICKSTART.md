@@ -43,18 +43,18 @@ Click **Review this batch**. Open each card, compare the fields with the photo, 
 
 - **Yellow** fields were hard to read: check them against the photo.
 - **First name is required.** A blank first name, an email without "@" or a phone with fewer than 7 digits can't be approved, not even with "Approve anyway". All problems are listed together.
-- The optional **AI double-check** usually takes under a minute when the model is free. If it is busy the box says so, and you don't need to wait for it. It never changes what you typed: it offers suggestions you accept or keep.
+- The optional **AI double-check** takes about 45 seconds of AI model time per card (median of 48 measured checks; 9 in 10 within about 75 seconds), plus any wait in the AI line: cards are checked one at a time, so with others ahead it takes longer (the card shows its place in line). It checks the saved card, so save first. If it is busy the box says so, and you don't need to wait for it. It never changes what you typed: it offers suggestions you accept or keep.
 - **"from QR code"** means the detail came from the card's QR code, which is very reliable.
 - An **orange box** means the person may already be in MC Trade or scanned twice. Pick one of the plain-language choices.
 
 ## 4. Export for MC Trade
 
-Go to **Export**, keep **"Approved, not yet exported"**, choose your event in **Which batch (event)?** (otherwise every batch is exported), and click **MC Trade import (Excel)**. The file name includes the batch. Three files land in your **Downloads** folder: the import file (MC Trade template columns only), a `…-extra-columns.csv` (notes, second emails, rows left out) and a `…-READ-ME.txt`. Read the READ ME before importing.
+Go to **Export**, keep **"Approved, not yet exported"**, choose your event in **Which batch (event)?** (otherwise every batch is exported), and click **MC Trade import (Excel)**. The file name includes the batch. Your **Downloads** folder gets **the import file** `GAC-MCTrade-….xlsx` (this is the file you import in MC Trade: template columns only, one row per person), a `…-READ-ME.txt`, a `…-extra-columns.csv` (notes, second emails, rows left out; not for import) and, when some cards update existing MC Trade profiles, `GAC-MCTrade-…-UPDATES.xlsx` (a separate import). Read the READ ME first. **Check against MC Trade (dry run)** on the same page shows UPDATE / CREATE / NEEDS REVIEW per card without changing anything. The header row comes from GAC's template once an admin uploads it (Admin → Settings; saved as `data/mctrade_template.xlsx`).
 
 ![Export](shots/12_export_done.png)
 
 ## Using a phone (optional)
-Phones can scan cards directly with the camera. This needs one extra step on the scanner computer: double-click **`enable-phone-access.command`** / **`.bat`**, then restart the scanner. The phone must be on the same office Wi-Fi; open the address the window shows (it starts with `https://`). Accept the one-time security warning. See DATA-TEAM-GUIDE.md for details.
+Phones can scan cards directly with the camera. Use **Scan cards → Scan with phone** in the scanner and scan the QR code with a phone on the same office Wi-Fi (no certificate or extra step; see docs/PHONE-MODE.md). The old `enable-phone-access` scripts are retired. Under Docker, phone mode doesn't work as shipped (see docs/PHONE-MODE.md).
 
 ## Help
 - **Forgot password:** ask an admin (Admin → Reviewers → Reset password).

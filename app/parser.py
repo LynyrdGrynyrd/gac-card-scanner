@@ -391,8 +391,19 @@ def parse(text: str, meta=None) -> dict:
     vals = [v for v in conf.values() if v is not None]
     f["confidence"] = conf
     f["overall_confidence"] = round(min(sum(vals) / len(vals), min(vals) + 0.25), 2) if vals else 0.0
-    f["needs_review"] = [k for k, v in conf.items() if v is not None and v < 0.6]
+    if not f["first_name"]: f["overall_confidence"] = min(f["overall_confidence"], 0.5)   # part-timer r1: 90 % with no name
+    f["needs_review"] = [k for k, v in conf.items() if v is not None and v < 0.6] + ([] if f["first_name"] else ["name"])
+    _postprocess(f)
     return f
+
+def _postprocess(f):
+    """Spacing around '&' glued by OCR ('Hughes& Partners Law' -> 'Hughes & Partners Law'); 'AT&T', 'R&D' stay as they are."""
+    for k in ("company", "title", "department", "address"):
+        v = f.get(k)
+        if isinstance(v, str) and "&" in v:
+            v = re.sub(r"(?<=[a-z])&(?=\s)", " &", v)          # 'Hughes& Partners'
+            v = re.sub(r"(?<=\s)&(?=[A-Za-z]{2})", "& ", v)     # 'Hughes &Partners'
+            f[k] = re.sub(r"\s{2,}", " ", v)
 
 def _unused_old_calibration(f, conf):
     f["confidence"] = conf

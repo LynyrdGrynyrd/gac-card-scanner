@@ -48,9 +48,10 @@ def test_upload_size_and_count_caps(demo):
 
 def test_exports_are_preview_only(demo):
     c = demo["c"]; ui = demo["ui"]; st = demo["store"]
-    cid = st.all_()[0]["id"]; st.update(cid, status="approved", reviewer="DEMO")
+    card = st.all_()[0]; cid = card["id"]; st.update(cid, status="approved", reviewer="DEMO")
+    b = (ui.meta(cid) or {}).get("batch") or "__none__"   # since r15 a reviewer exports/previews one batch at a time
     for kind in ("xlsx", "csv"):
-        r = c.get(f"/api/export/{kind}?status=approved")
+        r = c.get(f"/api/export/{kind}?status=approved&batch={b}")
         assert r.status_code == 200, r.text
         assert r.headers.get("X-Preview") == "1" and "PREVIEW-" in r.headers["Content-Disposition"]
     assert os.listdir(ui.EXP) == []
