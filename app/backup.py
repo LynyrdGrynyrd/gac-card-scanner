@@ -89,10 +89,10 @@ def restore(path, data=None, db=None):
     man = verify(path)
     lock = os.path.join(data, ".workers.lock")
     if os.path.exists(lock):
-        import fcntl
+        from . import paths
         fd = os.open(lock, os.O_RDWR)
-        try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError: raise RuntimeError("the scanner is still running on this data folder: stop it first")
+        try:
+            if not paths.try_lock(fd): raise RuntimeError("the scanner is still running on this data folder: stop it first")
         finally: os.close(fd)
     aside = data + ".before-restore-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     keep_contacts = [f for f in (os.listdir(data) if os.path.isdir(data) else []) if f.startswith("mctrade_contacts.")]

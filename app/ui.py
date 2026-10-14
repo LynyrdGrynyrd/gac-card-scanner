@@ -2550,11 +2550,10 @@ WORKERS = {"started": False, "lock_fd": None, "why": "not started (module import
 LOCK_PATH = os.path.join(DATA, ".workers.lock")
 def _take_lock(path=None):
     """Non-blocking exclusive flock on data/.workers.lock -> open fd, or None if another process holds it."""
-    import fcntl
     path = path or LOCK_PATH
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: os.close(fd); return None
+    if not paths.try_lock(fd): os.close(fd); return None
+    if os.name == "nt": os.lseek(fd, 1, 0); os.write(fd, f" {os.getpid()}\n".encode()); return fd   # byte 0 is the locked byte on Windows
     os.ftruncate(fd, 0); os.write(fd, f"{os.getpid()}\n".encode()); return fd
 def start_workers():
     """Start upload recovery, the AI double-check worker and the retention loop once. Returns True if this process runs them."""

@@ -13,4 +13,5 @@ rapidocr-onnxruntime>=1.2.3
 zxing-cpp>=2.2
 cryptography>=42
 rapidfuzz>=3.0
+qrcode>=7.4              # phone mode pairing QR code (app/phone.py)
 gender-guesser>=0.4.0   # GPL-3.0: first-name lexicon used by app/parser.py (see THIRD-PARTY-NOTICES.md)

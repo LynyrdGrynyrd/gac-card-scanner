@@ -9,6 +9,7 @@ phonenumbers==9.0.41
 pillow==12.3.0
 pytesseract==0.3.13
 python-multipart==0.0.32
+qrcode==8.2
 rapidfuzz==3.14.6
 rapidocr-onnxruntime==1.2.3
 uvicorn==0.54.0

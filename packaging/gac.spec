@@ -22,7 +22,7 @@ for pkg in ("onnxruntime", "zxingcpp"):
     try: binaries += collect_dynamic_libs(pkg)
     except Exception as e: print("skip libs", pkg, e)
 hidden = (collect_submodules("app") + collect_submodules("uvicorn") + collect_submodules("rapidocr_onnxruntime")
-          + collect_submodules("webview") + ["multipart", "python_multipart", "openpyxl", "cryptography"])
+          + collect_submodules("webview") + collect_submodules("qrcode") + ["multipart", "python_multipart", "openpyxl", "cryptography"])
 a = Analysis([os.path.join(ROOT, "packaging", "launcher.py")], pathex=[ROOT], binaries=binaries, datas=datas,
              hiddenimports=hidden, excludes=["tkinter", "matplotlib", "pytest", "IPython"], noarchive=False)
 pyz = PYZ(a.pure)
