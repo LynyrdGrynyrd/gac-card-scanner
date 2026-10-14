@@ -188,6 +188,14 @@
     <p>Cards are read quickly first. If a card looks uncertain, a slower local AI model (running on this computer only) double-checks it in the background and suggests corrections to names, companies, titles and addresses; nothing changes until a person accepts a suggestion. Cards a person has already edited or decided are never changed.</p>
     <label class="chk"><input type="checkbox" id="sAI"> Double-check uncertain cards with the local AI model</label>
     <p class="small" id="sAIStatus"></p>
+    <div id="aiHelper" class="small" hidden>
+      <p id="aiHelperMsg"></p>
+      <progress id="aiHelperBar" max="100" value="0" hidden style="width:100%"></progress>
+      <p><button type="button" class="btn" id="aiHelperDl">Download AI helper (3 GB)</button>
+         <button type="button" class="btn" id="aiHelperStart" hidden>Start AI helper</button>
+         <button type="button" class="btn" id="aiHelperStop" hidden>Stop AI helper</button>
+         <button type="button" class="btn" id="aiHelperRm" hidden>Remove AI helper</button></p>
+    </div>
     <div class="f"><label for="sAff">MC Trade affiliation code (AffCode1; must already exist in MC Trade exactly)</label><input id="sAff" maxlength="40"></div>
     <div class="f"><label for="sPh">Phone format in the MC Trade file</label><select id="sPh"><option value="gac">330-555-0181 (GAC style)</option><option value="e164">+13305550181 (E.164)</option></select></div>
     <label class="chk"><input type="checkbox" id="sCorr"> Keep corrected cards as test examples (off by default). When on, a <b>copy of the card photo and approved details</b> is saved in bench/corrections to measure accuracy; it follows the photo retention period and is deleted with the card. See the Privacy note.</label>
@@ -224,6 +232,7 @@
 </dialog>
 <div id="toast" role="status" aria-live="polite"></div>
 <footer class="foot"><div class="wrap">Greater Akron Chamber · Card Scanner · <strong>Internal pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a></div></footer>
-<script src="/static/ui/ui.js?v=7"></script>
+<script src="/static/ui/ui.js?v=8"></script>
+<script src="/static/ui/desktop.js?v=1"></script>
 </body>
 </html>

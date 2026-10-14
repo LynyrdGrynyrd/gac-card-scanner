@@ -8,9 +8,12 @@ from . import ui as _ui, auth as _auth
 app = FastAPI(title="GAC Card Scanner (pilot)", docs_url=None, redoc_url=None, openapi_url=None)  # no public API explorer
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 app.include_router(_auth.router)
+from . import ai_helper as _aih
+app.include_router(_aih.router)
 app.include_router(_ui.router)  # also answers the retired legacy URLs (redirect or 410)
 app.middleware("http")(_auth.middleware)  # sign-in required everywhere except /login, /setup, /static, /health
-UP = os.path.join(os.path.dirname(__file__), "..", "data", "uploads"); os.makedirs(UP, exist_ok=True)
+from . import paths
+UP = paths.data("uploads"); os.makedirs(UP, exist_ok=True)
 
 def _ingest(data: bytes, engine: str, ext=".jpg"):
     name = uuid.uuid4().hex + ext
@@ -44,7 +47,7 @@ def _ai_up():
 def health():
     up = _ai_up()
     return {"ok": True, "ai_checker": "online" if up else "offline",
-            **({} if up else {"ai_note": "AI checker offline: start it with start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + "). Scanning still works."})}
+            **({} if up else {"ai_note": "AI checker offline: start it from Admin > Settings > AI helper (desktop app) or start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + "). Scanning still works."})}
 
 def _startup_checks():
     """Warn loudly at startup (console) if a required dependency is missing, so two installs can't silently differ.
@@ -62,7 +65,7 @@ def _ai_banner():
         line = f"AI checker online at {url}" if up else f"AI checker OFFLINE (nothing answers at {url}). Scanning works; the AI double-check is off until start-ai-checker.command runs."
         print("\n" + "=" * 78 + "\n" + line + "\n" + "=" * 78 + "\n", flush=True)
     threading.Thread(target=run, daemon=True).start()
-_startup_checks(); _ai_banner()
+_startup_checks(); _ai_banner(); _aih.autostart()
 from . import demo as _demo
 if _demo.enabled(): _demo.start()
 @app.get("/api/demo")

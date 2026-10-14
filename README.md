@@ -18,7 +18,46 @@ Photograph a pile of business cards after an event, check each one in a clean re
 
 *Screenshots are from the public demo mode with synthetic cards (fictional people, 555 phone numbers).*
 
-## Run locally
+## Download (no terminal needed)
+
+**[⬇ Download the latest version](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest)** — pick the file for your computer:
+
+| Your computer | File to download |
+|---|---|
+| Windows 10 / 11 (64-bit) | `GAC-Card-Scanner-Setup-x.y.z.exe` |
+| Mac with Apple silicon (M1/M2/M3/M4) | `GAC-Card-Scanner-x.y.z-macos-arm64.dmg` |
+| Mac with an Intel processor | `GAC-Card-Scanner-x.y.z-macos-x86_64.dmg` |
+
+The app opens in its own window (no browser needed), runs only on your computer, and includes the card-reading engine (Tesseract). Nothing else to install.
+
+### Windows
+1. Double-click `GAC-Card-Scanner-Setup-x.y.z.exe`.
+2. If a blue **"Windows protected your PC"** box appears, click **More info → Run anyway**. (The installer isn't code-signed yet; this is expected.)
+3. Click through the installer (no administrator rights needed). It adds a Start-menu entry and, if you tick the box, a desktop shortcut. On older Windows 10 it also installs Microsoft's WebView2 component if missing.
+4. Open **GAC Card Scanner**. The first time, create the admin account.
+
+   ![Windows SmartScreen](docs/screenshots/install-windows-smartscreen.png) *(screenshot placeholder)*
+
+To uninstall: Settings → Apps → GAC Card Scanner → Uninstall. Your cards stay in `%LOCALAPPDATA%\GAC Card Scanner` (delete that folder to remove them too).
+
+### macOS
+1. Double-click the `.dmg`, then drag **GAC Card Scanner** onto **Applications**.
+2. The first time only: in Applications, **right-click (Control-click) the app → Open → Open**. (The app isn't notarized by Apple yet.) If macOS only offers *Move to Trash*, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
+3. The scanner opens in its own window. The first time, create the admin account.
+
+   ![macOS Open dialog](docs/screenshots/install-macos-open.png) *(screenshot placeholder)*
+
+Your data lives in `~/Library/Application Support/GAC Card Scanner`. Requires macOS 14 (Sonoma) or newer.
+
+### Optional: AI double-check
+In the app: **Admin → Settings → Download AI helper (3 GB)**. It downloads llama.cpp and the Qwen3-VL-4B model (Apache-2.0) from GitHub/Hugging Face, checks their SHA-256 checksums, and runs them locally next to the app (127.0.0.1:8090). Scanning works fine without it; the AI helper re-reads uncertain cards in the background. A computer with 8 GB+ RAM is recommended.
+
+### Desktop-app menu
+**File → Open in browser** opens the same scanner in your normal browser (useful for printing or if the window misbehaves); **File → Open data folder** shows where your data is kept.
+
+## Developer install
+
+### Run locally (from source)
 ```bash
 sudo apt-get install -y tesseract-ocr        # macOS: brew install tesseract
 git clone <this repo> gac-card-scanner && cd gac-card-scanner
@@ -108,3 +147,6 @@ Files: `app/ocr.py` (engines), `app/parser.py` (fields+confidence), `app/store.p
 ## Credits
 Built on open source; full list with licenses in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md):
 [Tesseract OCR](https://github.com/tesseract-ocr/tesseract), [RapidOCR](https://github.com/RapidAI/RapidOCR) + [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) models, [ONNX Runtime](https://github.com/microsoft/onnxruntime), [OpenCV](https://github.com/opencv/opencv), [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp), [python-phonenumbers](https://github.com/daviddrysdale/python-phonenumbers) (Google libphonenumber), [gender-guesser](https://github.com/lead-ratings/gender-guesser), [RapidFuzz](https://github.com/rapidfuzz/RapidFuzz), [FastAPI](https://github.com/fastapi/fastapi), [Uvicorn](https://github.com/encode/uvicorn), [Pillow](https://github.com/python-pillow/Pillow), [openpyxl](https://foss.heptapod.net/openpyxl/openpyxl), [NumPy](https://github.com/numpy/numpy), [cryptography](https://github.com/pyca/cryptography), [llama.cpp](https://github.com/ggml-org/llama.cpp), [Qwen3-VL](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF) (Apache-2.0), [Lato](https://fonts.google.com/specimen/Lato) and other OFL fonts. Research notes: [RESEARCH.md](RESEARCH.md), [OSS-SURVEY.md](OSS-SURVEY.md).
+
+## Building the installers
+`.github/workflows/release.yml` builds the Windows installer (PyInstaller onedir + bundled UB-Mannheim Tesseract + Inno Setup) and the macOS disk images (PyInstaller .app + Homebrew Tesseract with relocated dylibs, arm64 on macos-14 and x86_64 on macos-15-intel), smoke-tests each bundle (start headless, `/health`, scan `tests/cards/card1_left.jpg`), and attaches them to a GitHub Release when a `v*` tag is pushed. Entry point: `packaging/launcher.py` (pywebview window; `--headless` for CI). Run from source the same way: `pip install pywebview && python packaging/launcher.py`.
