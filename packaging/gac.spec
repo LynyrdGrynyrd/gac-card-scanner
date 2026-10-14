@@ -11,6 +11,8 @@ datas = [(os.path.join(ROOT, "app", "static"), "app/static"),
          (os.path.join(ROOT, "VERSION"), "."),
          (os.path.join(ROOT, "packaging", "icon.png"), "packaging"),
          (os.path.join(ROOT, "LICENSE"), "."), (os.path.join(ROOT, "THIRD-PARTY-NOTICES.md"), ".")]
+if os.path.isfile(os.path.join(ROOT, "COMMIT")):   # written by the release workflow; app/updates.py reads it (no .git in a bundle)
+    datas.append((os.path.join(ROOT, "COMMIT"), "."))
 tess = os.path.join(ROOT, "packaging", "build", "tesseract")
 if os.path.isdir(tess): datas.append((tess, "tesseract"))
 else: print("WARNING: packaging/build/tesseract missing: the bundle will rely on a system Tesseract")

@@ -80,6 +80,12 @@ SEC_HEADERS = {
                                "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(self), microphone=(), geolocation=()"}
+if os.environ.get("GAC_DESKTOP") == "1":
+    # Desktop app (pywebview): its bridge script builds window.pywebview.api with `new Function(...)` (webview/js/api.js), which
+    # script-src 'self' blocks as eval ("Refused to evaluate a string as JavaScript"). Without it, desktop.js sees no
+    # pywebview.api.save_file and exports fall back to a webview download, which pywebview cancels by default. Inline
+    # scripts stay blocked; the server only listens on 127.0.0.1 in the desktop build.
+    SEC_HEADERS["Content-Security-Policy"] = SEC_HEADERS["Content-Security-Policy"].replace("script-src 'self'", "script-src 'self' 'unsafe-eval'", 1)
 UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BODY = 26 * 1024 * 1024   # one photo (25 MB) + form overhead; checked before the body is read
 

@@ -187,7 +187,7 @@ def revoke_all():
 
 # ---------------------------------------------------------------- phone side (LAN server: upload only)
 phone_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-SEC = dict(auth.SEC_HEADERS); SEC["Content-Security-Policy"] = SEC["Content-Security-Policy"].replace("connect-src 'self'", "connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'")
+SEC = dict(auth.SEC_HEADERS); SEC["Content-Security-Policy"] = SEC["Content-Security-Policy"].replace(" 'unsafe-eval'", "").replace("connect-src 'self'", "connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'")
 
 @phone_app.middleware("http")
 async def _guard(request: Request, call_next):

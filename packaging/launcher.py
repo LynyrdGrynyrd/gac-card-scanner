@@ -130,6 +130,9 @@ def main(argv=None):
         from webview.menu import Menu, MenuAction, MenuSeparator
         menu = [Menu("File", [MenuAction("Open in browser", api.open_in_browser), MenuAction("Open data folder", api.open_data_folder),
                               MenuSeparator(), MenuAction("Quit", lambda: api.win and api.win.destroy())])]
+        # pywebview cancels every download unless ALLOW_DOWNLOADS is set (edgechromium on_download_starting, cocoa, qt):
+        # with it, a download the page can't route through desktop.js still gets a native Save dialog instead of vanishing
+        webview.settings["ALLOW_DOWNLOADS"] = True
         api.win = webview.create_window(APP, url, js_api=api, width=1280, height=860, min_size=(900, 600), text_select=True)
         api.win.events.closed += stop_all
         webview.start(menu=menu, icon=os.path.join(base_dir(), "packaging", "icon.png"), private_mode=False,
