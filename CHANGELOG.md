@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased: accuracy on real cards
+## Unreleased: accuracy on real cards, reading fixes, more tests
+### Reading cards
+- An address line with its label in front (**"Visitors and deliveries: 47 N Main St"**, **"Mailing address: PO Box 12"**) keeps its street, and the label no longer ends up in the address. A visitors/deliveries address on a card that also has a main address goes to *Other address*; when it is the card's only address, it is the address.
+- A street number with a misread letter (**"25o8 Jonathan Terrace Ave"**) no longer loses the whole street line; **"P.0. Box"** is read as "P.O. Box".
+- A phone number on the same line as an email address (**"E: mary@jones.com | T: 330-555-0102"**) is no longer dropped.
+- Malformed requests to the scanner's API (wrong value types, ids too large) get a clear error instead of a server error.
+
+### Accuracy and testing
 - **`bench/extract_eval_set.py`** turns the pilot's approved cards into a labelled test set for `bench/eval_bench.py` and prints, per field, how often reviewers had to fix what the scan read and whether the confidence score warned about it. It reads the database only, keeps cards approved unchanged (otherwise the set holds only failures), tags bulk-approved cards as weaker labels, and writes to the same folder as "Keep corrected cards as test examples", so photo retention and delete-on-request also clean its copies.
+- New test layers: property tests for the card reader (Hypothesis), fuzzing of every API endpoint (Schemathesis) and browser tests of scan → review → approve → export (Playwright), all run by CI. `CLAUDE.md` describes the project's rules for AI coding agents.
 
 ## Unreleased: audit fixes, part 3 (structure)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P2 items). Mostly invisible to users; it makes the code easier and safer to change.
