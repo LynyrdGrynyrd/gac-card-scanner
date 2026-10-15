@@ -42,3 +42,18 @@ def test_audit_csv_link_is_routed_in_the_desktop_app():
     html = _src(os.path.join(UI, "index.html"))
     assert re.search(r'<a[^>]*id="aCsv"[^>]*\sdownload[\s>]', html)
     assert "fmt=csv" in _src(os.path.join(UI, "desktop.js"))
+
+def test_every_api_fetch_goes_through_the_shared_auth_handling():
+    # audit 2026-10: dl()/tileExport used raw fetch and skipped call()'s 401 handling; only call(), fetchOk() and the
+    # public /api/auth/state + /health checks may call fetch() directly
+    js = _src(os.path.join(UI, "ui.js"))
+    raw = [ln.strip()[:90] for ln in js.splitlines() if re.search(r"(?<![\w.])fetch\(", ln)]
+    allowed = ("const r = await fetch(u, o)", "const r = await fetch(u, {credentials", "fetch(\"/api/auth/state\"", "fetch(\"/health\")")
+    assert all(any(a in ln for a in allowed) for ln in raw), raw
+    assert "function handleAuth(" in js and js.count("handleAuth(") >= 3
+
+def test_upload_401_pauses_instead_of_failing():
+    js = _src(os.path.join(UI, "ui.js"))
+    assert "x.status === 401" in js and "authPause()" in js and "/api/auth/state" in js
+    assert "data-retry=" in js
+    assert "Please sign in" not in js.split("function upload(")[1].split("function conn(")[0]

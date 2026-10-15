@@ -31,10 +31,22 @@ async function call(u, o = {}) {
   if (ME && uid && uid !== String(ME.id) && !$("#swapWarn")) {   // another tab signed this browser in as someone else
     document.body.insertAdjacentHTML("afterbegin", `<div id="swapWarn" class="alert bad" role="alert">Someone else signed in on this browser in another tab, so your actions would be saved under <b>their name</b>. <a href="/ui">Reload</a> or sign in again.</div>`);
   }
-  if (r.status === 401) { saveDraft(); dirty = false; location.href = "/login?next=" + encodeURIComponent("/ui" + location.hash); throw new Error("Please sign in."); }
+  if (r.status === 401) { const e = new Error(handleAuth(401, j)); e.status = 401; e.data = j || {}; throw e; }
   if (!r.ok) { const e = new Error((j && (j.error || j.detail)) || ("Server error " + r.status)); e.status = r.status; e.data = j || {}; throw e; }
   const sm = o.method === "POST" && u.match(/^\/api\/cards\/(\d+)$/); if (sm) dropDraft(+sm[1]);   // saved: the draft is no longer needed
   return j;
+}
+// audit 2026-10: ONE place for an expired session, used by call(), the downloads (fetchOk) and the uploads. While photos are
+// still waiting to upload, a 401 pauses the uploads (the photos stay in this tab) instead of leaving the page for /login.
+function handleAuth(status, j) {
+  if (status !== 401) return (j && (j.error || j.detail)) || null;
+  if (upPending()) { authPause(); return "Your sign-in expired. Sign in again: the waiting photos upload after that."; }
+  saveDraft(); dirty = false; location.href = "/login?next=" + encodeURIComponent("/ui" + location.hash); return "Please sign in.";
+}
+async function fetchOk(u) {   // audit 2026-10: downloads need the raw Response (a Blob), but errors are handled like call()'s
+  const r = await fetch(u, {credentials: "same-origin"}); if (r.ok) return r;
+  let j = {}; try { j = await r.json(); } catch {}
+  const e = new Error(handleAuth(r.status, j) || r.statusText || ("Server error " + r.status)); e.status = r.status; e.data = j; throw e;
 }
 const post = (u, b) => call(u, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(b)});
 async function busy(btn, label, fn) {
@@ -179,6 +191,26 @@ let B = JSON.parse(SS.batch || "null");   // {id,label,rows:[{key,file,state,msg
 const saveB = () => { if (B) SS.batch = JSON.stringify({...B, rows: B.rows.map(r => ({...r, thumb: undefined, blob: undefined}))}); };
 let BATCHES = []; call("/api/batches").then(b => BATCHES = b).catch(() => {});
 let uploading = 0; const UPCONC = 3, upq = [];
+const upPending = () => !!(upq.length || uploading || (B && B.rows.some(r => r.state === "wait" && r.blob)));
+// audit 2026-10: a 401 while uploading used to mark every photo "Not added: Please sign in" and the files were lost. Now the
+// queue pauses, the photos stay "waiting", one message offers a sign-in in a new tab, and the uploads resume by themselves.
+let AUTH_PAUSED = false, authT = null;
+function authPause() {
+  AUTH_PAUSED = true;
+  let el = $("#authPause"); if (!el) { document.body.insertAdjacentHTML("afterbegin", `<div id="authPause" class="alert bad" role="alert"></div>`); el = $("#authPause"); }
+  const n = B ? B.rows.filter(r => r.state === "wait").length : 0;
+  el.innerHTML = `<b>Your sign-in expired, so uploading is paused.</b> ${n ? plural(n, "photo") + " waiting; nothing is lost. " : ""}Keep this tab open, <a href="/login?next=%2Fui%23upload" target="_blank" rel="noopener">sign in again</a> (opens a new tab), then come back: the upload carries on by itself.`;
+  el.hidden = false; if (!authT) authT = setInterval(authCheck, 3000); renderBatch();
+}
+async function authCheck() {   // runs while this tab is hidden too: the person is signing in in the other tab
+  if (!AUTH_PAUSED) return;
+  let s = null; try { s = await (await fetch("/api/auth/state", {credentials: "same-origin"})).json(); } catch { return; }
+  if (!s || !s.user || !AUTH_PAUSED) return;
+  if (ME && s.user.id !== ME.id) { $("#authPause").innerHTML = `This browser is now signed in as <b>${esc(s.user.display)}</b>, not <b>${esc(ME.display)}</b>, so uploading stays paused (the photos would be saved under their name). Sign in as ${esc(ME.display)} in the other tab.`; return; }
+  AUTH_PAUSED = false; clearInterval(authT); authT = null; $("#authPause").hidden = true;
+  toast("Signed in again: uploading carries on.", 4000); renderBatch(); pumpUploads(); poll();
+}
+addEventListener("focus", () => { if (AUTH_PAUSED) authCheck(); });
 function newBatch() {
   // round 8 (newcomer r8 N2): the batch name is kept exactly as typed (only spaces tidied, control characters and < > dropped);
   // nothing is appended. Your own batch with the same name from the last 12 h is reused; if someone else (or an older batch)
@@ -234,6 +266,7 @@ async function enqueue(files) {
   B.stopped = false; saveB(); renderBatch(); pumpUploads();
 }
 function pumpUploads() {
+  if (AUTH_PAUSED) return;
   while (uploading < UPCONC && upq.length) { const r = upq.shift(); uploading++; upload(r).finally(() => { uploading--; pumpUploads(); }); }
 }
 const ROWB = new WeakMap();   // audit 2026-10 P0-14: row -> the batch it was added to (not whatever batch is current at send time)
@@ -257,7 +290,10 @@ function upload(row, allowDup = false) {
       else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 13: the server may give this batch its own id
       else if (x.status === 409 && j.cancelled) { row.state = "cancel"; row.msg = ""; }
       else if (x.status === 409) { row.state = "dup"; row.msg = j.error; row.dupOf = j.duplicate_of; }
-      else { row.state = "rej"; row.msg = j.error || "Upload failed (" + x.status + ")."; if (x.status === 401) saveB(); }
+      else if (x.status === 401) { row.state = "wait"; row.msg = ""; upq.unshift(row); authPause(); }   // audit 2026-10: kept, sent after signing in
+      else if (x.status === 403 && j.need === "reload" && !row.csrfTry) {   // stale CSRF cookie: any signed-in GET renews it; send once more
+        row.csrfTry = 1; row.state = "wait"; row.msg = ""; call("/api/me").catch(() => {}).finally(() => { upq.unshift(row); pumpUploads(); }); }
+      else { row.state = "rej"; row.msg = j.error || "Upload failed (" + x.status + ")."; row.retry = x.status >= 500 || [403, 408, 429].includes(x.status); }   // audit 2026-10: Retry button
       if (row.stop) cancelJobs([row].concat(bb.rows.filter(r => r.src === row.file)));   // round 19: Cancel pressed while this photo was uploading
       saveB(); renderBatch(); poll(); res();
     };
@@ -294,7 +330,7 @@ function splitRow(row, j, bb = B) {
 let pollT = null;
 async function poll() {
   clearTimeout(pollT);
-  if (!B) return;
+  if (!B || AUTH_PAUSED) return;   // audit 2026-10: resumed by authCheck()
   const live = B.rows.filter(r => ["queued", "reading", "splitting"].includes(r.state) && r.job);
   if (!live.length) return;
   try {
@@ -334,6 +370,8 @@ function rowHTML(r) {
   if (r.state === "splitting" && r.pages) st = esc(`Reading PDF: page ${r.page || 1} of ${r.pages}…`);
   if (r.state === "queued" && r.pdf) st = "PDF in line to be read";
   if (r.msg) st += `<span class="why">${esc(r.msg)}</span>`;
+  if (r.state === "wait" && AUTH_PAUSED) st += `<span class="why">Paused until you sign in again</span>`;
+  if (r.blob && (r.state === "err" || (r.state === "rej" && r.retry))) st += ` <button type="button" class="link" data-retry="${r.key}">Retry</button>`;   // audit 2026-10
   if (r.state === "dup") st += ` <span class="why">${r.dupOf ? `<a href="#review/${r.dupOf}">Open card #${r.dupOf}</a> · ` : ""}${r.blob ? `<button type="button" class="link" data-again="${r.key}">Scan it anyway</button>` : ""}</span>`;
   const tsrc = r.thumb || (r.card && r.card.img ? `/img/${encodeURIComponent(r.card.img)}?w=160` : null);   // round 20: PDF/HEIC cards get the server's thumbnail once read
   const th = tsrc && r.state !== "rej" ? `<img alt="" src="${tsrc}">` : `<span class="thumbph" aria-hidden="true">${r.state === "rej" ? "✕" : "▢"}</span>`;
@@ -357,7 +395,10 @@ function renderBatch() {
   $("#batchLegend").hidden = !fin; $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(B.id)}&s=pending`;
   $("#clearBatch").hidden = fin !== n; $("#cancelBatch").hidden = fin === n || !!B.stopped;
 }
-$("#batchList").addEventListener("click", e => { if (B && !B.t0) B.t0 = Date.now() / 1000; const k = e.target.dataset.again; if (!k) return; const r = B.rows.find(x => x.key === k); r.msg = ""; upload(r, true); });
+$("#batchList").addEventListener("click", e => { if (B && !B.t0) B.t0 = Date.now() / 1000;
+  const rk = e.target.dataset.retry, rr = rk && B && B.rows.find(x => x.key === rk);   // audit 2026-10: send a failed photo again (it is still in this tab)
+  if (rr && rr.blob) { Object.assign(rr, {state: "wait", msg: "", retry: false, job: undefined, tries: 0, csrfTry: 0}); B.stopped = false; B.stopMsg = ""; upq.push(rr); saveB(); renderBatch(); pumpUploads(); return; }
+  const k = e.target.dataset.again; if (!k) return; const r = B.rows.find(x => x.key === k); r.msg = ""; upload(r, true); });
 // round 19: Cancel stops the cards still waiting (not yet uploaded or in line to be read); cards already added stay.
 async function cancelJobs(rows) {
   const ids = rows.filter(r => ["queued", "splitting", "reading"].includes(r.state) && r.job).map(r => r.job); if (!ids.length) return 0;
@@ -1304,7 +1345,7 @@ async function exportInfo() {
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
 }
 async function dl(url) {   // fetch + save, so several files can be downloaded from one click
-  const r = await fetch(url); if (!r.ok) { let j = {}; try { j = await r.json(); } catch {} throw new Error(j.error || r.statusText); }
+  const r = await fetchOk(url);
   const nm = (r.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "file", a = document.createElement("a");
   a.href = URL.createObjectURL(await r.blob()); a.download = decodeURIComponent(nm); document.body.append(a); a.click(); a.remove(); return r;
 }
@@ -1381,13 +1422,12 @@ async function tileExport(t) {
   t.setAttribute("aria-busy", "true");
   try {
     const sv = seenV ? Object.entries(seenV).map(([k, x]) => `&seen_${k}=${encodeURIComponent(x)}`).join("") : "";
-    const res = await fetch(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
-    if (!res.ok) { let j = {}; try { j = await res.json(); } catch {} throw new Error(j.error || res.statusText); }
+    const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
     const name = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "export." + kind, n = res.headers.get("X-Card-Count");
     const blob = await res.blob(), a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove();
     $("#exDone").hidden = false;
     const eid = res.headers.get("X-Export-Id"), comp = (res.headers.get("X-Companions") || "").split(",").filter(Boolean);
-    for (const c of comp) { const r2 = await fetch(`/api/exports/${eid}/companion/${c}`); if (!r2.ok) continue;
+    for (const c of comp) { let r2; try { r2 = await fetchOk(`/api/exports/${eid}/companion/${c}`); } catch (x) { if (x.status === 401) throw x; continue; }
       const nm = (r2.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || c, a2 = document.createElement("a");
       a2.href = URL.createObjectURL(await r2.blob()); a2.download = decodeURIComponent(nm); document.body.append(a2); a2.click(); a2.remove(); }
     $("#exDone").className = "alert ok"; $("#exDone").hidden = false;
