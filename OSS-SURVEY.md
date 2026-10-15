@@ -3,6 +3,8 @@ Surveyed 2026-10-13. Stars / last push / license come from the GitHub REST API o
 **Fit** = how well it matches this project (CPU-only, local, Python, small office pilot). **Rec** = adopt / try / skip.
 Benchmark numbers come from `bench/` (26 real cards × 10 fields, plus 48 synth2 cards). Full logs are in ITERATIONS.md, iteration 10.
 
+> **Re-checked 2026-10-15** on `main` after the audit fixes: see [Re-check 2026-10-15](#re-check-2026-10-15) at the end. One recommendation changed: RapidOCR 3.x with its new default **PP-OCRv6 small** models is worth adopting after a real-card check.
+
 **License policy (from the user, 2026-10-13):** this is an internal tool, so GPL/AGPL components are acceptable but are flagged ⛔ here and in THIRD-PARTY-NOTICES.md.
 **License key:** ✅ permissive (MIT/Apache/BSD/Unlicense). ⚠️ weak copyleft (LGPL/MPL): OK as an unmodified dependency, but keep notices. ⛔ strong copyleft (GPL/AGPL), no license, or non-commercial model weights: do not bundle.
 
@@ -146,3 +148,61 @@ Real set = 26 cards × 10 fields. Baseline in the project venv: 222/260 rules-on
 | splink / dedupe (comparison levels, order-insensitive name comparison, an explainable score) | token-sorted name similarity, separate email, phone, name and org evidence with a `why` list; RapidFuzz scorers | `app/mctrade_sync.py` (`match`) |
 | Label Studio / paperless-ngx review UX | already present: per-field source badges, confidence-driven "needs attention", keyboard review, undo. Next to borrow: Label Studio's *ground-truth export* of reviewer-approved cards for benchmarking, and paperless-ngx's "suggestions you can accept" pattern (the AI-suggested diff already follows it) | recommendation (`bench/corrections` is the hook) |
 | splink (next step) | when a full MC Trade export is available: blocking on email domain / last-name initial, then probabilistic matching | recommendation |
+
+## Re-check 2026-10-15
+Re-run on `main` (cb01302, after the audit's P0–P2 fixes) with the data in this repository only: the 26-card real set is
+not in the repo, so every number below is **synthetic** and needs confirming on real cards before anything ships.
+Two extra held-out sets were generated with `tests/gen_synth2.py` unchanged except the seed (2027 → "synth3", 4242 →
+"synth4", 48 cards each, not committed). Each RapidOCR row is compared with the same venv's unmodified baseline, which
+matched the project venv exactly (108 / 467 / 446 / 447).
+
+**Finding 1: synth2 overstates accuracy.** The same generator with fresh seeds scores **446 and 447/480** on `main`
+against **467** on synth2: the rules are partly tuned to synth2's exact cards. Treat synth2 as a development set.
+
+| Candidate | tests/cards | synth2 | synth3 (held-out) | synth4 (held-out) | Time | Decision |
+|---|---|---|---|---|---|---|
+| baseline: rapidocr-onnxruntime 1.2.3 (PP-OCRv4) | 108/108 | 467/480 | 446 | 447 | median 4.4 s/card | — |
+| **rapidocr 3.10.0, default PP-OCRv6 small det+rec** | 108 | **476** (+9) | **464** (+18) | **464** (+17) | median 5.9 s/card | **adopt after a real-card check** |
+| rapidocr 3.10.0, PP-OCRv6 tiny | — | 464 (−3) | 453 (+7) | 446 (−1) | 3.8 s/card | no (mixed) |
+| rapidocr 3.10.0, PP-OCRv5 mobile (+ EN rec) | — | 453 (−14) / 460 (−7) | — | — | 5.0 s/card | skip (confirms the survey) |
+| usaddress 0.5.16 (trim, city rescue, street rescue) | 0 | 0 | 0 / +4* | 0 | <1 ms | skip (*rule designed on synth3's misses) |
+| probablepeople 0.5.6 (re-split, guard, fill when unsure) | 0 | 0 / −2 | 0 / −2 | 0 | <1 ms | skip |
+| GLiNER small v2.1 (company spans) | — | company 0 | 0 | 0 | ~2 s/card + torch | skip |
+
+On the held-out sets PP-OCRv6 small mostly gains last names (42→46, 45→48), addresses (40→46, 43→44), phones and emails.
+Calibration improves too: wrong fields drop from 27 to 14 (synth3) and 23 to 13 (synth4).
+
+**Finding 2: the pinned OCR package is dormant.** `rapidocr-onnxruntime` 1.2.3 is from 2023-03-11; the 1.2.x line ended
+2023-07 and the package at 1.4.4 (2025-01-17, `Requires-Python <3.13`). `rapidocr` 3.x is the maintained successor
+(3.10.0, 2026-10-08, Apache-2.0). Things a migration must handle:
+- `rapidocr` depends on **opencv-python-headless**, which must not be installed next to `opencv-python`
+  (`requirements.txt` already warns: they overwrite each other's `cv2/`). Pick one.
+- New dependencies: omegaconf, requests, colorlog, tqdm (+ urllib3, certifi, charset-normalizer). The wheel bundles the
+  PP-OCRv6 small models (32 MB vs 14 MB today).
+- Non-default models are **downloaded at run time from modelscope.cn** into site-packages, and parallel first runs
+  raced (`INVALID_PROTOBUF`). Ship only the bundled default (or pre-fetch at build time) so the offline, local-only
+  promise holds; check the desktop bundle (PyInstaller) picks up the model files.
+- Call shape: `rapidocr.RapidOCR(params=...)(img)` returns an object (`boxes`, `txts`, `scores`), not 1.2.x's
+  `(result, elapse)` tuple; `app/ocr.py` `_rapid()` and its callers need a small adapter.
+- Re-measure speed on the office laptop (+1.5 s/card here); `Det.limit_side_len` may recover some of it (untested).
+
+**Finding 3: Splink 5.0.0 roughly ties the current matcher**, so not now. Test: a synthetic 10,000-row CRM (4,183
+companies, shared main lines, 10% no email) and ~2,200 perturbed cards in 15 categories (typos, swapped names,
+nicknames, new email domain, missing phone; plus colleague and same-name near-misses). At match probability ≥ 0.9 Splink
+has precision 0.92 / recall 0.91, against 0.94 / 0.90 for `mctrade_sync.Index.match` (leaving out the same-full-name
+cases it flags on purpose, the MC Trade First+Last rule). Splink finds more "nickname + new email domain + no phone"
+matches but wrongly matches colleagues with the same last name at the same company. It adds ~234 MB of dependencies and
+~16 s of model training per batch, against ~5 ms per card today. Cheaper idea (untested): a nickname table and a
+"same last name + same email domain, different mailbox = different person" rule in the current matcher.
+Re-run on the real MC Trade export before deciding.
+
+**Parser bugs found while probing** (not fixed here):
+- "Visitors and deliveries: 47 N Main St" + "Akron, OH 44308" → address is only `Akron, OH 44308` (the street with an
+  inline label is dropped); "Mailing address: PO Box 12" keeps the label in the address.
+- An OCR letter/digit mix-up in the street number ("25o8 Jonathan Terrace Ave") drops the whole street line
+  (3 of 96 held-out cards).
+- "P.0. Box" (zero for O) is not normalised (3 of 96 held-out cards).
+
+**Freshness (PyPI, 2026-10-15):** usaddress 0.5.16 (2025-08-07, MIT); probablepeople 0.5.6 (2024-10-29, MIT; §3's
+2025-05-15 is its last push, not a release); rapidocr 3.10.0 (2026-10-08, Apache-2.0); rapidocr-onnxruntime 1.4.4
+(2025-01-17, dormant); splink 5.0.0 (2026-09-28, MIT, new major version); gliner 0.2.29 (2026-09-08, Apache-2.0).
