@@ -9,7 +9,11 @@ import argparse, base64, json, mimetypes, os, secrets, socket, sys, threading, t
 
 APP = "GAC Card Scanner"
 if not getattr(sys, "frozen", False): sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-IMG_EXT = (".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff", ".bmp")
+IMG_EXT = (".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff", ".bmp", ".pdf")   # audit 2026-10: PDFs too (the app reads them)
+MIME = {".heic": "image/heic", ".heif": "image/heif", ".pdf": "application/pdf"}   # mimetypes doesn't know HEIC everywhere
+# audit 2026-10: a folder pick is read into memory and sent to the page as base64, so it is capped
+PICK_MAX_FILES, PICK_MAX_FILE, PICK_MAX_TOTAL = 500, 25 * 1024 * 1024, 300 * 1024 * 1024
+LOG_MAX = 5 * 1024 * 1024
 
 def base_dir():
     return getattr(sys, "_MEIPASS", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -36,9 +40,16 @@ def setup_env():
 def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
 
+def _rotate_log(path, limit=LOG_MAX):
+    """audit 2026-10: app.log grew forever. At start, a log over ~5 MB becomes app.log.1 (replacing the older one)."""
+    try:
+        if os.path.getsize(path) > limit: os.replace(path, path + ".1")
+    except OSError: pass   # no log yet, or another copy still has it open (Windows)
+
 def _log_to_file(d):
     if sys.stdout is None or sys.stderr is None or getattr(sys, "frozen", False):
-        f = open(os.path.join(d, "app.log"), "a", buffering=1, encoding="utf-8"); sys.stdout = sys.stderr = f
+        p = os.path.join(d, "app.log"); _rotate_log(p)
+        f = open(p, "a", buffering=1, encoding="utf-8"); sys.stdout = sys.stderr = f
 
 INSTANCE = lambda d: os.path.join(d, "instance.json")
 def _ping_existing(d):
@@ -50,7 +61,8 @@ def _ping_existing(d):
     except Exception: return False
 
 def _dlg(kind):
-    import webview
+    try: import webview
+    except ImportError: return kind   # no webview (tests): the dialog kind is only passed through
     fd = getattr(webview, "FileDialog", None)
     return getattr(fd, kind) if fd is not None else getattr(webview, kind + "_DIALOG")
 
@@ -60,30 +72,26 @@ class Api:
         self.url, self.d, self.win, self.last_dir = url, d, None, None
         self._lock = threading.Lock()
     def save_file(self, name, b64data):
+        """Save one file through a native Save dialog. audit 2026-10: returns what really happened, so the page reports it:
+        {"path": saved path} | {"cancelled": True} | {"error": message} (each with "name")."""
         # v0.2.1: one Save dialog at a time (an export saves 3 files back to back; parallel dialogs lost the companions),
         # each opening in the folder the previous one was saved to
         with self._lock:
-            name = os.path.basename(name or "download")
+            name = os.path.basename(name or "download") or "download"
             start = self.last_dir if self.last_dir and os.path.isdir(self.last_dir) else os.path.expanduser("~/Downloads")
-            r = self.win.create_file_dialog(_dlg('SAVE'), directory=start, save_filename=name)
-            if not r: return ""
-            path = r if isinstance(r, str) else r[0]
-            self.last_dir = os.path.dirname(path)
-            with open(path, "wb") as f: f.write(base64.b64decode(b64data))
-            return path
+            try:
+                r = self.win.create_file_dialog(_dlg('SAVE'), directory=start, save_filename=name)
+                if not r: return {"cancelled": True, "name": name}
+                path = r if isinstance(r, str) else r[0]
+                with open(path, "wb") as f: f.write(base64.b64decode(b64data))
+                self.last_dir = os.path.dirname(path)
+                return {"path": path, "name": name}
+            except Exception as e:
+                return {"error": str(e) or e.__class__.__name__, "name": name}
     def pick_folder(self):
-        import webview
         r = self.win.create_file_dialog(_dlg('FOLDER'))
-        if not r: return []
-        root = r if isinstance(r, str) else r[0]; out = []
-        for dp, _, fs in os.walk(root):
-            for n in sorted(fs):
-                if n.lower().endswith(IMG_EXT) and not n.startswith("."):
-                    p = os.path.join(dp, n)
-                    if os.path.getsize(p) <= 25 * 1024 * 1024:
-                        out.append({"name": n, "type": mimetypes.guess_type(n)[0] or "image/jpeg", "b64": base64.b64encode(open(p, "rb").read()).decode()})
-                if len(out) >= 500: return out
-        return out
+        if not r: return {"files": []}
+        return collect_folder(r if isinstance(r, str) else r[0])
     def open_in_browser(self): webbrowser.open(self.url)
     def open_url(self, path):   # v0.2.1: Help PDF links open in the system browser (webviews can't show/download PDFs reliably)
         from urllib.parse import urlsplit
@@ -91,6 +99,29 @@ class Api:
         if not path.startswith("/static/") or ".." in path or "//" in path: return False
         u = urlsplit(self.url); webbrowser.open(f"{u.scheme}://{u.netloc}{path}"); return True
     def open_data_folder(self): _open_folder(self.d)
+
+def collect_folder(root, max_files=PICK_MAX_FILES, max_file=PICK_MAX_FILE, max_total=PICK_MAX_TOTAL):
+    """Photos/PDFs under root (recursive, hidden files and folders skipped) as [{name, type, b64}] for the page.
+    audit 2026-10: everything is base64'd in memory, so files over max_file are skipped (counted in "skipped_big") and the
+    pick stops at max_files files or max_total bytes ("capped": the page asks the person to pick fewer)."""
+    out, big, total, capped = [], 0, 0, False
+    for dp, dns, fs in os.walk(root):
+        dns[:] = sorted(x for x in dns if not x.startswith("."))
+        for n in sorted(fs):
+            if n.startswith(".") or not n.lower().endswith(IMG_EXT): continue
+            p = os.path.join(dp, n)
+            try: size = os.path.getsize(p)
+            except OSError: continue
+            if size > max_file: big += 1; continue
+            if len(out) >= max_files or total + size > max_total: capped = True; break
+            try:
+                with open(p, "rb") as f: data = f.read()
+            except OSError: continue
+            total += size
+            out.append({"name": n, "type": MIME.get(os.path.splitext(n)[1].lower()) or mimetypes.guess_type(n)[0] or "image/jpeg",
+                        "b64": base64.b64encode(data).decode()})
+        if capped: break
+    return {"files": out, "skipped_big": big, "capped": capped, "bytes": total, "max_mb": max_total // (1024 * 1024), "max_file_mb": max_file // (1024 * 1024)}
 
 def main(argv=None):
     a = argparse.ArgumentParser(); a.add_argument("--headless", action="store_true"); a.add_argument("--port", type=int)
