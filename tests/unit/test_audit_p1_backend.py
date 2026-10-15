@@ -124,7 +124,7 @@ def test_failed_contacts_write_keeps_the_old_file(env, monkeypatch):
         if str(p).endswith(".uploading"): raise OSError("disk full")
         return real_open(p, *a, **k)
     monkeypatch.setattr(os, "open", failing_open)
-    monkeypatch.setattr(ui, "_check_contacts", lambda data, ext: ([{"x": 1}], 1, 0))
+    monkeypatch.setattr(ui._admin_files, "_check_contacts", lambda data, ext: ([{"x": 1}], 1, 0))
     v = env["adm"].get("/api/admin/mctrade-contacts").json().get("version", "")
     with pytest.raises(OSError):
         env["adm"].post(f"/api/admin/mctrade-contacts?expected_version={v}", files={"image": ("c.csv", b"a,b\n1,2\n", "text/csv")})
@@ -252,3 +252,9 @@ def test_crm_index_matches_full_scan():
         f = {"first_name": random.choice(first + [""]), "last_name": random.choice(last), "company": random.choice(["Acme", "Summit Bank", ""]),
              "emails": random.choice([[], [f"p{k % 40}@acme.com"]]), "phones": random.choice([[], [{"number": f"330-555-{k % 50:04d}"}]])}
         assert ix.match(f) == ms.match(f, rows), f
+
+
+@pytest.mark.skipif(__import__("sys").platform != "darwin", reason="macOS-only reading (libproc); Linux uses /proc, Windows psapi")
+def test_rss_on_macos_comes_from_libproc():
+    from app import reader
+    assert reader._rss_darwin(os.getpid()) > 10, "proc_pidinfo reading failed (would silently fall back to the slow ps reading)"

@@ -1,6 +1,6 @@
 """Local logins for the pilot: named reviewers, PBKDF2-hashed passwords, admin role, cookie sessions.
 No external identity provider; everything lives in the same SQLite DB (tables users, sessions, settings, auth_log)."""
-import os, re, time, hmac, hashlib, secrets, json, threading
+import os, re, time, hmac, hashlib, secrets, threading
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from . import store, demo
@@ -176,6 +176,10 @@ async def middleware(request: Request, call_next):
     if p.startswith("/api/"): resp.headers["X-GAC-Asset"] = asset_version()   # round 9: an open tab sees the app was updated
     ctype = resp.headers.get("content-type", "")
     if p.startswith("/api/") or ctype.startswith("text/html"): resp.headers["Cache-Control"] = "no-store"   # Back after sign-out must not show the app
+    elif p.startswith("/static/ui/") and p.endswith((".js", ".css")):
+        # audit 2026-10 P2: the page is ES modules; an imported module's URL carries no ?v= (the CSP blocks an inline import
+        # map), so every module is revalidated on each load (ETag/Last-Modified -> 304) instead of being cached by heuristic
+        resp.headers["Cache-Control"] = "no-cache"
     tok = request.cookies.get(COOKIE)
     if tok and getattr(request.state, "user", None) and request.cookies.get(CSRF_COOKIE) != csrf_for(tok):
         resp.set_cookie(CSRF_COOKIE, csrf_for(tok), httponly=False, samesite="strict", secure=request.url.scheme == "https", max_age=SESSION_HOURS * 3600, path="/")
@@ -216,22 +220,25 @@ def login_page():
 
 _AV = {}
 def asset_version():
-    """Round 9 (reviewer r9): short fingerprint of the page code (ui.js, ui.css, login.js). Asset URLs carry it, so a new
-    version is never served from an old cache, and the API sends it so an open tab can reload itself."""
-    import hashlib
-    fs = [os.path.join(STATIC, "ui", n) for n in ("ui.js", "ui.css", "login.js", "desktop.js")]   # audit 2026-10: desktop.js too
-    key = tuple(os.path.getmtime(f) if os.path.isfile(f) else 0 for f in fs)
+    """Round 9 (reviewer r9): short fingerprint of the page code. Asset URLs carry it, so a new version is never served
+    from an old cache, and the API sends it so an open tab can reload itself.
+    audit 2026-10 P2: every script under static/ui (the ES modules in core/, ui/, views/, main.js, desktop.js, login.js) plus
+    ui.css, so a change in any module changes the version."""
+    import glob, hashlib
+    root = os.path.join(STATIC, "ui")
+    fs = sorted(set(glob.glob(os.path.join(root, "**", "*.js"), recursive=True)) | {os.path.join(root, "ui.css"), os.path.join(root, "login.js")})
+    key = tuple((f, os.path.getmtime(f)) if os.path.isfile(f) else (f, 0) for f in fs)
     if _AV.get("key") != key:
         h = hashlib.sha1()
         for f in fs:
-            if os.path.isfile(f): h.update(open(f, "rb").read())
+            if os.path.isfile(f): h.update(os.path.relpath(f, root).encode() + b"\0" + open(f, "rb").read())
         _AV.update(key=key, v=h.hexdigest()[:10])
     return _AV["v"]
 def versioned_html(path):
     import re as _re
     from fastapi.responses import HTMLResponse
     html = open(path, encoding="utf-8").read(); v = asset_version()
-    html = _re.sub(r'(/static/ui/(?:ui\.js|ui\.css|login\.js|desktop\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
+    html = _re.sub(r'(/static/ui/(?:main\.js|ui\.css|login\.js|desktop\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 @router.get("/setup")

@@ -5,7 +5,7 @@ Admin-only routes (the auth middleware guards /api/admin/*):
   POST /api/admin/ai-helper/download start the ~3 GB download in the background
   POST /api/admin/ai-helper/start | /stop
   POST /api/admin/ai-helper/remove   delete the downloaded files"""
-import hashlib, json, os, platform, secrets, shutil, subprocess, sys, tarfile, threading, time, urllib.request, zipfile
+import hashlib, os, platform, secrets, shutil, subprocess, tarfile, threading, urllib.request, zipfile
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from . import paths

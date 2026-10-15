@@ -23,7 +23,7 @@ flowchart LR
 | `app/auth.py` | users (PBKDF2-SHA256, 310k iterations), sessions (random token, SHA-256 stored, 12 h sliding), roles, settings, auth_log, first-run setup | setup allowed only from loopback unless `GAC_ALLOW_REMOTE_SETUP=1` |
 | `app/admin.py` | CLI: `python -m app.admin create-admin|reset-password|list` | for lockouts / Docker |
 | `app/ui.py` | all /ui JSON APIs: async scan jobs, cards, validation, `attention()`, duplicates (CRM sample + in-queue + photo hash), bulk, archive, **undo** (row snapshots in `actions`), exports + history, retention purge, audit | single source of truth for "needs attention" |
-| `app/static/ui/` | `index.html`, `ui.js` (no framework, no build step), `ui.css`, `login.html`, `privacy.html` | |
+| `app/static/ui/` | `index.html`, `main.js` + ES modules in `core/`, `ui/`, `views/` (no framework, no build step), `ui.css`, `login.html`, `privacy.html` | |
 | `app/pipeline.py`, `ocr.py`, `parser.py`, `qr.py`, `vlm.py`, `merge.py` | recognition pipeline | owned by the accuracy work; UI only calls `pipeline.scan()` and `qr.decode/parse_vcard` (for per-field source) |
 | `app/store.py`, `export.py`, `mctrade_sync.py` | card table, CSV/vCard, duplicate scoring + dry-run plan | `mctrade_sync.match()` is reused for in-queue duplicates |
 | `app/make_cert.py` | self-signed HTTPS cert with LAN IP SANs | |

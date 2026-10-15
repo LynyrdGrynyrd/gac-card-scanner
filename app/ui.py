@@ -2,11 +2,11 @@
 so every path goes through the same checks). /api/scan contract untouched.
 UI state (batches, hashes, archive, audit history, duplicate decisions, undo snapshots, exports, field sources)
 lives in extra tables in the same SQLite DB so store.py stays unchanged."""
-import asyncio, copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, sqlite3, html as _html
+import asyncio, copy, io, os, re, json, time, uuid, hashlib, datetime, threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import HTMLResponse, FileResponse, Response, RedirectResponse, JSONResponse
-from . import store, export, mctrade_sync, auth, crm_source
+from fastapi.responses import Response, JSONResponse
+from . import store, mctrade_sync, auth, crm_source
 
 router = APIRouter()
 
@@ -34,6 +34,7 @@ STATIC = os.path.join(os.path.dirname(__file__), "static")
 from . import paths
 DATA = paths.DATA
 UP = os.path.join(DATA, "uploads"); EXP = os.path.join(DATA, "exports")
+
 INBOX = os.path.join(DATA, "inbox")   # accepted-but-not-yet-read uploads; survives a crash/restart and is re-queued at start
 DONE = os.path.join(DATA, "jobs_done")   # small result records so an open browser can still look a job up after a restart (24 h)
 for _d in (UP, EXP, INBOX, DONE): os.makedirs(_d, exist_ok=True)
@@ -175,7 +176,6 @@ def email_syntax(e):
     tld = labels[-1]
     if not (tld.isalpha() and len(tld) >= 2) and not tld.lower().startswith("xn--"): return "the domain ending (.com, .org …) is not valid"
     return None
-ANY_EMAIL = re.compile(r"^\w(?:[\w.%+'-]*[\w%'-])?@\w(?:[\w.-]*\w)?$")   # kept for old callers; hard_errors uses email_syntax
 ZW = re.compile("[\u200b-\u200f\u2060-\u2064\ufeff\u202a-\u202e\u00ad]")
 def clean_note(n):
     """Round 10 (skeptic R9-3): invisible characters are removed from the note, and a note that a spreadsheet could run as
@@ -275,7 +275,6 @@ def garbled_errors(f):
             if m: err[k] = f"Address “{v[:100]}” has “{m.group(0)}” in it: a misread. Check the photo and fix it."
     if "company" not in err and f.get("company"):   # round 22 (newcomer r21): a gibberish company ('Higneniscdaie CoffeeCa') blocks
         try:
-            from . import plausibility as _pl
             if company_gibberish(f.get("company")):   # round 23 (r22 reviewer/newcomer/datamanager): 'CoffeeCo.' is run-together, not gibberish
                 err["company"] = f"Company “{f.get('company')}” looks misread. Check the photo."
         except Exception: pass
@@ -297,7 +296,6 @@ def garbled_errors(f):
         err["website"] = f"Website “{w}” looks misread. Check the photo and fix it, or clear it."
     elif w:
         d = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; d = d[4:] if d.startswith("www.") else d
-        from difflib import SequenceMatcher as _SMg
         for e in ems:
             ed = str(e).lower().rsplit("@", 1)[-1].strip()
             if ed == d or ed.endswith("." + d) or d.endswith("." + ed): continue
@@ -441,6 +439,7 @@ def _as_row(c):
 # every card is cached until any card, status or look-alike-relevant meta field changes (one fingerprint per request).
 _DK = ("batch", "sha256", "archived", "kept_apart", "dup_resolution", "crm_action")
 _DC = {"refs": {}, "ctx": None}; _DCL = threading.Lock()
+
 def _bkeys(f, m):
     k = set(); al = lambda x: re.sub(r"[^a-z0-9@]", "", (x or "").lower())
     for p_ in f.get("phones") or []:
@@ -481,6 +480,7 @@ def _cands(c, others, metas, ctx):
         for o in ctx["idx"].get(k_, ()): seen[o["id"]] = o
     return [o for o in others if o["id"] in seen]   # same order as before
 _CRM_IX = {"rows": None, "ix": None}; _CRM_IXL = threading.Lock()
+
 def _crm_index(rows):
     """One mctrade_sync.Index per contacts list object (the list is cached by crm_source until the file changes)."""
     with _CRM_IXL:
@@ -767,96 +767,6 @@ def enrich(c, cards, metas, full=False, names=None):
         for x in d["crm"]: x["why_text"] = _why(x["why"])
     return out
 
-# ---------------------------------------------------------------- pages (legacy URLs now lead to /ui)
-@router.get("/ui")
-def ui(request: Request):
-    from . import demo
-    if demo.enabled(): return demo.page(os.path.join(STATIC, "ui", "index.html"))
-    r = auth.versioned_html(os.path.join(STATIC, "ui", "index.html")); r.headers["Cache-Control"] = "no-store"
-    u = getattr(request.state, "user", None)
-    if not u or u.get("role") != "admin": r = HTMLResponse(strip_admin(r.body.decode()), headers={"Cache-Control": "no-store"})
-    return r
-
-def strip_admin(html):
-    """Round 15 (part-timer r14): a reviewer's page has no admin tables, labels or settings in its code. Only empty, hidden
-    placeholders with the same ids stay, so the page script can still start."""
-    m = re.search(r"<!--ADMIN-BEGIN-->(.*?)<!--ADMIN-END-->", html, re.S)
-    if not m: return html
-    ids = re.findall(r'\bid="([^"]+)"', m.group(1))
-    return html[:m.start()] + '<div hidden aria-hidden="true">' + "".join(f'<span id="{i}"></span>' for i in ids) + "</div>" + html[m.end():]
-@router.get("/app")
-def app_alias(): return RedirectResponse("/ui", 307)
-@router.get("/")
-def legacy_home(): return RedirectResponse("/ui#upload", 307)
-@router.get("/queue")
-def legacy_queue(status: str = ""): return RedirectResponse(f"/ui#queue?s={status if status in ('pending','approved','rejected') else ''}", 307)
-@router.get("/card/{cid}")
-def legacy_card(cid: CardId): return RedirectResponse(f"/ui#review/{cid}", 307)
-@router.post("/card/{cid}")
-def legacy_card_post(cid: CardId):
-    return JSONResponse({"error": "This old page was retired. Review cards at /ui so validation, duplicate and audit checks apply.", "use": f"/ui#review/{cid}"}, 410)
-@router.post("/scan")
-def legacy_scan(): return JSONResponse({"error": "This old upload form was retired. Scan cards at /ui.", "use": "/ui#upload"}, 410)
-@router.get("/sync/dry-run")
-@router.get("/sync/dry-run/{cid}")
-def legacy_sync(cid: str = ""): return JSONResponse({"error": "Retired. Use Export → MC Trade import (Excel)."}, 410)
-@router.get("/export.csv")
-def legacy_csv(status: str = "approved"): return RedirectResponse(f"/ui#export", 307)
-@router.get("/export.vcf")
-def legacy_vcf(status: str = "approved"): return RedirectResponse(f"/ui#export", 307)
-@router.get("/export.xlsx")
-def legacy_xlsx(status: str = "approved"): return RedirectResponse(f"/ui#export", 307)
-@router.get("/privacy")
-def privacy(): return FileResponse(os.path.join(STATIC, "ui", "privacy.html"), headers={"Cache-Control": "no-cache"})
-
-@router.get("/img/{name}")
-def img(name: str, w: int = 0):
-    if not name or "\x00" in name or len(name) > 200 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
-        raise HTTPException(404, "No such photo")
-    p = os.path.join(UP, os.path.basename(name))
-    if not os.path.isfile(p):
-        try: drop_thumbs(name)
-        except OSError: raise HTTPException(404, "No such photo")
-        return Response(PLACEHOLDER, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
-    if w:   # small cached thumbnail for the queue list instead of the full-resolution original
-        t = _thumb(p, w)
-        if t: return FileResponse(t, media_type="image/webp", headers={"Cache-Control": "private, max-age=3600"})
-    return FileResponse(p, headers={"Cache-Control": "private, max-age=3600"})
-THUMBS = os.path.join(DATA, "thumbs"); os.makedirs(THUMBS, exist_ok=True)
-THUMB_SIZES = (160, 320)
-def _thumb(p, w):
-    """Return the path of a cached WebP thumbnail (width snapped to THUMB_SIZES), building it on first use. None on failure."""
-    w = min(THUMB_SIZES, key=lambda s: abs(s - w)); base = os.path.basename(p)
-    t = os.path.join(THUMBS, f"{base}.{w}.webp")
-    try:
-        if os.path.isfile(t) and os.path.getmtime(t) >= os.path.getmtime(p): return t
-        from PIL import Image, ImageOps
-        Image.MAX_IMAGE_PIXELS = MAX_PIXELS
-        with Image.open(p, formats=FORMATS) as im:
-            im = ImageOps.exif_transpose(im); im.draft("RGB", (w * 2, w * 2)); im = im.convert("RGB"); im.thumbnail((w, w * 2))
-            tmp = t + ".tmp"; im.save(tmp, "WEBP", quality=70, method=4); os.replace(tmp, t)
-        return t
-    except Exception:
-        return None
-def remove_photo(name):
-    """Audit 2026-10 F08: delete an uploaded photo AND every thumbnail made from it. Safe to repeat (missing files are fine).
-    Use this wherever a front or back photo is deleted (retention, permanent delete, orphan clean-up)."""
-    if not name: return
-    try: os.remove(os.path.join(UP, os.path.basename(name)))
-    except FileNotFoundError: pass
-    drop_thumbs(name)
-def drop_thumbs(name):
-    """Delete cached thumbnails of a photo (called wherever the photo itself is deleted)."""
-    if not name: return
-    base = os.path.basename(name)
-    for s_ in THUMB_SIZES:
-        try: os.remove(os.path.join(THUMBS, f"{base}.{s_}.webp"))
-        except FileNotFoundError: pass
-PLACEHOLDER = b"""<svg xmlns="http://www.w3.org/2000/svg" width="420" height="240" viewBox="0 0 420 240"><rect width="420" height="240" fill="#eee"/><text x="210" y="112" text-anchor="middle" font-family="Lato,sans-serif" font-size="18" fill="#555">Photo deleted</text><text x="210" y="140" text-anchor="middle" font-family="Lato,sans-serif" font-size="13" fill="#777">(retention policy)</text></svg>"""
-
-@router.get("/api/me")
-def me(request: Request): return auth.pub(request.state.user)
-
 # ---------------------------------------------------------------- async scan jobs
 SCAN_WORKERS = max(1, int(os.environ.get("SCAN_WORKERS", "1")))
 POOL = ThreadPoolExecutor(max_workers=SCAN_WORKERS)
@@ -954,7 +864,7 @@ QR_KEYS = ("first_name", "last_name", "title", "company", "department", "emails"
 class _Cancelled(Exception): pass
 def ingest(data, engine, ext, jid=None, meta_kw=None):
     """Image -> card using the shared pipeline (QR/vCard decode + OCR + parser). Returns (card_id, field_sources)."""
-    from . import pipeline, qr
+    from . import qr
     name = uuid.uuid4().hex + ext
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
     r = scan_limited(data, None if engine in (None, "", "auto", "standard", "tesseract") else engine, use_vlm=False, **({"key": jid} if jid else {}))
@@ -1031,6 +941,7 @@ def _cancelled_since(who, batch, t0=None):
     return time.time() - ct < 8 or (t0 is not None and ct >= t0 - 0.5)
 
 BATCH_OWNER = {}; _BATCH_LOCK = threading.Lock()
+
 def batch_for(batch, label, who=""):
     """Round 13 (part-timer r5 HIGH): two people who started a batch in the same second got the SAME batch id, so one
     batch showed the other's cards (export dialog, queue filter). A batch id belongs to the first person (and name) that
@@ -1321,6 +1232,7 @@ def list_jobs(request: Request, ids: str = "", batch: str = ""):
 import queue as _queue, itertools as _it
 AI_Q: "_queue.PriorityQueue" = _queue.PriorityQueue()   # (priority, seq, cid, why): 0 = asked for by a person, 1 = background
 AI_SEQ = _it.count(); AI_WAIT: dict = {}                  # cid -> (priority, seq) while waiting
+
 BACK_BUSY = threading.Event()   # round 15 (reviewer r14): back-of-card OCR pauses the AI queue so it is not stuck ~5 min behind
 AI_TIMES: list = []                                       # recent run times (s), for the progress estimate
 AI_RUNNING: dict = {}
@@ -1524,7 +1436,7 @@ def ai_check_now(cid: CardId, request: Request):
 
 @router.post("/api/cards/{cid}/ai-decide")
 def ai_decide(cid: CardId, request: Request, body: dict = Body(...)):
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _ai_decide(cid, request, body)
         finally: _seal()
 def _ai_decide(cid, request, body):
@@ -1624,7 +1536,7 @@ def confirm_correct(cid: CardId, request: Request, body: dict = Body(...)):
     says 'This is correct' for one field: that exact saved value is accepted from then on, and the audit says who did it."""
     # Round 22 (skeptic r21 M1/M2, mctrade-admin r21 M1/M2): body {field, value, version}; archived cards and stale versions
     # are refused; the exact value the reviewer saw must still be the saved one; admin-only for email/website/address.
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         c = store.get(cid)
         if not c: return JSONResponse({"error": "Card not found."}, 404)
         if meta(cid).get("archived"): return _archived_409(cid)
@@ -1670,163 +1582,6 @@ def ai_skip_waiting(request: Request):
         set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"note": "AI check skipped by an admin (busy event)"}))
     auth.alog(request.state.user["username"], f"skipped {n} waiting AI {'check' if n == 1 else 'checks'} (busy event)")
     return {"ok": True, "skipped": n}
-
-@router.post("/api/admin/cards/{cid}/delete")
-def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
-    """Removal request: delete the card, its photo, metadata, history and any undo snapshots holding its data.
-    Exported files already downloaded are outside the app; stored export copies containing it are deleted too."""
-    if body.get("confirm") != cid: return JSONResponse({"error": "Confirm by sending {\"confirm\": <card id>}."}, 422)
-    # audit 2026-10 P0-5: under WRITE_LOCK (a save that already passed its version check can't write merged values back),
-    # database first and in ONE transaction together with its audit rows, files after the commit, VACUUM last and optional
-    with WRITE_LOCK: return _hard_delete(cid, request.state.user)
-
-TOMBSTONES = os.path.join(DATA, "deleted_cards.json")
-def _tombstones():
-    try:
-        with open(TOMBSTONES) as fh: return {int(k): v for k, v in json.load(fh).items()}
-    except (FileNotFoundError, ValueError): return {}
-def _add_tombstone(cid, created=None):
-    """Audit 2026-10 P1 (F07): remember every card deleted on request, so restoring an older backup can't bring it back
-    (backup.restore keeps this file; apply_tombstones() deletes such cards again at the next start)."""
-    t = _tombstones(); t[cid] = {"deleted": time.time(), "created": created}; tmp = TOMBSTONES + ".tmp"
-    with open(tmp, "w") as fh: json.dump({str(k): v for k, v in t.items()}, fh)
-    os.replace(tmp, TOMBSTONES)
-def apply_tombstones():
-    # the card's scan time must match too, so a tombstone can never hit a different card that got the same number
-    gone = [cid for cid, v in _tombstones().items() if (c := store.get(cid)) and (not isinstance(v, dict) or v.get("created") in (None, c["created"]))]
-    for cid in gone:
-        with WRITE_LOCK: _hard_delete(cid, {"initials": "SYS", "username": "restore"})
-    if gone: auth.alog("restore", f"deleted {len(gone)} card(s) again that had been deleted on request before the restored backup was made: " + ", ".join(f"#{i}" for i in gone))
-    return gone
-
-def _hard_delete(cid, user):
-    c = store.get(cid)
-    if not c: raise HTTPException(404, "Card not found")
-    photos = [c.get("image"), meta(cid).get("back_image")]
-    if os.path.isdir(CORR):
-        for fn in os.listdir(CORR):
-            if fn.startswith(f"card{cid}_"): os.remove(os.path.join(CORR, fn))
-        gp = os.path.join(CORR, "gt.json")
-        if os.path.isfile(gp):
-            with open(gp) as fh: gt = json.load(fh)
-            with open(gp, "w") as fh: json.dump({k: v for k, v in gt.items() if not k.startswith(f"card{cid}_")}, fh, indent=1)
-    removed_exports = 0; removed_merged = 0; export_files = []
-    x0 = db(); x0.execute("PRAGMA secure_delete=ON")   # overwrite freed pages so the text can't be recovered from the file
-    with x0 as x:
-        x.execute("DELETE FROM cards WHERE id=?", (cid,)); x.execute("DELETE FROM card_meta WHERE card_id=?", (cid,))
-        # Audit rows are KEPT for accountability (who scanned/edited/approved/exported it and when); only the personal
-        # data inside them is removed. Statuses, reviewer initials, time and card number stay (PRIVACY-NOTE.md).
-        for h in x.execute("SELECT id, action, detail FROM card_history WHERE card_id=?", (cid,)).fetchall():
-            x.execute("UPDATE card_history SET detail=? WHERE id=?", (json.dumps(_redact(h["action"], h["detail"])), h["id"]))
-        targets = {}   # card that received this card's details -> (merge time, values copied)
-        for h in x.execute("SELECT id, card_id, ts, action, detail FROM card_history WHERE action IN ('merged_from','back_added')").fetchall():
-            try: dd = json.loads(h["detail"] or "{}")
-            except Exception: continue
-            if isinstance(dd, dict) and h["action"] == "merged_from" and dd.get("card") == cid and dd.get("added"):
-                removed_merged += _unmerge(x, h["card_id"], dd["added"], cid, dd.get("replaced") or {})        # the contact details the merge copied over
-                pv = targets.get(h["card_id"]); targets[h["card_id"]] = (min(h["ts"], pv[0]) if pv else h["ts"], (pv[1] if pv else []) + _vals(dd["added"]))
-            elif isinstance(dd, dict) and dd.get("from_card") == cid: targets.setdefault(h["card_id"], (h["ts"], []))
-            if isinstance(dd, dict) and (dd.get("card") == cid or dd.get("from_card") == cid):   # details copied from it
-                x.execute("UPDATE card_history SET detail=? WHERE id=?", (json.dumps({"card": cid, "added": {}, "removed_on_request": True}), h["id"]))
-        # chained merges (A -> B, then B -> C): C received A's values through B, so it is a target too
-        added_by = {tid: list(v[1]) for tid, v in targets.items()}
-        frontier = list(targets)
-        while frontier:
-            b_ = frontier.pop()
-            for h in x.execute("SELECT card_id, ts, detail FROM card_history WHERE action='merged_from' AND ts>=?", (targets[b_][0],)).fetchall():
-                try: dd = json.loads(h["detail"] or "{}")
-                except Exception: continue
-                if not (isinstance(dd, dict) and dd.get("card") == b_ and dd.get("added")) or h["card_id"] in targets or h["card_id"] == cid: continue
-                carried = {k: v for k, v in dd["added"].items() if set(_vals({k: v})) & set(added_by[b_])}
-                if carried: removed_merged += _unmerge(x, h["card_id"], carried, b_)
-                targets[h["card_id"]] = (h["ts"], added_by[b_]); added_by[h["card_id"]] = added_by[b_]; frontier.append(h["card_id"])
-        for tid in targets:   # a stored AI suggestion of a target can quote merged values: drop it
-            x.execute("UPDATE card_meta SET ai_detail=NULL WHERE card_id=? AND ai_detail IS NOT NULL", (tid,))
-        # the merge target's LATER history rows (edits, back-to-pending problems) can quote the merged values: blank them
-        for tid, (since, vals) in targets.items():
-            for h in x.execute("SELECT id, detail FROM card_history WHERE card_id=? AND ts>=? AND action IN ('edited','back_to_pending','decision')", (tid, since)).fetchall():
-                det = h["detail"] or ""; new = det
-                for v in vals:
-                    if v and len(v) >= 3: new = new.replace(json.dumps(v)[1:-1], "[removed on request]")
-                if new != det: x.execute("UPDATE card_history SET detail=? WHERE id=?", (new, h["id"]))
-        # undo snapshots: of this card, and of any card its details were merged into (they hold copies of those details)
-        for a in x.execute("SELECT id, snapshot FROM actions").fetchall():
-            if any(sn["card"]["id"] == cid or sn["card"]["id"] in targets for sn in json.loads(a["snapshot"] or "[]")): x.execute("DELETE FROM actions WHERE id=?", (a["id"],))
-        for e in x.execute("SELECT id, ts, stored, card_ids FROM exports WHERE stored IS NOT NULL").fetchall():
-            ids_ = json.loads(e["card_ids"] or "[]")
-            if cid in ids_ or any(t in ids_ and e["ts"] >= targets[t][0] for t in targets):   # also exports of a merge target made after the merge
-                ep = os.path.join(EXP, e["stored"]); export_files += [ep] + [ep + "." + n for n in COMPANION]
-                x.execute("UPDATE exports SET stored=NULL WHERE id=?", (e["id"],)); removed_exports += 1
-        # the audit rows are part of the same transaction: no delete without its record, no record without the delete
-        x.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
-                  (cid, time.time(), user["initials"], "deleted_on_request", None, None, json.dumps({"export_copies": removed_exports, "merged_removed": removed_merged})))
-        x.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), user["username"],
-                  f"deleted card #{cid} on request (photo, details; history kept without personal data; {removed_exports} stored export file(s))", None))
-    _add_tombstone(cid, c.get("created"))
-    for ph in photos: remove_photo(ph)   # F08: front and back, with their thumbnails
-    for q in export_files:
-        try: os.remove(q)
-        except FileNotFoundError: pass
-    try: x0.execute("VACUUM")   # compacts the file so freed pages are gone; best-effort (the delete is already committed)
-    except sqlite3.OperationalError as e: print("VACUUM after delete skipped:", e, flush=True)
-    finally: x0.close()
-    for fn in os.listdir(DONE):   # job records (they hold the original file name)
-        p_ = os.path.join(DONE, fn)
-        try:
-            with open(p_) as fh: jd = json.load(fh)
-            if jd.get("card_id") == cid: os.remove(p_)
-        except Exception: pass
-    with JLOCK:
-        for jid in [k for k, j in JOBS.items() if (j.get("card") or {}).get("id") == cid]: JOBS.pop(jid, None)
-    AI_WAIT.pop(cid, None)
-    return {"deleted": cid, "export_copies_deleted": removed_exports, "merged_details_removed": removed_merged}
-
-def _redact(action, detail):
-    """What is left of a history row's detail after a removal request: no names, contact details, file names or notes."""
-    try: d = json.loads(detail) if detail else None
-    except Exception: d = None
-    out = {"redacted": True}
-    if isinstance(d, dict):
-        if action == "edited": out["fields"] = sorted(d.keys())
-        if action == "decision": out.update({k: True for k in ("bulk",) if d.get(k)}); out.update({"override": True} if d.get("override") else {})
-        if action == "merged_from" and d.get("card"): out["card"] = d["card"]
-        if action == "duplicate_kept_both" and d.get("cards"): out["cards"] = d["cards"]
-        if action in ("exported", "redownloaded") and d.get("export_id"): out["export_id"] = d["export_id"]
-        if action == "exported" and d.get("file"): out["file"] = d["file"]   # export file names hold no personal data
-        for k in ("why", "undid", "seconds", "after_days"):
-            if k in d and action != "back_to_pending": out[k] = d[k]
-    elif action == "mc_trade_choice": out["choice"] = d
-    return out
-
-def _vals(added):
-    out = []
-    for k, v in (added or {}).items():
-        if k == "phones":   # also the reformatted forms a later edit/export may show (330-555-0181, +13305550181, digits)
-            from . import mctrade_export as _mx
-            for p in v:
-                n_ = p.get("number") or ""; out += [n_, _mx.phone(n_), _mx.phone(n_, "e164"), _digits(n_)]
-        elif isinstance(v, list): out += [str(e) for e in v]
-        else: out.append(str(v))
-    return out
-
-def _unmerge(x, tid, added, cid, replaced=None):
-    """Remove from card tid the values a merge copied in from a card that is being deleted on request."""
-    r = x.execute("SELECT fields, note FROM cards WHERE id=?", (tid,)).fetchone()
-    if not r: return 0
-    f = json.loads(r["fields"]); n = 0
-    for k, v in added.items():
-        if k == "note":
-            nt = (r["note"] or "").replace(f" | From #{cid}: {v}", "").replace(f"From #{cid}: {v}", "").strip(" |")
-            x.execute("UPDATE cards SET note=? WHERE id=?", (nt, tid)); n += 1
-        elif k == "phones":
-            gone = {_digits(p.get("number")) for p in v}; before = len(f.get("phones") or [])
-            f["phones"] = [p for p in f.get("phones") or [] if _digits(p.get("number")) not in gone]; n += before - len(f["phones"])
-        elif isinstance(v, list):
-            before = len(f.get(k) or []); f[k] = [e for e in f.get(k) or [] if e not in v]; n += before - len(f[k])
-            if isinstance((replaced or {}).get(k), list): f[k] = list((replaced or {})[k]) + f[k]   # round 9: misread emails the merge replaced
-        elif f.get(k) == v: f[k] = (replaced or {}).get(k, ""); n += 1   # round 8: a merge may have replaced a flagged value
-    x.execute("UPDATE cards SET fields=? WHERE id=?", (json.dumps(f), tid))
-    return n
 
 @router.get("/api/ai/status")
 def ai_status():
@@ -1963,7 +1718,7 @@ def _archived_409(cid):
 def update(cid: CardId, request: Request, body: dict = Body(...)):
     """body: card_id, version (required), fields?, status?, note?, override_reason?, confirm_redecide?, dup_resolution?,
        merge_into?, crm_action?, confirm_cross_batch?. The reviewer is always the signed-in user."""
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _update(cid, request, body, internal=False)
         finally: _seal()
 
@@ -1999,9 +1754,6 @@ def _update(cid, request, body, internal=False):
     if not internal:
         vp = _version_problem(c, body.get("version"), cid)
         if vp is not None: return vp
-        _ver_seen = body.get("version")   # round 15 (reviewer r14): remember what we checked; never succeed if it drifted
-    else:
-        _ver_seen = None
     ka = body.get("keep_apart")   # skeptic R9-5: keep_apart:true used to crash (500)
     if ka not in (None, False, "", "all") and not (isinstance(ka, list) and all(str(x).isdigit() for x in ka)):
         return JSONResponse({"error": "keep_apart must be \"all\" or a list of card numbers.", "need": "fix"}, 422)
@@ -2156,11 +1908,7 @@ def _update(cid, request, body, internal=False):
     if st and st != c["status"]:
         log(cid, rv, "decision", c["status"], st, {"override": body.get("override_reason")} if body.get("override_reason") else None)
     if not internal: _ai_settle(cid, saved=True)
-    out = card(cid)
-    # round 15 (reviewer r14): a stale version must never report success (even if WRITE_LOCK raced)
-    if not internal and _ver_seen is not None and body.get("version") != _ver_seen:
-        return JSONResponse({"error": f"Card #{cid} changed since you opened it. Nothing was saved. Reload it, check, and save again.",
-                             "need": "stale", "version": card_version(store.get(cid) or c)}, 409)
+    out = card(cid)   # (audit 2026-10 P2: a never-firing "stale after save" check was removed; the check under WRITE_LOCK above is the real one)
     if not st and changes: out["save_problems"] = validate(f) | hard_errors(f)   # saved, but tell the person what still blocks approval
     if moved: out["notice"] = "This approved card now has problems, so it was moved back to pending: " + "; ".join(validate(f).values())
     return out
@@ -2411,7 +2159,7 @@ def attach_back(cid, data, ext, initials, confirm_other_person=False, user=None)
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
     # audit 2026-10: a replaced back photo is no longer deleted here (Undo restores the old one and needs the file); it is
     # unreferenced from now on, so the retention clean-up removes it with its thumbnails as an orphan
-    with WRITE_LOCK: return _attach_back_write(cid, c, r, name, initials, user)
+    with WRITE_LOCK, store.tx(): return _attach_back_write(cid, c, r, name, initials, user)
 
 from . import parser as _P
 SITE_TLDS = _P.KNOWN_TLDS | set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
@@ -2486,7 +2234,7 @@ def _other_person(f, b):
 def bulk(request: Request, body: dict = Body(...)):
     for k_ in ("confirm_cross_batch", "confirm_redecide"):   # round 11 (skeptic R10-2): only a real true confirms ("no" is not yes)
         if k_ in body: body[k_] = body[k_] is True
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _bulk(request, body)
         finally: _seal()
 def _bulk(request, body):
@@ -2573,7 +2321,7 @@ def archive(request: Request, body: dict = Body(...)):
         ids = [c["id"] for c in store.all_(None)]
     elif b == "__none__": ids = [r[0] for r in db().execute("SELECT c.id FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL")]
     else: ids = [r[0] for r in db().execute("SELECT card_id FROM card_meta WHERE batch=?", (b,))]
-    with WRITE_LOCK:   # audit 2026-10 P1: like every other card change (snapshot, write, seal as one step)
+    with WRITE_LOCK, store.tx():   # audit 2026-10 P1: like every other card change (snapshot, write, seal as one step)
         ids = [i for i in ids if not meta(i).get("archived")]
         try:
             if ids: snapshot(ids, user, f"Archive {len(ids)} {_s(len(ids), 'card')}")
@@ -2650,588 +2398,6 @@ def undo(request: Request, body: dict = Body(default={})):
         out["kept_later_changes"] = conflicts
         out["notice"] = "Some values were changed after that action, so they were kept: " + "; ".join(f"#{i}: {', '.join(v)}" for i, v in conflicts.items())
     return out
-
-# ---------------------------------------------------------------- exports (reviewer, duplicate guard, history)
-XCOLS = ["IndFirstName", "IndLastName", "IndTitle", "OrgName", "IndEmail", "IndEmail2", "IndPhone", "IndCellPhone", "IndFax",
-         "WebAddress", "Address", "AffCode1"]
-MORE = ["Credentials", "Department", "OtherAddress", "AllEmails", "AllPhones", "Note"]
-AUDIT = ["ScanCardID", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "Check"]
-FILTERS = {"approved_new": "approved, not yet exported", "approved": "all approved", "all": "all cards", "pending": "pending only", "rejected": "rejected only"}
-
-def _export_set(status, batch=""):
-    cs, metas = _active()
-    mm = lambda c: metas.get(c["id"]) or {}
-    if status == "approved_new": sel = [c for c in cs if c["status"] == "approved" and (not mm(c).get("exported") or mm(c).get("reexport"))]
-    else: sel = [c for c in cs if status == "all" or c["status"] == status]
-    if batch: sel = [c for c in sel if (mm(c).get("batch") or "__none__") == batch]
-    probs = []
-    if batch:   # a batch export is only blocked by look-alikes inside the same batch; other people's batches don't block it
-        inb = {c["id"] for c in cs if (mm(c).get("batch") or "__none__") == batch}
-    for c in sel:   # all batches: look-alikes anywhere in the active queue (pending ones too)
-        d = dupes(c, cs, metas)
-        if batch: d["open"] = [x for x in d["open"] if x["card_id"] in inb]
-        # round 15 (reviewer r14): rejected look-alikes stay as review hints but never block an export
-        clash = [x["card_id"] for x in d["open"] if (store.get(x["card_id"]) or {}).get("status") != "rejected"]
-        if clash: probs.append({"id": c["id"], "with": clash, "strong": [x["card_id"] for x in d["open"] if x.get("strong") and (store.get(x["card_id"]) or {}).get("status") != "rejected"],
-                                "batch": mm(c).get("batch_label") or mm(c).get("batch") or ""})
-    return sel, metas, probs
-
-ADMIN_ONLY_FILTERS = ("all", "pending")
-REVIEWER_FILTERS = ("approved_new", "approved")      # anything else (rejected, any free text) is admin-only
-def _filter_refused(status, user):
-    if user["role"] == "admin": return status not in FILTERS and status != "rejected"
-    return status not in REVIEWER_FILTERS
-
-PLAINNUM = re.compile(r"[+-]\d+(?:\.\d+)?"); HANDLE = re.compile(r"@[A-Za-z0-9_.]{1,40}(?:\s+@[A-Za-z0-9_.]{1,40})*")
-NUMBERISH = re.compile(r"[+-][\d\s().-]*\d[\d\s().-]*(?:\s*(?:x|ext\.?|extension|#)\s*\d+)?", re.I)
-def safe_cell(v):
-    """CSV formula-injection guard. A leading ' is added ONLY when a spreadsheet would evaluate the text: it starts with
-    = or @ or TAB/CR, or with + / - followed by something that is not a plain phone number or number
-    ('+1 330-555-0181' and '-5' stay as they are; '+SUM(1)' and '-2+3' get the '). XLSX cells are always typed as text,
-    so the Excel file needs (and gets) no prefix at all."""
-    if not isinstance(v, str) or not v: return v
-    if HANDLE.fullmatch(v): return " " + v      # '@gachamber' (social handle): a leading space keeps it text without a stray '
-    if v[0] in "=@\t\r": return "'" + v
-    if v[0] in "+-":
-        if PLAINNUM.fullmatch(v): return v          # '-5', '+3.5': a number either way, nothing changes
-        if NUMBERISH.fullmatch(v) and re.search(r"[\s()]", v) and not re.search(r"\d\s+[+-]\s*\d|\s[+-]\s", v): return v   # '+1 330-555-0181' stays; '+1 -1' is arithmetic
-        return "'" + v                              # '+1-330-555-0182', '+1-1', '+SUM(1)': Excel WOULD calculate it
-    return v
-
-def _when(t): return datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else ""
-def _slug(s, n=40): return re.sub(r"[^A-Za-z0-9]+", "-", s or "").strip("-")[:n].strip("-")
-def _bname(label):
-    """Batch name for file names. Round 8: names are stored as typed; labels from before round 8 had ' · <date/time> · <initials>'
-    appended by the page, and only that old suffix is dropped."""
-    return re.sub(r"(?: · [^·]*\d{1,2}:\d{2}\s*[AP]M)(?: · [A-Z]{1,4})?$", "", label or "")
-def _fname(kind, status, ext, batch_label=""):
-    tag = {"approved_new": "new", "approved": "approved", "all": "all", "pending": "pending"}.get(status, _slug(status))
-    if batch_label: tag += "-" + _slug(_bname(batch_label), 28)
-    kind = {"contacts-for-MC-Trade": "MCTrade"}.get(kind, kind)
-    fn = f"GAC-{kind}-{tag}-{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}.{ext}"
-    # round 15 (manager r14 M-1): two exports never share a file name ("-2", "-3" ... when the name was used before)
-    try:
-        used = {r[0] for r in db().execute("SELECT filename FROM exports WHERE filename LIKE ?", (fn.rsplit(".", 1)[0] + "%",))}
-    except Exception: used = set()
-    n = 2; base, dot = fn.rsplit(".", 1)
-    while fn in used: fn = f"{base}-{n}.{dot}"; n += 1
-    return fn
-def plural(n, one, many=None): return f"{n} {one if n == 1 else (many or one + 's')}"
-def ids3(ids, k=3):
-    """Round 20: '#4, #9, #12 and 7 more' (never a wall of ids)."""
-    ids = list(ids); h = ", ".join("#" + str(i) for i in ids[:k])
-    return h + (f" and {len(ids) - k} more" if len(ids) > k else "")
-
-def same_names(sel, contacts_from=None):
-    """Round 15 (mctrade r14 M1): rows of one export that share a first + last name with another row of the export or with
-    an MC Trade contact (real export only). MC Trade's import may treat same first+last as one duplicate: review first."""
-    by = {}
-    for c in sel:
-        n = _nm(c["fields"])
-        if n and " " in n: by.setdefault(n, []).append(c["id"])
-    out = [{"name": n.title(), "cards": ids, "with": "export"} for n, ids in by.items() if len(ids) > 1]
-    if contacts_from is not None:   # round 20: the MC Trade match looks at every exported card, the 'twice' check at file rows
-        by = {}
-        for c in contacts_from:
-            n = _nm(c["fields"])
-            if n and " " in n: by.setdefault(n, []).append(c["id"])
-    rows = crm_source.real()
-    if rows:
-        have = {}
-        for r in rows:
-            n = re.sub(r"\s+", " ", (r.get("name") or f"{r.get('first_name','')} {r.get('last_name','')}").strip().lower())
-            if n: have.setdefault(n, []).append(str(r.get("profile_id") or r.get("id") or ""))
-        for n, ids in by.items():
-            if n in have: out.append({"name": n.title(), "cards": ids, "with": "contacts", "profiles": have[n][:5]})
-    return out
-
-@router.get("/api/export/check")
-def export_check(request: Request, status: str = "approved_new", batch: str = ""):
-    if _filter_refused(status, request.state.user):
-        return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
-    sel, metas, probs = _export_set(status, batch)
-    flagged = [c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or validate(c["fields"])]
-    ok_batches = []
-    if probs and not batch:   # all batches is blocked: say which single batches can be exported right now
-        for b in sorted({(metas.get(c["id"]) or {}).get("batch") or "__none__" for c in sel}):
-            s2, m2, p2 = _export_set(status, b)
-            if s2 and not p2: ok_batches.append({"batch": b, "label": (m2.get(s2[0]["id"]) or {}).get("batch_label") or b, "count": len(s2)})
-    cs_, metas_ = _active()
-    pend = [{"id": c["id"], "name": f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)"}
-            for c in cs_ if c["status"] == "pending" and (not batch or ((metas_.get(c["id"]) or {}).get("batch") or "__none__") == batch)]
-    return {"count": len(sel), "duplicates": probs, "flagged": flagged, "same_names": same_names(sel), "ok_batches": ok_batches, "pending": pend[:200], "pending_count": len(pend),
-            "cards": [{"id": c["id"], "name": f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip()} for c in sel[:300]],
-            "admin_only": _filter_refused(status, request.state.user), "versions": export_versions(sel)}
-
-def strict_profile_id(c, existing=None):
-    """MC Trade Profile ID for an 'update existing' card, ONLY when certain (round 6, R3-8): the card's email matches the
-    profile exactly, or the exact same name + the same phone with a high score. Two different certain candidates, or
-    anything weaker (e.g. a similar name + a shared office line) -> None, and the card goes to review."""
-    sure = []
-    existing = existing if existing is not None else crm_source.real()
-    if existing is None: return None      # round 7: never a Profile ID from SAMPLE data
-    for m_ in _crm_index(existing).match(c["fields"]):
-        exact_name = mctrade_sync._nname(m_["name"]) == mctrade_sync._nname(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}")
-        if "email exact" in m_["why"] or (exact_name and "phone exact" in m_["why"] and m_["score"] >= 0.5): sure.append(m_["profile_id"])
-    sure = list(dict.fromkeys(sure))
-    return sure[0] if len(sure) == 1 else None
-def exact_email_profile(c, existing=None):
-    """Profile ID of an existing MC Trade profile with exactly this card's email (create-new cards: would duplicate it)."""
-    existing = existing if existing is not None else crm_source.real()
-    if existing is None: return None
-    hits = list(dict.fromkeys(m_["profile_id"] for m_ in _crm_index(existing).match(c["fields"]) if "email exact" in m_["why"]))
-    return hits[0] if hits else None
-
-def crm_look(c, existing=None):
-    """Round 8: everything classify() needs about one card vs the REAL MC Trade contacts (see mctrade_export.classify)."""
-    existing = existing if existing is not None else crm_source.real()
-    if existing is None: return {}
-    f = c["fields"]; nm = mctrade_sync._nname(f"{f.get('first_name','')} {f.get('last_name','')}")
-    byid = _crm_index(existing).byid
-    cem = {e.strip().lower() for e in f.get("emails") or [] if (e or "").strip()}
-    email, strong, name = [], [], []
-    for m_ in _crm_index(existing).match(f):
-        pid = str(m_["profile_id"]); exact = bool(nm) and mctrade_sync._nname(m_["name"]) == nm
-        if "email exact" in m_["why"]: email.append(pid); strong.append(pid)
-        elif exact and ("phone exact" in m_["why"] or any(w.startswith("org~") for w in m_["why"])): strong.append(pid)
-        elif exact: name.append(pid)
-    email, strong, name = (list(dict.fromkeys(x)) for x in (email, strong, name))
-    sure = None if len(email) > 1 else strict_profile_id(c, existing)
-    pe = ((byid.get(str(sure)) or {}).get("email") or "").strip().lower() if sure else ""
-    return {"email": email, "strong": strong, "name": name, "sure": sure,
-            # round 11 (mctrade-r7 F1): the UPDATES row writes the card's FIRST email; any difference from the profile's email
-            # holds the card back (a match on the card's second email would otherwise overwrite the profile email)
-            "email_differs": bool(sure and pe and (f.get("emails") or [""])[0].strip().lower() not in ("", pe))}
-
-def _note(c):
-    """Note as exported: a stale 'Duplicate of #N (details merged)' on a card that is no longer rejected is dropped."""
-    n = c.get("note") or ""
-    return STALE_DUP.sub("", n).strip(" |") if c.get("status") != "rejected" else n
-def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
-    def flag(c):
-        m = metas.get(c["id"]) or {}; ov = _ov(m); errs = validate(c["fields"]); out = []
-        if ov: out.append(f"APPROVED ANYWAY by {ov.get('by')}: {ov.get('reason')}")
-        if errs: out.append("CHECK: " + "; ".join(errs.values()))
-        out += confirmed_lines(c["fields"])   # round 22: hard-check overrides are visible to the importer
-        xb = db().execute("SELECT detail FROM card_history WHERE card_id=? AND action='cross_batch_confirmed' ORDER BY id DESC LIMIT 1", (c["id"],)).fetchone()
-        if xb:
-            try: oth = (json.loads(xb[0] or "{}") or {}).get("cards") or []
-            except Exception: oth = []
-            out.append("Also in another batch: approved over a look-alike" + (" (" + ", ".join(f"#{o}" for o in oth) + ")" if oth else "") + ": check for a double import")
-        return " | ".join(out)
-    def aud(c):
-        m = metas.get(c["id"]) or {}
-        return [c["id"], c.get("reviewer") or "", _when(c.get("decided")), m.get("batch_label") or "",
-                {"update_existing": "update existing", "create_new": "create new"}.get(m.get("crm_action"), "create new (no MC Trade match)" if c["status"] == "approved" else ""), flag(c)]   # round 13 (newcomer r11 #6): never blank for an exported new profile
-    def more(c):
-        f = c["fields"]
-        return [f.get("credentials") or "", f.get("department") or "", f.get("other_address") or "",
-                "; ".join(f.get("emails") or []), "; ".join(f"{p.get('type')}: {p.get('number')}" for p in f.get("phones") or []), _note(c)]
-    if kind == "csv":
-        b = io.StringIO(); w = csv.writer(b)
-        w.writerow(export.COLS + ["credentials", "department", "other_address", "all_emails", "all_phones", "note",
-                                  "reviewed_by", "decided_at", "batch", "mc_trade_action", "needs_attention"])
-        for c in sel:
-            r = export._flat(c); r["social"] = r["social"]; a = aud(c); w.writerow([safe_cell(x) for x in [r[k] for k in export.COLS] + more(c) + a[1:]])
-        return ("\ufeff" + b.getvalue()).encode(), "text/csv", _fname("contacts", status, "csv", batch_label)   # BOM: Excel opens UTF-8 correctly
-    if kind == "vcf":
-        return export.to_vcard(sel).encode(), "text/vcard", _fname("contacts", status, "vcf", batch_label)
-    if kind == "xlsx":   # MC Trade import file: template columns only, one sheet, one row per person (see mctrade_export.py)
-        from openpyxl import Workbook
-        from . import mctrade_export as mx
-        aff = auth.get_setting("mctrade_affcode") or ""; style = auth.get_setting("phone_format") or "gac"
-        def _kept_pair(a, b_): return b_ in _kept(metas.get(a) or {}) or a in _kept(metas.get(b_) or {})
-        _real = crm_source.real(); _hint_rows, _ = crm_source.rows_for_hints()
-        def _hint(c):
-            m_ = _crm_index(_hint_rows).match(c["fields"])
-            return f"{m_[0]['name']} ({m_[0]['organization']})" if m_ else None
-        res = mx.build(sel, aff, style, hard_errors, kept=_kept_pair, confirmed=lambda f_: list(valid_confirmations(f_)), crm_look=lambda c: crm_look(c, _real),
-                       crm_real=_real is not None, crm_hint=_hint, updates_on=auth.get_setting("mctrade_updates_enabled") == "1",
-                       action=lambda c: (metas.get(c["id"]) or {}).get("crm_action") or "")
-        hdr, source, rows, left, upd = res["headers"], res["source"], res["rows"], res["left"], res["updates"]
-        def _book(rws):
-            wb = Workbook(); ws = wb.active; ws.title = "Sheet1"; ws.append(hdr)
-            for c, r_ in rws: ws.append(mx.cells(hdr, r_))
-            for rw in ws.iter_rows():
-                for cell in rw:
-                    if isinstance(cell.value, str): cell.data_type = "s"   # plain text, never a formula; no ' prefix needed
-            b_ = io.BytesIO(); wb.save(b_); return b_.getvalue()
-        body_x = _book(rows)
-        fn = _fname("contacts-for-MC-Trade", status, "xlsx", batch_label)
-        rfn = ("PREVIEW-" if preview else "") + fn   # round 10 (coordinator r3 3c): the READ-ME names the files as they are saved
-        # companion files (not for import): every non-template column + rows left out, and the READ ME notes
-        e = io.StringIO(); w = csv.writer(e)
-        w.writerow(["ScanCardID", "InImportFile", "Why left out", "FirstName", "LastName", "Email2", "Website", "Credentials", "Department", "OtherAddress",
-                    "AllEmails", "AllPhones", "Social", "Note", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "Check"])
-        why = {c["id"]: r for c, r in left}; updids = {c["id"] for c, _ in upd}
-        for c in sel:
-            f_ = c["fields"]; a = aud(c); em = f_.get("emails") or []
-            inimp = "updates file" if c["id"] in updids else "no" if c["id"] in why else "yes"
-            w.writerow([safe_cell(x) for x in [c["id"], inimp, why.get(c["id"], ""), mx.clean(f_.get("first_name")), mx.clean(f_.get("last_name")),
-                        em[1] if len(em) > 1 else "", mx.clean(f_.get("website"))] + [mx.clean(x) for x in more(c)[:5]] + [" ".join(f_.get("social") or []), mx.clean(_note(c))] + a[1:]])
-        nflag = sum(1 for c in sel if aud(c)[-1])
-        cinfo = crm_source.info()
-        _smp = []   # round 9 (newcomer r9 N1): cards in the new file that match a SAMPLE contact by email (SAMPLE data only)
-        if not cinfo["real"]:
-            _sr = crm_source.sample_rows(); _in = {x["id"] for x, _ in rows}
-            _smp = [c_["id"] for c_ in sel if c_["id"] in _in and any("email exact" in m_["why"] for m_ in mctrade_sync.match(c_["fields"], _sr))]
-        xb_ids = {}
-        for c in sel:   # cards approved over a cross-batch look-alike warning (coordinator r1 #6): risk of a double import
-            for h in history(c["id"]):
-                if h["action"] == "cross_batch_confirmed":
-                    d_ = h.get("detail") if isinstance(h.get("detail"), dict) else {}
-                    xb_ids[c["id"]] = d_.get("cards") or []
-        tpl_real = source == "GAC template file"
-        cnt_ = mx.counts(res["decisions"])   # round 22 (mctrade-admin r21 H1): ONE source for every count (README, sign-off, dry run)
-        conf_ = [(c["id"], ln) for c in sel for ln in confirmed_lines(c["fields"])]
-        ovr_ = [c["id"] for c in sel if _ov(metas.get(c["id"]) or {})]
-        readme = "\n".join([
-            *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
-            # round 22: the 5 lines that matter come first
-            "GAC Card Scanner: MC Trade import file (internal pilot)",
-            readme_totals(cnt_),
-            "Before you import: read the lines below that start with “Check”, " + ("import this 1 row as a test first" if len(rows) + len(upd) == 1 else "import 2 rows first") + " (an import can't be undone)"
-            + (", and import new profiles and updates separately." if upd else "."),
-            (f"Overrides: {len(conf_)} confirmed, {len(ovr_)} approved anyway (see the Check column in the CSV)." if conf_ or ovr_ else "Overrides: none."),
-            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the companion CSV and this READ-ME (not for import).",
-            *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
-            (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
-            ("MC Trade contacts compared against: " + cinfo["source"] + "." if cinfo["real"] else
-             "Test data: no real MC Trade contacts file is loaded, so no Profile IDs were assigned."),
-            f"Created {_when(time.time())} by {who}; {len(rows)} new-profile {_s(len(rows), 'row')} and {len(upd)} update {_s(len(upd), 'row')} from {len(sel)} {_s(len(sel), 'card')}, filter = {FILTERS.get(status, status)}" + (f", batch {batch_label}" if batch_label else "") + ".",
-            f"New profiles: {rfn} (one sheet; " + ("columns from GAC's template" if tpl_real else "the scanner's default column names, not checked against MC Trade") + ").",
-            (f"Updates of existing MC Trade profiles: {comp_name(rfn, '-UPDATES.xlsx')} ({len(upd)} {_s(len(upd), 'row')}, with ProfileID). "
-             "MemberSince is left BLANK in update rows, so it can't overwrite a member's real date. Import new profiles and updates SEPARATELY."
-             if upd else "No 'update existing' cards in this export."),
-            (f"Template columns the scanner does not fill (left blank): {', '.join(res['unknown_cols'])}." if res["unknown_cols"] else
-             "Every column of GAC's template was recognised." if tpl_real else
-             "Columns not checked: upload GAC's template (Admin > Settings)."),
-            (f"Scanner fields with no column in this template (in the companion CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
-            f"Affiliation code: '{aff}' (it must already exist in MC Trade).",
-            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; extensions like 330-555-0170 x4271)'}; addresses are split into street/city/state/zip.",
-            ("Website: the card's website is in the import file's " + ", ".join(h for h in hdr if mx.canonical(h) in ("Website", "IndWebsite")) + " column (and in the companion CSV)."
-             if any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h) else
-             "Website: this template has NO website column, so websites are only in the companion CSV (not imported)."),
-            f"Left out: {cnt_[mx.LEFT]} {_s(cnt_[mx.LEFT], 'card')} (combined with another row, or values to fix first). The CSV says why.",
-            # round 20 (mctrade-admin r19 F1): 'in this export N times' only when 2+ ROWS of the import files share the name
-            # (cards merged into one row or left out no longer count); id lists show 3 ids + 'N more'
-            *[f"Check, same name: {g['name']} is on {plural(len(g['cards']), 'card')} {ids3(g['cards'])}"
-              + (f" ({plural(len(g['cards']), 'row')} in this export)" if g["with"] == "export" else f" and already in MC Trade (profile {', '.join(g.get('profiles') or [])})")
-              + ". MC Trade may merge people with the same name: check they are different, or merge them." for g in same_names([c for c, _ in rows] + [c for c, _ in upd], contacts_from=sel)],
-            (f"Check, to review: {cnt_[mx.REVIEW]} {_s(cnt_[mx.REVIEW], 'card')} ({ids3([k for k, v in res['decisions'].items() if v[0] == mx.REVIEW])}) "
-             "are in neither file: a person must decide (the CSV says why)." if cnt_[mx.REVIEW] else
-             ("Nothing held back for review." if cinfo["real"] else "Nothing held back for review (only test contacts loaded).") + (f" {nflag} exported {_s(nflag, 'card')} {'has' if nflag == 1 else 'have'} a warning (see the Check column in the CSV)." if nflag else "")),
-            (f"{', '.join('#' + str(i) for i in _smp)} match test contacts. Included anyway." if _smp else ""),
-            (f"Check, maybe already in MC Trade: {ids3(res['possible'])} (counted above)." if res["possible"] else ""),
-            *(["Check, marked different but identical: " + x for x in res["conflicts"]] if len(res["conflicts"]) <= 3 else
-              [f"Check, marked different but identical: {len(res['conflicts'])} cards, each exported once (the CSV says which)."]),
-            *[f"Check website: #{i} has {w} ({why}). Compare it with the photo." for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))],
-            # round 21 (mctrade-admin r20 M3): ONE cross-batch line (count + the first few), the full list is in the companion CSV
-            (f"Check, also in another batch: {plural(len(xb_ids), 'card')} ({ids3(list(xb_ids))}) may match people approved in another batch." if xb_ids else ""),
-            "Extra details (reviewer, batch, notes, second emails/phones) are in the CSV, not in the import file."])
-        _seen = set(); readme = "\n".join(x for x in readme.split("\n") if not x.strip() or not (x in _seen or _seen.add(x)))   # round 24: each warning once
-        comp = {"extra.csv": ("\ufeff" + e.getvalue()).encode(), "readme.txt": readme.encode()}
-        if upd: comp["updates.xlsx"] = _book(upd)
-        # round 9 (mctrade-r6): what each update row would overwrite in MC Trade, old value next to new
-        _byid = {str(r_["profile_id"]): r_ for r_ in (crm_source.real() or [])}; _udiff = []
-        _inhdr = {mx.canonical(h) for h in hdr if h}   # round 13 (mctrade-r8 R2): only columns that are really in the file (no phantom IndWebsite)
-        for c_, r_ in upd:
-            old_ = _byid.get(str(r_.get("ProfileID"))) or {}; f_ = c_["fields"]
-            pairs = [("Name", f"{old_.get('first_name', '')} {old_.get('last_name', '')}".strip(), f"{f_.get('first_name', '')} {f_.get('last_name', '')}".strip()),
-                     ("Organization", old_.get("organization", ""), f_.get("company", "")),
-                     ("Email", old_.get("email", ""), (f_.get("emails") or [""])[0]),
-                     ("Phone", old_.get("phone", ""), ((f_.get("phones") or [{}])[0] or {}).get("number", ""))]
-            _udiff.append({"card": c_["id"], "profile_id": str(r_.get("ProfileID")),
-                           "fields": [{"field": k, "old": o or "", "new": n or "", "changes": _digits(o) != _digits(n) if k == "Phone" else (o or "").strip().lower() != (n or "").strip().lower()} for k, o, n in pairs]
-                           # round 11 (mctrade-r7 F2): EVERY other column the UPDATES row writes is listed too. The contacts export
-                           # doesn't hold MC Trade's current value for these, so it is shown as unknown (old=None).
-                           + [{"field": h_, "old": None, "new": str(v_), "changes": None}
-                              for h_, v_ in r_.items() if v_ not in (None, "") and mx.canonical(h_) in _inhdr and h_ not in ("ProfileID", "MemberSince", "OrgInd", "IndFirstName", "IndLastName", "OrgName", "IndEmail", "IndPhone")]})
-        summ = {"new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
-                "left_ids": [c["id"] for c, _ in left if c["id"] not in {x["id"] for x, _ in rows}],
-                "review": res["review"], "possible": res["possible"], "crm_real": cinfo["real"],
-                "decisions": {str(k): v[0] for k, v in res["decisions"].items()}, "counts": mx.counts(res["decisions"]),
-                "_view": {"headers": [h for h in hdr], "rows": [mx.cells(hdr, r_) for _, r_ in rows], "updates": [mx.cells(hdr, r_) for _, r_ in upd], "update_diff": _udiff,
-                          "left": [[c["id"], why_] for c, why_ in left], "source_text": f"Columns: {source}. MC Trade contacts: {cinfo['source']}.",
-                          "warnings": [f"#{i}: approved although approved cards {', '.join('#' + str(o) for o in os_)} in another batch look like the same person" for i, os_ in xb_ids.items()] + [f"#{i}: check the website {w} ({why})" for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))]}}
-        return body_x, MT["xlsx"], fn, comp, summ
-    raise HTTPException(404)
-
-def readme_totals(cnt):
-    from . import mctrade_export as mx
-    return (f"Totals: {cnt[mx.NEW]} new · {cnt[mx.UPDATE]} {_s(cnt[mx.UPDATE], 'update')} · {cnt[mx.REVIEW]} to review · "
-            f"{cnt[mx.LEFT]} left out.")
-
-def comp_name(fn, suf):
-    """Companion file name. The UPDATES file never says '-new-' (it holds updates of EXISTING profiles, not new ones)."""
-    base = os.path.splitext(fn)[0]
-    if suf == "-UPDATES.xlsx": base = base.replace("-MCTrade-new-", "-MCTrade-")
-    return base + suf
-
-# round 15 (second-round bots): only ONE real export of a batch (or of overlapping cards) runs at a time. A second one
-# started while the first is still building gets 409 'export_busy' instead of exporting (and marking) the same cards twice.
-EXPORT_BUSY = {}; _EXL = threading.Lock()
-def _export_claim(key, ids, who):
-    with _EXL:
-        for k, (ids2, w2, t2) in EXPORT_BUSY.items():
-            if k == key or (ids & ids2): return {"by": w2, "since": t2}
-        EXPORT_BUSY[key] = (ids, who, time.time()); return None
-def _export_release(key):
-    with _EXL: EXPORT_BUSY.pop(key, None)
-def export_versions(sel):
-    """Round 16 (manager/coordinator r15 H1): what an export sign-off was reviewed against: the template, the contacts file
-    and the exact cards (id + version). The page sends these back with the real export; if any changed meanwhile the
-    export is refused (409 'stale_review') instead of building a file nobody looked at."""
-    cv = hashlib.sha256(",".join(f"{c['id']}:{card_version(c)}" for c in sorted(sel, key=lambda c: c["id"])).encode()).hexdigest()[:12]
-    return {"template": template_version(), "contacts": contacts_version(), "cards": cv}
-SUSPECT_WEB = re.compile(r"phish|login|verify|secure-?|account|update-?info|signin|wallet|bit\.ly|tinyurl|xn--|^\d+\.\d+\.\d+\.\d+$", re.I)
-def _wdom(w):
-    w = re.sub(r"^[a-z]+://", "", str(w or "").strip().lower()).split("/")[0].split(":")[0]
-    return w[4:] if w.startswith("www.") else w
-def website_warnings(sel, metas, rows=None, merged=None):
-    """Round 16 (mctrade r15 M2): a website that does not match the card's email domain(s) AND either came in through a
-    merge or looks like a phishing / login / short-link / IP address domain. -> [(card id, website, why)] for the READ-ME."""
-    merged_into = {}
-    for cid_, m_ in (metas or {}).items():
-        d_ = str((m_ or {}).get("dup_resolution") or "")
-        if d_.startswith("merged_into:"):
-            try: merged_into.setdefault(int(d_.split(":", 1)[1]), []).append(cid_)
-            except ValueError: pass
-    for tgt, ids_ in (merged or {}).items():   # round 17 (mctrade r16): rows merged at export time count as merges too
-        for x_ in ids_:
-            if x_ not in merged_into.get(tgt, []): merged_into.setdefault(tgt, []).append(x_)
-    out = []
-    # round 17 (mctrade r16): with the export's rows, only cards that ARE in an import file are listed, under the exported
-    # row's card id, with the website the row really carries (it may have come from a merged-away card)
-    items = [(c, str(r_.get("Website") or r_.get("IndWebsite") or "")) for c, r_ in rows] if rows is not None else [(c, c["fields"].get("website") or "") for c in sel]
-    for c, w in items:
-        w = (w or "").strip(); d = _wdom(w)
-        if not d: continue
-        eds = {e.split("@")[-1].strip().lower() for e in c["fields"].get("emails") or [] if "@" in e}
-        if any(d == e or d.endswith("." + e) or e.endswith("." + d) for e in eds): continue
-        why = []
-        if SUSPECT_WEB.search(d): why.append("the domain looks like a phishing, login or short-link address")
-        if c["id"] in merged_into: why.append("it came in through a merge (from #" + ", #".join(str(x) for x in merged_into[c["id"]]) + ")")
-        if why: out.append((c["id"], w, "; ".join(why) + (f"; it doesn't match the email domain {', '.join(sorted(eds))}" if eds else "")))
-    return out
-MT = {"csv": "text/csv", "vcf": "text/vcard", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
-@router.get("/api/export/{kind}")
-def do_export(kind: str, request: Request, status: str = "approved_new", batch: str = "", preview: bool = False):
-    """preview=1: build and return the file(s) but change nothing (no 'exported' marks, no history, no stored copy)."""
-    if kind == "dryrun": return export_dryrun(request, status, batch)   # same URL family; defined at the end of this module
-    if kind not in MT: raise HTTPException(404)
-    from . import demo
-    if demo.enabled(): preview = True   # public demo: every export (incl. the MC Trade Excel) is a dry-run preview
-    if _filter_refused(status, request.state.user):
-        return JSONResponse({"error": "Only an admin can export pending, rejected or all cards. Reviewers export approved cards."}, 403)
-    if preview and not batch and request.state.user.get("role") != "admin":   # skeptic R6-1: no all-batches contact dump for reviewers
-        return JSONResponse({"error": "Choose one batch under “Batch” to preview. Only admins can preview all batches."}, 403)
-    sel, metas, probs = _export_set(status, batch)
-    if probs and not preview:   # a preview changes nothing, so look-alikes don't block it
-        msg = ("Some cards in this batch look like the same person. Resolve them in the review screen before exporting." if batch else
-               "With “All batches”, look-alikes from anyone's batch block the export. Choose your batch under “Batch”, "
-               "or ask an admin to resolve the cards listed.")
-        return JSONResponse({"error": msg, "duplicates": probs}, 409)
-    if not sel: return JSONResponse({"error": "No cards to export."}, 404)
-    user = request.state.user
-    if not preview:
-        seen_ = {k: request.query_params.get("seen_" + k) for k in ("template", "contacts", "cards")}
-        _cl = ": cards " + ", ".join(f"#{c['id']}" for c in sel[:500])   # round 17 (manager r16 L-1): refused rows name the cards
-        if not all(seen_.values()):   # round 17 (manager r16 M-1, skeptic L1): the sign-off versions are REQUIRED for a real export
-            miss = [k for k, v in seen_.items() if not v]
-            auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + "): sent without the sign-off versions (" + ", ".join("seen_" + k for k in miss) + "); nothing was exported" + _cl)
-            return JSONResponse({"error": "Nothing was exported: the sign-off check is missing. Export from the Export page.",
-                                 "need": "version_required", "missing": ["seen_" + k for k in miss]}, 428)   # round 21 (skeptic r20 L1): no versions in a 428
-        if True:
-            now_ = export_versions(sel); drift = [k for k, v in seen_.items() if v and v != now_[k]]
-            if drift:
-                words = {"template": "the MC Trade template", "contacts": "the MC Trade contacts file", "cards": "the cards (edited, approved or rejected)"}
-                auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + "): changed since the sign-off was shown: " + ", ".join(words[k] for k in drift) + "; nothing was exported" + _cl)
-                return JSONResponse({"error": "Since you opened the export sign-off, " + " and ".join(words[k] for k in drift) + " changed. Nothing was exported: check the sign-off again, then export.",
-                                     "need": "stale_review", "changed": drift, "now": now_}, 409)
-        xkey = "batch:" + (batch or "__all__"); busy_ = _export_claim(xkey, {c["id"] for c in sel}, user["username"])
-        if busy_: auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + f"): another export of these cards was running (started by {busy_['by']} at {time.strftime('%H:%M:%S', time.localtime(busy_['since']))}); nothing was exported" + _cl)
-        if busy_: return JSONResponse({"error": f"Another export of these cards is running right now (started by {busy_['by']} at {time.strftime('%H:%M:%S', time.localtime(busy_['since']))}). Nothing was exported: wait for it to finish, then check the export history before exporting again.", "need": "export_busy"}, 409)
-        try: return _do_export_real(kind, request, status, batch, sel, metas, user, seen_)
-        finally: _export_release(xkey)
-    blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
-    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, preview=preview)
-    body, mt, fn = res[:3]; extras = res[3] if len(res) > 3 else {}
-    view = res[4].pop("_view", None) if len(res) > 4 else None
-    summ_h = {"X-Summary": json.dumps(res[4])} if len(res) > 4 else {}
-    if preview and view is not None and request.query_params.get("view") == "1":   # on-screen preview (no file)
-        auth.alog(user["username"], f"viewed the PREVIEW of the MC Trade files on screen ({len(sel)} {_s(len(sel), 'card')}" + (f", batch {blabel or batch}" if batch else ", all batches") + "): " + ", ".join(f"#{c['id']}" for c in sel[:500]))
-        return view | res[4] | {"versions": export_versions(sel)}
-    if preview:
-        fn = "PREVIEW-" + fn
-        if request.query_params.get("companion") and request.query_params["companion"] not in extras:   # mctrade-r5 F1
-            return JSONResponse({"error": "There is no such file in this export (for example no update rows, so no UPDATES file)."}, 404)
-        nm_ = request.query_params.get("companion") or "main file"
-        auth.alog(user["username"], f"downloaded the PREVIEW {kind} ({nm_}) of {len(sel)} {_s(len(sel), 'card')}, {FILTERS.get(status, status)}"
-                  + (f", batch {blabel or batch}" if batch else ", all batches") + ": " + ", ".join(f"#{c['id']}" for c in sel[:500]) + ("…" if len(sel) > 500 else ""))
-        hdrs = {"Content-Disposition": f'attachment; filename="{fn}"', "X-Card-Count": str(len(sel)), "X-Preview": "1", "X-Companions": ",".join(extras)} | summ_h
-        if request.query_params.get("companion"):
-            nm = request.query_params["companion"]; mt2, suf = COMPANION[nm]
-            return Response(extras[nm], media_type=mt2, headers=hdrs | {"Content-Disposition": f'attachment; filename="{comp_name(fn, suf)}"'})
-        return Response(body, media_type=mt, headers=hdrs)
-    raise AssertionError('unreachable')
-
-def _stale_export(kind, batch, user, sel, changed, now_, when):
-    words = {"template": "the MC Trade template", "contacts": "the MC Trade contacts file", "cards": "the cards (edited, approved or rejected)"}
-    auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + f"): changed {when}: "
-              + ", ".join(words[k] for k in changed) + "; nothing was exported: cards " + ", ".join(f"#{c['id']}" for c in sel[:500]))
-    return JSONResponse({"error": f"{' and '.join(words[k] for k in changed).capitalize()} changed {when}. Nothing was exported: check the sign-off again, then export.",
-                         "need": "stale_review", "changed": changed, "now": now_}, 409)
-
-def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
-    # re-read the set INSIDE the claim: cards exported by a run that just finished are not exported again by accident
-    sel, metas, probs = _export_set(status, batch)
-    if probs: return JSONResponse({"error": "Some cards in this batch look like the same person. Resolve them in the review screen before exporting.", "duplicates": probs}, 409)
-    if not sel: return JSONResponse({"error": "No cards to export (they may have just been exported by someone else: see the export history)."}, 404)
-    # audit 2026-10 P0-2 / F01: the re-read set must still be exactly what the sign-off showed (a card approved in between
-    # would otherwise be exported without anyone having looked at it on the sign-off)
-    built_v = export_versions(sel)
-    if seen:
-        drift = [k for k, v in seen.items() if v and v != built_v[k]]
-        if drift: return _stale_export(kind, batch, user, sel, drift, built_v, "since the sign-off was shown")
-    blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
-    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel)
-    body, mt, fn = res[:3]; extras = res[3] if len(res) > 3 else {}
-    if len(res) > 4: res[4].pop("_view", None)
-    summ_h = {"X-Summary": json.dumps(res[4])} if len(res) > 4 else {}
-    stored = uuid.uuid4().hex + "_" + fn
-    with open(os.path.join(EXP, stored), "wb") as fh: fh.write(body)
-    for nm, data in extras.items():
-        with open(os.path.join(EXP, stored + "." + nm), "wb") as fh: fh.write(data)
-    now = time.time()
-    # audit 2026-10 P0-2: mark the cards only if nothing changed while the file was being built (an edit made meanwhile
-    # is not in the file; marking it exported would hide it from the next export). Checked and written under WRITE_LOCK,
-    # in one transaction, so no save can slip in between; the export id comes from this insert (F02), not MAX(id).
-    with WRITE_LOCK:
-        cur = [store.get(c["id"]) for c in sel]
-        now_v = export_versions([x for x in cur if x]) if all(cur) else None
-        if now_v != built_v:
-            for p_ in [stored] + [stored + "." + nm for nm in extras]:
-                try: os.remove(os.path.join(EXP, p_))
-                except OSError: pass
-            return _stale_export(kind, batch, user, sel, [k for k in built_v if not now_v or now_v[k] != built_v[k]], now_v, "while the file was being built")
-        curm = all_metas(); tv = template_version()
-        with db() as c:
-            eid = c.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                            (now, user["username"], user["initials"], kind, status, len(sel), fn, json.dumps([x["id"] for x in sel]), stored, blabel if batch else "")).lastrowid
-            for x in sel:
-                m = curm.get(x["id"]) or {}
-                c.execute("INSERT INTO card_meta(card_id) VALUES(?) ON CONFLICT(card_id) DO NOTHING", (x["id"],))
-                if not m.get("exported"): c.execute("UPDATE card_meta SET exported=? WHERE card_id=?", (now, x["id"]))
-                if m.get("reexport"): c.execute("UPDATE card_meta SET reexport=NULL WHERE card_id=?", (x["id"],))
-                c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
-                          (x["id"], now, user["initials"], "exported", None, None, json.dumps({"file": fn, "template_version": tv})))
-    return Response(body, media_type=mt, headers={"Content-Disposition": f'attachment; filename="{fn}"', "X-Card-Count": str(len(sel)),
-                                                  "X-Export-Id": str(eid), "X-Companions": ",".join(extras)} | summ_h)
-
-COMPANION = {"extra.csv": ("text/csv", "-extra-columns.csv"), "readme.txt": ("text/plain", "-READ-ME.txt"),
-             "updates.xlsx": (MT["xlsx"], "-UPDATES.xlsx")}
-@router.get("/api/exports/{eid}/companion/{name}")
-def export_companion(eid: int, name: str, request: Request):
-    """Companion files of an MC Trade import file: the non-template columns + rows left out, and the READ ME notes."""
-    if name not in COMPANION: raise HTTPException(404)
-    r = db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone()
-    u = request.state.user
-    if r and u["role"] != "admin" and r["username"] != u["username"]:
-        return JSONResponse({"error": "Only the person who made this export (or an admin) can download it."}, 403)
-    p = os.path.join(EXP, (r["stored"] or "") + "." + name) if r and r["stored"] else ""
-    if not p or not os.path.isfile(p): return JSONResponse({"error": "No such file (it may have been removed by the retention policy)."}, 404)
-    mt, suf = COMPANION[name]
-    ids_ = json.loads(r["card_ids"] or "[]")
-    auth.alog(u["username"], f"downloaded the {suf.strip('-')} companion of export #{eid} ({r['filename']}; cards " + ", ".join(f"#{i}" for i in ids_[:500]) + ("…" if len(ids_) > 500 else "") + ")")
-    return FileResponse(p, media_type=mt, filename=comp_name(r["filename"], suf))
-
-@router.get("/api/exports")
-def export_history(request: Request):
-    out = []; u = request.state.user
-    for r in db().execute("SELECT * FROM exports ORDER BY id DESC LIMIT 200"):
-        d = dict(r); d["available"] = bool(d["stored"]) and os.path.isfile(os.path.join(EXP, d["stored"])); d["filter_text"] = FILTERS.get(d["filter"], d["filter"])
-        d["own"] = d["username"] == u["username"]; d["mine"] = u["role"] == "admin" or d["own"]; d["available"] = d["available"] and d["mine"]
-        d["companions"] = [n for n in COMPANION if d["available"] and os.path.isfile(os.path.join(EXP, d["stored"] + "." + n))]
-        d["card_ids"] = json.loads(d["card_ids"] or "[]"); d.pop("stored"); out.append(d)
-    return out
-
-@router.get("/api/exports/{eid}/download")
-def export_again(eid: int, request: Request):
-    r = db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone()
-    if not r or not r["stored"] or not os.path.isfile(os.path.join(EXP, r["stored"])):
-        return JSONResponse({"error": "That file is no longer stored. Export again."}, 404)
-    u = request.state.user
-    if u["role"] != "admin" and r["username"] != u["username"]:
-        return JSONResponse({"error": "Only the person who made this export (or an admin) can download it again."}, 403)
-    ids = json.loads(r["card_ids"] or "[]")
-    auth.alog(request.state.user["username"], f"re-downloaded export #{eid} ({r['filename']}; {len(ids)} {_s(len(ids), 'card')}: " + ", ".join(f"#{i}" for i in ids[:500]) + (" …" if len(ids) > 500 else "") + ")")
-    for i in ids: log(i, request.state.user["initials"], "redownloaded", detail={"export_id": eid, "file": r["filename"]})
-    return FileResponse(os.path.join(EXP, r["stored"]), media_type=MT.get(r["kind"]), filename=r["filename"])
-
-# ---------------------------------------------------------------- retention
-def purge(now=None, who="retention"):
-    """Delete card photos older than image_retention_days and stored export files older than export_retention_days.
-    Card text (the contact details) stays, so approved contacts and the audit trail survive."""
-    now = now or time.time(); res = {"images": 0, "exports": 0}
-    if auth.get_setting("retention_enabled") != "1": return res
-    di = int(auth.get_setting("image_retention_days")); de = int(auth.get_setting("export_retention_days"))
-    for r in db().execute("SELECT id,image,created FROM cards WHERE image IS NOT NULL AND image!='' AND status!='pending' AND created<?", (now - di * 86400,)).fetchall():
-        remove_photo(r["image"]); remove_photo(meta(r["id"]).get("back_image"))   # F08: both sides, with thumbnails
-        with db() as c: c.execute("UPDATE cards SET image='' WHERE id=?", (r["id"],))
-        set_meta(r["id"], image_deleted=now); log(r["id"], who, "photo_deleted", detail={"after_days": di}); res["images"] += 1
-    for r in db().execute("SELECT id,stored,ts FROM exports WHERE stored IS NOT NULL AND ts<?", (now - de * 86400,)).fetchall():
-        p = os.path.join(EXP, r["stored"])
-        for q in [p] + [p + "." + n for n in COMPANION]:
-            try: os.remove(q)
-            except FileNotFoundError: pass
-        with db() as c: c.execute("UPDATE exports SET stored=NULL WHERE id=?", (r["id"],))
-        res["exports"] += 1
-    # undo snapshots hold full copies of card data but can only be used for 24 h: drop them after 2 days
-    with db() as c: res["undo_snapshots"] = c.execute("UPDATE actions SET snapshot='[]' WHERE ts<? AND snapshot!='[]'", (now - 2 * 86400,)).rowcount
-    # orphan photos (e.g. an upload that crashed before its card was saved) follow the same retention clock
-    known = {r[0] for r in db().execute("SELECT image FROM cards WHERE image!=''")} | {r[0] for r in db().execute("SELECT back_image FROM card_meta WHERE back_image IS NOT NULL")}
-    # labelled correction photos follow the photo retention too (the benchmark keeps only what is still allowed)
-    if os.path.isdir(CORR):
-        for fn in os.listdir(CORR):
-            fp = os.path.join(CORR, fn)
-            if not fn.endswith(".json") and os.path.getmtime(fp) < now - di * 86400 and os.path.getmtime(fp) < now - 3600:
-                os.remove(fp); res["corrections"] = res.get("corrections", 0) + 1
-    for fn in os.listdir(UP):
-        fp = os.path.join(UP, fn)
-        if fn not in known and os.path.isfile(fp) and os.path.getmtime(fp) < now - di * 86400 and os.path.getmtime(fp) < now - 3600:
-            remove_photo(fn); res["orphans"] = res.get("orphans", 0) + 1
-    for fn in os.listdir(THUMBS):   # F08: thumbnails whose photo is gone (e.g. deleted by an older version)
-        base = fn.rsplit(".", 2)[0] if fn.endswith(".webp") else None
-        if base and base not in known and not os.path.isfile(os.path.join(UP, base)):
-            try: os.remove(os.path.join(THUMBS, fn)); res["orphan_thumbs"] = res.get("orphan_thumbs", 0) + 1
-            except FileNotFoundError: pass
-    if res["images"] or res["exports"] or res.get("orphans"): auth.alog(who, f"retention purge: {res['images']} photo(s), {res['exports']} export file(s) deleted")
-    return res
-
-JOB_KEEP_S = int(os.environ.get("JOB_KEEP_S", "7200"))
-def prune_memory(now=None):
-    """Audit 2026-10 P1 (F05): finished jobs and old throttle entries no longer pile up in memory for the whole uptime.
-    A finished job is still found through its record in data/jobs_done (24 h) after it leaves memory."""
-    from . import reader, phone
-    now = now or time.time(); n = 0
-    with JLOCK:
-        for jid in [k for k, j in JOBS.items() if j.get("state") in ("done", "error", "cancelled") and (j.get("finished") or j.get("created") or 0) < now - JOB_KEEP_S]:
-            JOBS.pop(jid, None); n += 1
-        for k in [k for k, t in CANCELLED_BATCH.items() if t < now - 3600]: CANCELLED_BATCH.pop(k, None)
-        reader.CANCELLED.intersection_update(set(JOBS) | set(reader.RUNNING))
-    for cid in [c for c in list(AI_RETRIES) if c not in AI_WAIT]: AI_RETRIES.pop(cid, None)
-    auth.prune_fails(now)
-    for ip in [ip for ip, ts in list(phone._BAD.items()) if not ts or max(ts) < now - 60]: phone._BAD.pop(ip, None)
-    return n
-
-def _retention_loop():
-    while True:
-        try: purge()
-        except Exception as e: print("retention error:", e)
-        try: prune_memory()
-        except Exception as e: print("memory prune error:", e)
-        time.sleep(3600)
 
 def recover():
     """After a crash or restart: re-queue uploads that were accepted but not yet read (same job id, so an open browser
@@ -3311,385 +2477,30 @@ def start_workers():
     except Exception as e: print("backup scheduler not started:", e)
     return True
 
-@router.post("/api/admin/retention/run")
-def run_purge(request: Request): return purge(who=request.state.user["username"])
-
-@router.get("/api/admin/retention/preview")
-def purge_preview():
-    di = int(auth.get_setting("image_retention_days")); now = time.time()
-    n = db().execute("SELECT COUNT(*) FROM cards WHERE image IS NOT NULL AND image!='' AND status!='pending' AND created<?", (now - di * 86400,)).fetchone()[0]
-    total = db().execute("SELECT COUNT(*) FROM cards WHERE image IS NOT NULL AND image!=''").fetchone()[0]
-    return {"would_delete": n, "photos_stored": total, "days": di, "enabled": auth.get_setting("retention_enabled") == "1"}
-
-# ---------------------------------------------------------------- audit log
-def _fmtv(v):
-    """History values in plain words: phone dicts as 'mobile: 330-555-0101', lists joined."""
-    if isinstance(v, list): return ", ".join(_fmtv(x) for x in v)
-    if isinstance(v, dict): return f"{v.get('type', '')}: {v.get('number', '')}".strip(": ") if "number" in v else ", ".join(f"{k}: {x}" for k, x in v.items())
-    return "" if v is None else str(v)
-
-NAMES = {"scanned": "scanned", "edited": "edited", "exported": "exported", "redownloaded": "re-downloaded in an export",
-         "merged_from": "merged details from another card", "mc_trade_choice": "MC Trade choice", "back_added": "back of card added",
-         "ai_checked": "double-check", "ai_suggestion": "AI suggestion", "duplicate_kept_both": "marked as a different person"}
-def _audit_text(action, frm, to, d):
-    d = d or {}
-    if isinstance(d, dict) and d.get("redacted"):
-        if action == "decision": t = f"{frm} → {to}" + (" (approved despite problems)" if d.get("override") else "") + (" (bulk)" if d.get("bulk") else "")
-        elif action == "edited": t = "edited " + ", ".join(LABEL.get(k, k) for k in d.get("fields", []))
-        elif action == "merged_from" and d.get("card"): t = f"merged details from card #{d['card']}"
-        elif action == "exported": t = "exported" + (f" in {d['file']}" if d.get("file") else "")
-        elif action == "redownloaded": t = f"re-downloaded in export #{d.get('export_id')}"
-        elif action == "duplicate_kept_both" and d.get("cards"): t = "marked as a different person from " + ", ".join(f"#{i}" for i in d["cards"])
-        elif action == "undo": t = f"undid: {d.get('undid', '')}"
-        else: t = NAMES.get(action, action.replace("_", " "))
-        return t + " [personal details removed on request]"
-    if action == "hard_check_override":   # round 23: field, value and reason in plain words
-        return f"confirmed {LABEL.get(d.get('field'), d.get('field') or 'a value')} “{_fmtv(d.get('value'))[:120]}” as correct" + (f" (reason: {d['reason']})" if d.get("reason") else " (no reason recorded)")
-    if action == "cross_batch_confirmed":
-        return "approved although " + (("#" + ", #".join(str(i) for i in d["cards"])) if d.get("cards") else "a card in another batch") + " may be the same person"
-    if action == "deleted_on_request": return f"card deleted on request (photo and details; {d.get('export_copies', 0)} stored export file(s)); its history is kept without personal data"
-    if action == "redownloaded": return f"re-downloaded in export #{d.get('export_id')} ({d.get('file')})"
-    if action == "decision":
-        t = f"{frm} → {to}"
-        if isinstance(d, dict) and d.get("override"): t += f' (approved despite problems: "{d["override"]}")'
-        if isinstance(d, dict) and d.get("bulk"): t += " (bulk)"
-        return t
-    if action == "edited": return "edited " + ", ".join(f"{LABEL.get(k, k)}: “{_fmtv(v.get('from'))}” → “{_fmtv(v.get('to'))}”" for k, v in d.items() if isinstance(v, dict))
-    if action == "scanned": return f"scanned {d.get('file', '')}" + (f" in batch “{d.get('batch')}”" if d.get("batch") else "") + (" (QR code found)" if d.get("qr") else "")
-    if action == "exported": return f"exported in {d.get('file')}"
-    if action == "merged_from":
-        add = d.get("added") or {}
-        return f"merged details from card #{d.get('card')}" + (" (added " + ", ".join(LABEL.get(k, k.replace("_", " ")) for k in add) + ")" if add else "")
-    if action == "mc_trade_choice": return "chose: update existing MC Trade contact" if d == "update_existing" else "chose: add as new MC Trade contact"
-    if action == "duplicate_kept_both":
-        ids = (d or {}).get("cards") if isinstance(d, dict) else None
-        return "marked as a different person from " + ", ".join(f"#{i}" for i in ids) + " (keep both)" if ids else "marked as a different person (keep both)"
-    if action == "back_to_pending": return f"moved back to pending ({d.get('why')}): " + "; ".join(d.get("problems") or [])
-    if action == "archived": return "archived"
-    if action == "upload_cancelled": return "stopped an upload: " + (f"{d['kept']} kept, " if d.get("kept") is not None else "") + f"{d.get('not_scanned', 0)} not scanned" + (f" (batch “{d.get('batch')}”)" if d.get("batch") else "")
-    if action == "undo": return f"undid: {d.get('undid')}"
-    if action == "ai_checked":
-        ch = d.get("changed") or {}
-        if d.get("suggested"): return "double-check: suggestions offered for " + ", ".join(LABEL.get(k, k) for k in d["suggested"]) + f" ({d.get('seconds')} s)"
-        return "double-check: " + (("changed " + ", ".join(f"{LABEL.get(k, k)} “{_fmtv(v.get('from'))}” → “{_fmtv(v.get('to'))}”" for k, v in ch.items())) if ch else "no changes needed") + f" ({d.get('seconds')} s)"
-    if action == "reexport_needed": return f"needs exporting again ({(d or {}).get('why', '')})"
-    if action == "ai_suggestion": return "AI suggestion: " + ", ".join(f"{LABEL.get(k, k)}: " + ("used the AI value" if v == "accept" else "kept the current value") for k, v in d.items())
-    if action == "back_added" and d.get("from_card"): return f"back photo carried over from card #{d['from_card']}"
-    if action == "back_added": return "added the back of the card" + (" (filled " + ", ".join(LABEL.get(k, k) for k in d.get("filled", [])) + ")" if d.get("filled") else "")
-    if action == "photo_deleted": return f"photo deleted by retention policy ({d.get('after_days')} days)"
-    return action.replace("_", " ")
-
-@router.get("/api/admin/audit")
-def audit(q: str = "", limit: int = 500, fmt: str = "json"):
-    rows = []; want = limit
-    # round 15 (manager r14 L-r14-2): WHO is always the username (initials are mapped back); the initials stay in their own column
-    _ini = {}
-    for u_ in auth.db().execute("SELECT username, initials FROM users"): _ini.setdefault(u_["initials"], []).append(u_["username"])
-    _u2i = {u_["username"]: u_["initials"] for u_ in auth.db().execute("SELECT username, initials FROM users")}
-    def _w(x):
-        if not x or x == "system": return "system"
-        if x in _u2i: return x
-        return _ini[x][0] if len(_ini.get(x) or []) == 1 else x
-    if q: limit = 1_000_000   # manager-r9 L-r9-4: search the whole log first, then keep the newest `limit` matches
-    for r in db().execute("SELECT * FROM card_history ORDER BY id DESC LIMIT ?", (limit,)):
-        d = json.loads(r["detail"]) if r["detail"] else None
-        txt = _audit_text(r["action"], r["from_status"], r["to_status"], d)
-        rows.append({"ts": r["ts"], "who": r["reviewer"] or "system", "what": txt[:400], "card": r["card_id"], "kind": "card"})
-    for r in db().execute("SELECT * FROM auth_log ORDER BY id DESC LIMIT ?", (limit,)):
-        ev = r["event"] or ""
-        # round 17 (manager r16 L-1): refused rows are filed under what was refused, not 'account'
-        kind = (("export" if ev.startswith("refused export") else "template" if "of the MC Trade template" in ev else "contacts" if "of the MC Trade contacts" in ev else "settings")
-                if ev.startswith("refused") else "settings" if ev.startswith("settings") else "export" if ev.startswith(("re-downloaded", "downloaded the", "dry run", "ran the MC Trade dry-run", "viewed the PREVIEW")) else
-                "card" if ev.startswith(("deleted card", "Clear all test data", "confirmed as correct on card")) else "account")
-        ids_ = list(dict.fromkeys(int(x) for x in re.findall(r"#(\d+)", ev))) if kind in ("export", "card") or ev.startswith("refused export") else []   # round 11: each card once (manager-r10)
-        rows.append({"ts": r["ts"], "who": r["username"], "what": ev + (f" (from {r['ip']})" if r["ip"] else ""), "card": ids_[0] if ids_ else None, "cards": ids_, "kind": kind})
-    for r in db().execute("SELECT * FROM exports ORDER BY id DESC LIMIT ?", (limit,)):
-        _ids = json.loads(r["card_ids"] or "[]")
-        rows.append({"ts": r["ts"], "who": r["initials"], "what": f"export {r['kind']} · {r['count']} {_s(r['count'], 'card')} · {FILTERS.get(r['filter'], r['filter'])} · {r['filename']}" + (": " + ", ".join(f"#{i}" for i in _ids[:500]) if _ids else ""), "card": _ids[0] if _ids else None, "cards": _ids, "kind": "export"})
-    for r in db().execute("SELECT * FROM actions WHERE undone IS NOT NULL ORDER BY id DESC LIMIT ?", (limit,)):
-        rows.append({"ts": r["undone"], "who": r["username"], "what": f"undo: {r['label']}", "card": None, "kind": "undo"})
-    rows.sort(key=lambda x: -x["ts"])
-    for r in rows: r["who"] = _w(r["who"]); r["initials"] = _u2i.get(r["who"], "")
-    if q: ql = q.lower(); rows = [r for r in rows if ql in (str(r["who"]) + " " + str(r.get("initials") or "") + " " + r["what"] + " #" + str(r["card"])).lower()]
-    rows = rows[:want]
-    if fmt == "csv":
-        b = io.StringIO(); w = csv.writer(b); w.writerow(["time", "who", "initials", "type", "card", "what"])
-        for r in rows: w.writerow([_when(r["ts"]), r["who"], r.get("initials") or "", r["kind"], " ".join(f"#{i}" for i in (r.get("cards") or ([r["card"]] if r["card"] else []))), safe_cell(r["what"])])
-        return Response(b.getvalue(), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="GAC-scanner-audit-{datetime.date.today()}.csv"'})
-    return rows
-
-
-# ---------------------------------------------------------------- round 6/7: MC Trade template + contacts upload, in-app dry run
-def _safe_fname(n):
-    """Filename for the audit log: no control characters, no markup, short (mctrade-r4 R4-7)."""
-    import urllib.parse
-    n = urllib.parse.unquote(str(n or ""))
-    return re.sub(r"[^\w .()\-]", "_", n)[:80] or "(no name)"
-
-TPL_BAKS = 5
-# ---------------- round 15 (manager r14 H-r14-1 / M-r14-1): optimistic locking for the shared admin state
-# Each shared thing (template file, contacts file, the 'update existing' switch + other settings) has a short version.
-# The Settings page sends back the version it showed; if another admin changed it meanwhile the change is refused with 409
-# 'stale_admin' and says who changed it and when. Nothing is overwritten silently.
-def file_version(p):
-    if not p or not os.path.isfile(p): return "none"
-    return hashlib.sha256(open(p, "rb").read()).hexdigest()[:12]
-def template_version():
-    from . import mctrade_export as mx
-    return file_version(mx.TEMPLATE_XLSX)
-def contacts_version():
-    p = crm_source.uploaded_path()
-    return file_version(p) if p else "none"
-def _last_admin_change(prefix):
-    r = db().execute("SELECT ts, username, event FROM auth_log WHERE event LIKE ? AND event NOT LIKE '%REFUSED%' ORDER BY id DESC LIMIT 1", (prefix + "%",)).fetchone()
-    return {"by": r["username"], "at": _when(r["ts"]), "what": r["event"][:200]} if r else None
-def stale_admin(thing, expected, current, prefix, user=None, action=""):
-    """None when the page's version is current; else the answer. Round 16 (manager r15 H-1): a MISSING version is refused
-    too (428 'version_required'), so a script or old page can't overwrite blindly. Every refusal is an audit row (M-1)."""
-    if expected == current: return None
-    lc = _last_admin_change(prefix)
-    # round 17 (manager r16 L-2): the refused row says WHAT was tried (upload / revert / remove, and the file name)
-    if user: auth.alog(user, f"refused (stale admin page): {action or 'change'} of the {thing} " + (f"made from version {_safe_fname(expected)}, current version is {current}" if expected else f"sent without a version (current version {current})") + ": nothing was changed")
-    if not expected:
-        return JSONResponse({"error": f"Nothing was changed: the page is out of date. Reload Admin → Settings and try again.",
-                             "need": "version_required", "thing": thing, "version": current, "last_change": lc}, 428)
-    # round 17 (manager r16 L-3): a version this server never issued is not "changed by X after you opened this page"
-    known = expected == "none" or bool(re.fullmatch(r"[0-9a-f]{12}", expected or "")) and db().execute(
-        "SELECT 1 FROM auth_log WHERE event LIKE ? AND event NOT LIKE '%refused%' LIMIT 1", ("%" + expected + "%",)).fetchone() is not None
-    if expected and not known:
-        return JSONResponse({"error": f"The version sent for the {thing} ({_safe_fname(expected)[:40]}) is not one this server has ever had (current version {current}). Nothing was changed: reload Admin → Settings and try again.",
-                             "need": "stale_admin", "unknown_version": True, "thing": thing, "version": current, "last_change": lc}, 409)
-    msg = (f"The {thing} was changed by {lc['by']} at {lc['at']} after you opened this page. Nothing was changed: reload Admin → Settings, check their change, then try again."
-           if lc else f"The {thing} changed after you opened this page. Nothing was changed: reload Admin → Settings and try again.") if expected else \
-          f"This request didn't say which version of the {thing} it was made from. Reload Admin → Settings and try again."
-    return JSONResponse({"error": msg, "need": "stale_admin", "thing": thing, "version": current, "last_change": lc}, 409)
-def _rotate_bak(dst):
-    """Keep several generations: .bak (newest) .bak2 ... .bak5 (manager-r4 L-r4-2)."""
-    if not os.path.isfile(dst): return False
-    for k in range(TPL_BAKS, 1, -1):
-        a = dst + (".bak" if k == 2 else f".bak{k-1}"); b = dst + f".bak{k}"
-        if os.path.isfile(a): os.replace(a, b)
-    os.replace(dst, dst + ".bak"); return True
-
-def _check_template(data):
-    """-> (header row) or raises ValueError. Size/zip-bomb caps, read_only parse, <=200 columns, name columns, no formula/HTML headers."""
-    from openpyxl import load_workbook
-    from . import mctrade_export as mx
-    if not data or len(data) > crm_source.MAX_UPLOAD: raise ValueError("Empty file or larger than 5 MB.")
-    crm_source.check_xlsx(data)
-    try:
-        wb = load_workbook(io.BytesIO(data), read_only=True)
-        try: sheets = [[("" if x is None else str(x)) for x in (next(w.iter_rows(min_row=1, max_row=1, max_col=1000, values_only=True), ()) or ())] for w in wb.worksheets]
-        finally: wb.close()
-    except Exception: raise ValueError("That isn't an Excel (.xlsx) file.")
-    hdr = next((r for r in sheets if any(mx._hnorm(x) in ("indemail", "affcode1") for x in r)), None)
-    if hdr is None: raise ValueError("No sheet has an IndEmail or AffCode1 column in its first row: this doesn't look like the MC Trade import template.")
-    while hdr and not hdr[-1].strip(): hdr.pop()
-    if any(not h.strip() for h in hdr):   # mctrade-r5 F5: a blank cell between headers silently shifted the counts
-        raise ValueError(f"Header cell {next(i for i, h in enumerate(hdr) if not h.strip()) + 1} of the first row is blank: an MC Trade template has a name in every column.")
-    long_ = [h for h in hdr if len(h) > 200]
-    if long_: raise ValueError(f"A header cell is {len(long_[0])} characters long (limit 200): not an MC Trade template.")
-    if len(hdr) > 200: raise ValueError(f"The header row has {len(hdr)} columns; an MC Trade import template has far fewer (limit 200).")
-    norm = {mx._hnorm(h) for h in hdr}
-    if not {"indfirstname", "indlastname"} <= norm: raise ValueError("The header row has no IndFirstName / IndLastName columns: people's names would be lost.")
-    bad = [h for h in hdr if h and (re.match(r"\s*[=+\-@]", h) or re.search(r"[<>]", h))]
-    if bad: raise ValueError("Header cells look like formulas or HTML (" + ", ".join(b[:30] for b in bad[:3]) + "): not an MC Trade template.")
-    return hdr
-
-def _refused(user, what, fname, why):
-    auth.alog(user, f"settings: REFUSED {what} upload ({_safe_fname(fname)}): {why}")
-
-@router.post("/api/admin/mctrade-template")
-async def upload_template(request: Request, image: UploadFile = File(...)):
-    """Admin: GAC's MC Trade import template -> data/mctrade_template.xlsx. Checked (sizes, zip ratio, columns, headers) in a
-    worker thread so a bad file can't block the server. Up to 5 previous files are kept (.bak ... .bak5); revert in Settings."""
-    import asyncio
-    from . import mctrade_export as mx
-    u = request.state.user["username"]
-    st_ = stale_admin("MC Trade template", (await request.form()).get("expected_version") or request.query_params.get("expected_version"), template_version(), "settings: %template%", request.state.user["username"], f"upload ({_safe_fname(image.filename)})")
-    if st_: return st_
-    data = await image.read(crm_source.MAX_UPLOAD + 1)
-    try: hdr = await asyncio.wait_for(asyncio.to_thread(_check_template, data), timeout=20)
-    except asyncio.TimeoutError: _refused(u, "template", image.filename, "took too long to read"); return JSONResponse({"error": "The file took too long to read: refused."}, 422)
-    except ValueError as e: _refused(u, "template", image.filename, str(e)); return JSONResponse({"error": str(e)}, 422)
-    dst = mx.TEMPLATE_XLSX
-    prev = len([h for h in mx.headers()[0] if h]) if os.path.isfile(dst) else 0
-    tmp = dst + ".uploading"   # audit 2026-10 P1 (F03): written in full first; the current template is only replaced after that
-    with open(tmp, "wb") as fh: fh.write(data); fh.flush(); os.fsync(fh.fileno())
-    had = _rotate_bak(dst)
-    os.replace(tmp, dst)
-    hdr, src = mx.headers()
-    unknown = [h for h in hdr if h and not mx.canonical(h)]
-    auth.alog(u, f"settings: uploaded the MC Trade import template ({_safe_fname(image.filename)}, {len([h for h in hdr if h])} columns"
-              + (f"; replaced the previous template ({prev} columns), kept as .bak" if had else "; there was no template before") + f"; template version {template_version()})")
-    return {"ok": True, "columns": hdr, "unknown": unknown, "source": src, "had_previous": had, "version": template_version()}
-
-@router.post("/api/admin/mctrade-template/revert")
-def revert_template(request: Request):
-    """Undo of a template upload: the newest .bak becomes the template again (or no template if there was none)."""
-    from . import mctrade_export as mx
-    dst = mx.TEMPLATE_XLSX; bak = dst + ".bak"; u = request.state.user["username"]
-    st_ = stale_admin("MC Trade template", request.query_params.get("expected_version"), template_version(), "settings: %template%", request.state.user["username"],
-                      "remove" if request.query_params.get("to_none") == "1" else "revert to the previous file")
-    if st_: return st_
-    if os.path.isfile(bak):
-        os.replace(bak, dst)
-        for k in range(2, TPL_BAKS + 1):   # shift the older generations up
-            a = dst + f".bak{k}"; b = dst + (".bak" if k == 2 else f".bak{k-1}")
-            if os.path.isfile(a): os.replace(a, b)
-        hdr, _ = mx.headers(); auth.alog(u, f"settings: reverted the MC Trade import template to the previous file ({len([h for h in hdr if h])} columns); template version now {template_version()}")
-        return {"ok": True, "present": True, "columns": hdr, "version": template_version()}
-    if os.path.isfile(dst) and request.query_params.get("to_none") == "1":
-        old_v = template_version(); os.remove(dst)   # round 16 (manager r15 L-3): no .removed leftover on disk
-        if os.path.isfile(dst + ".removed"): os.remove(dst + ".removed")
-        auth.alog(u, f"settings: removed the MC Trade import template version {old_v} (default columns are used again); template version now none")
-        return {"ok": True, "present": False, "version": template_version()}
-    return JSONResponse({"error": "There is no earlier template to go back to."}, 404)
-
-@router.get("/api/admin/mctrade-template")
-def template_info():
-    from . import mctrade_export as mx
-    if os.path.isfile(mx.TEMPLATE_XLSX + ".removed"):   # round 16: leftovers of earlier rounds' removals
-        try: os.remove(mx.TEMPLATE_XLSX + ".removed")
-        except OSError: pass
-    hdr, src = mx.headers()
-    return {"present": os.path.isfile(mx.TEMPLATE_XLSX), "path": "data/mctrade_template.xlsx", "columns": hdr, "source": src,
-            "unknown": [h for h in hdr if h and not mx.canonical(h)], "can_revert": os.path.isfile(mx.TEMPLATE_XLSX + ".bak"),
-            "previous": sum(1 for k in ["", "2", "3", "4", "5"] if os.path.isfile(mx.TEMPLATE_XLSX + ".bak" + k)),
-            "version": template_version(), "last_change": _last_admin_change("settings: %template%")}
-
-def _check_contacts(data, ext):
-    """-> (rows, n_people). A real MC Trade contacts export (Profile Selector / Query Tool: .xlsx or .csv). Raises ValueError."""
-    import tempfile
-    if not data or len(data) > 20 * 1024 * 1024: raise ValueError("Empty file or larger than 20 MB.")
-    if ext == "xlsx":
-        crm_source.check_xlsx(data)
-    else:
-        try: data.decode("utf-8-sig")
-        except UnicodeDecodeError: raise ValueError("The CSV isn't UTF-8 text: save it from Excel as 'CSV UTF-8'.")
-    fd, tmp = tempfile.mkstemp(suffix="." + ext)
-    try:
-        with os.fdopen(fd, "wb") as fh: fh.write(data)
-        rows, is_sample, n = crm_source.parse(tmp)
-    except ValueError: raise
-    except Exception: raise ValueError("The file could not be read as an MC Trade contacts export.")
-    finally: os.unlink(tmp)
-    if is_sample or crm_source.looks_like_sample(rows, data):
-        raise ValueError("This is the scanner's own SAMPLE contacts file (fake test people, Profile IDs 1001-1005), not GAC's real MC Trade export.")
-    rows, skipped = crm_source.skip_sample_rows(rows)
-    if not rows: raise ValueError("No people with a Profile ID found in the file" + (" (rows with the scanner's SAMPLE emails are skipped)." if skipped else "."))
-    return rows, n, skipped
-
-@router.post("/api/admin/mctrade-contacts")
-async def upload_contacts(request: Request, image: UploadFile = File(...)):
-    """Admin: GAC's real MC Trade contacts export. Used for Profile IDs in the export AND by the in-app dry run (same source)."""
-    import asyncio
-    u = request.state.user["username"]; ext = os.path.splitext(image.filename or "")[1].lower().lstrip(".")
-    if ext not in ("xlsx", "csv"): _refused(u, "MC Trade contacts", image.filename, "not .xlsx/.csv"); return JSONResponse({"error": "Upload the MC Trade export as .xlsx or .csv."}, 422)
-    st_ = stale_admin("MC Trade contacts file", (await request.form()).get("expected_version") or request.query_params.get("expected_version"), contacts_version(), "settings: %contacts%", request.state.user["username"], f"upload ({_safe_fname(image.filename)})")
-    if st_: return st_
-    data = await image.read(20 * 1024 * 1024 + 1)
-    try: rows, n, skipped = await asyncio.wait_for(asyncio.to_thread(_check_contacts, data, ext), timeout=30)
-    except asyncio.TimeoutError: _refused(u, "MC Trade contacts", image.filename, "took too long"); return JSONResponse({"error": "The file took too long to read: refused."}, 422)
-    except ValueError as e: _refused(u, "MC Trade contacts", image.filename, str(e)); return JSONResponse({"error": str(e)}, 422)
-    # audit 2026-10 P1 (F03): the new file is written in full BEFORE the old one goes (a failed write used to leave no
-    # contacts file at all); the old one is still wiped, not kept (round 8)
-    _cp = os.path.join(crm_source.DATA, f"mctrade_contacts.{ext}"); tmp = _cp + ".uploading"
-    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as fh: fh.write(data); fh.flush(); os.fsync(fh.fileno())
-    os.chmod(tmp, 0o600)
-    if os.path.isfile(_cp): os.replace(_cp, _cp + ".old")
-    os.replace(tmp, _cp)
-    for p_ in [_cp + ".old"] + [os.path.join(crm_source.DATA, f"mctrade_contacts.{e_}") + sfx for e_ in ("xlsx", "csv") for sfx in ("", ".bak") if not (e_ == ext and sfx == "")]:
-        crm_source.secure_delete(p_)
-    crm_source.write_loader(request.state.user)   # round 11 (mctrade-r7 C1): who loaded it, and when, is shown with the source
-    auth.alog(u, f"settings: uploaded the MC Trade contacts export ({_safe_fname(image.filename)}, {len(rows)} people with a Profile ID); "
-                 "exports and the dry run now use it" + (f"; {skipped} {_s(skipped, 'row')} with the scanner's SAMPLE emails skipped" if skipped else "") + f"; contacts version {contacts_version()}")
-    return {"ok": True, "skipped_sample_rows": skipped} | contacts_info()
-
-@router.post("/api/admin/mctrade-contacts/remove")
-def remove_contacts(request: Request):
-    st_ = stale_admin("MC Trade contacts file", request.query_params.get("expected_version"), contacts_version(), "settings: %contacts%", request.state.user["username"], "remove")
-    if st_: return st_
-    gone = 0
-    for e_ in ("xlsx", "csv"):
-        p_ = os.path.join(crm_source.DATA, f"mctrade_contacts.{e_}")
-        if crm_source.secure_delete(p_): gone += 1
-        crm_source.secure_delete(p_ + ".bak")   # leftovers of round 7, which renamed instead of deleting
-    crm_source.secure_delete(crm_source.loader_path())
-    if gone: auth.alog(request.state.user["username"], "settings: removed the MC Trade contacts export: file overwritten and deleted, no copy kept (back to SAMPLE data: no Profile IDs)")
-    return {"ok": True, "deleted": gone} | contacts_info()
-
-@router.get("/api/admin/mctrade-contacts")
-def contacts_info(): return crm_source.info() | {"version": contacts_version(), "last_change": _last_admin_change("settings: %contacts%")}
-
-@router.get("/api/mctrade-source")
-def mctrade_source():   # any signed-in user: which MC Trade list the review box / export / dry run use
-    i = crm_source.info(); return {"real": i["real"], "source": i["source"]}
-
-@router.get("/api/export/dryrun")
-def export_dryrun(request: Request, status: str = "approved_new", batch: str = ""):
-    """The MC Trade dry run inside the app. Round 8 (mctrade-r5 F2/F3, manager-r8 M-r8-1/2): the decisions come from the SAME
-    classification as the export and the sign-off (mctrade_export.classify via build_export), so the three always agree.
-    The built import file is also read back with mctrade-dryrun/dryrun.py's reader as a file check. Changes nothing; audited."""
-    import tempfile, importlib.util, contextlib, shutil
-    from . import mctrade_export as _mx
-    user = request.state.user
-    sel0, metas0, _ = _export_set(status, batch) if not _filter_refused(status, user) else ([], {}, [])
-    blabel0 = next(((metas0.get(c["id"]) or {}).get("batch_label") or "" for c in sel0), "") if batch else ""
-    if batch and not blabel0:
-        blabel0 = next(((m or {}).get("batch_label") or "" for m in all_metas().values() if (m or {}).get("batch") == batch), "")
-    def refuse(code, msg):
-        auth.alog(user["username"], f"dry run REFUSED ({code}): {msg} [filter {FILTERS.get(status, status)}, batch {('“' + blabel0 + '”') if blabel0 else (batch or 'all')}]")
-        return JSONResponse({"error": msg}, code)
-    if _filter_refused(status, user) or (not batch and user.get("role") != "admin"):
-        return refuse(403, "Choose your batch first (only an admin can check all batches).")
-    sel, metas = sel0, metas0
-    if not sel: return refuse(404, "No cards to check.")
-    blabel = blabel0
-    res = build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "")
-    body, comp, summ = res[0], res[3], res[4]; view = summ.pop("_view", None) or {}
-    cinfo = crm_source.info(); dec = summ["decisions"]; cnt = summ["counts"]
-    why = {int(i): w for i, w in view.get("left", [])}
-    filecheck = ""
-    tmp = tempfile.mkdtemp(prefix="gac-dryrun-")
-    try:
-        open(os.path.join(tmp, "export.xlsx"), "wb").write(body)
-        spec = importlib.util.spec_from_file_location("gac_dryrun", os.path.join(os.path.dirname(__file__), "..", "mctrade-dryrun", "dryrun.py"))
-        dr = importlib.util.module_from_spec(spec); spec.loader.exec_module(dr)
-        with contextlib.redirect_stdout(io.StringIO()): n_ = len(dr.read_export(os.path.join(tmp, "export.xlsx")))
-        # round 11 (manager-r10 L-r9-3): the UPDATES file is read back too; "0 rows" alone no longer reads as "nothing to import"
-        ub = comp.get("updates.xlsx") if isinstance(comp, dict) else None
-        nu_ = None
-        if ub:
-            open(os.path.join(tmp, "updates.xlsx"), "wb").write(ub)
-            with contextlib.redirect_stdout(io.StringIO()): nu_ = len(dr.read_export(os.path.join(tmp, "updates.xlsx")))
-        parts_ = [f"new-profiles file: {n_} {_s(n_, 'row')}" + (" (no new profiles in this export)" if not n_ else "")]
-        if nu_ is not None: parts_.append(f"UPDATES file: {nu_} {_s(nu_, 'row')}")
-        filecheck = "The import files read back cleanly (" + "; ".join(parts_) + ")."
-    except (Exception, SystemExit) as e: filecheck = f"The import file could not be read back: {_html.escape(str(e)[:200])}"
-    finally: shutil.rmtree(tmp, ignore_errors=True)
-    LBL = {"new": "CREATE (new-profiles file)", "update": "UPDATE (UPDATES file)", "review": "NEEDS REVIEW (in neither file)", "left": "LEFT OUT (merged or fix first)"}
-    COL = {"new": "#d9ead3", "update": "#ddebf7", "review": "#fce4d6", "left": "#eeeeee"}
-    order = {"review": 0, "left": 1, "update": 2, "new": 3}
-    def nm(c): return _html.escape(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)")
-    trs = "".join(f"<tr data-card='{c['id']}' data-decision='{dec[str(c['id'])]}' style='background:{COL[dec[str(c['id'])]]}'><td>#{c['id']}</td><td>{nm(c)}</td><td>{_html.escape(c['fields'].get('company') or '')}</td>"
-                  f"<td><b>{LBL[dec[str(c['id'])]]}</b></td><td>{_html.escape(why.get(c['id'], ''))}</td></tr>"
-                  for c in sorted(sel, key=lambda c: (order[dec[str(c['id'])]], c["id"])))
-    left = [int(i) for i, k in dec.items() if k in ("review", "left")]
-    html_ = ("<!doctype html><html><head><meta charset='utf-8'><title>MC Trade dry run: match report</title></head><body style='font:14px sans-serif;margin:16px'>"
-             f"<h1>MC Trade dry run: match report (nothing was sent to MC Trade)</h1>"
-             f"<div style='background:#fff3cd;border:2px solid #b45309;padding:10px;margin:8px 0;font:15px sans-serif'><b>Compared against:</b> {_html.escape(cinfo['source'])}."
-             + ("" if cinfo["real"] else " <b>SAMPLE DATA: this is a rehearsal; no Profile IDs are assigned.</b>")
-             + f"<br><b>Cards checked:</b> {len(sel)}" + (f" · batch “{_html.escape(blabel)}”" if blabel else "")
-             + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · NEEDS REVIEW {cnt['review']} · LEFT OUT {cnt['left']}</b>"
-             + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {_s(summ['new_rows'], 'row')}, {summ['update_rows']} update {_s(summ['update_rows'], 'row')})"
-             + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are NEEDS REVIEW, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
-             + f"<br>{filecheck}</div>"
-             "<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>Card</th><th>Name</th><th>Company</th><th>Decision</th><th>Why</th></tr>"
-             + trs + "</table></body></html>")
-    auth.alog(user["username"], f"dry run: ran the MC Trade dry-run check on {len(sel)} {_s(len(sel), 'card')}, " + (f"batch “{blabel or batch}”" if batch else "all batches")
-              + f", filter {FILTERS.get(status, status)}; data source: {'REAL ' + cinfo['file'] if cinfo['real'] else 'SAMPLE data'}; result: "
-              + f"UPDATE {cnt['update']}, CREATE {cnt['new']}, NEEDS REVIEW {cnt['review']}, LEFT OUT {cnt['left']}"
-              + f"; not in either file {len(left)} (NEEDS REVIEW + LEFT OUT)" + (": " + ", ".join(f"#{i}" for i in sorted(left)[:500]) if left else "")
-              + "; cards checked: " + ", ".join(f"#{c['id']}" for c in sorted(sel, key=lambda c: c["id"])[:500]))   # manager-r9 L-r9-1/2
-    return Response(html_, media_type="text/html", headers={"Cache-Control": "no-store"})
+# ---------------------------------------------------------------- audit 2026-10 P2: modules split out of this file
+# They are imported last (they use this module's names as U.<name> at call time) and their names are re-exported here,
+# so `from app import ui; ui.<name>` keeps working everywhere.
+from . import pages as _pages  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
+from .pages import (  # noqa: E402,F401
+    PLACEHOLDER, THUMBS, THUMB_SIZES, _thumb, app_alias, drop_thumbs, legacy_card, legacy_card_post, legacy_csv,
+    legacy_home, legacy_queue, legacy_scan, legacy_sync, legacy_vcf, legacy_xlsx, privacy, remove_photo,
+    strip_admin, ui)
+from . import privacy as _privacy  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
+from .privacy import (  # noqa: E402,F401
+    JOB_KEEP_S, TOMBSTONES, _add_tombstone, _hard_delete, _redact, _retention_loop, _tombstones, _unmerge, _vals,
+    apply_tombstones, hard_delete, prune_memory, purge, purge_preview, run_purge)
+from . import exporting as _exporting  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
+from .exporting import (  # noqa: E402,F401
+    ADMIN_ONLY_FILTERS, AUDIT, COMPANION, EXPORT_BUSY, FILTERS, HANDLE, MORE, MT, NUMBERISH, PLAINNUM,
+    REVIEWER_FILTERS, SUSPECT_WEB, XCOLS, _EXL, _bname, _do_export_real, _export_claim, _export_release,
+    _export_set, _filter_refused, _fname, _note, _slug, _stale_export, _wdom, _when, build_export, comp_name,
+    crm_look, do_export, exact_email_profile, export_again, export_check, export_companion, export_history,
+    export_versions, ids3, plural, readme_totals, safe_cell, same_names, strict_profile_id, website_warnings)
+from . import audit_log as _audit_log  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
+from .audit_log import (  # noqa: E402,F401
+    NAMES, _audit_text, _fmtv, audit)
+from . import admin_files as _admin_files  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
+from .admin_files import (  # noqa: E402,F401
+    TPL_BAKS, _check_contacts, _check_template, _last_admin_change, _refused, _rotate_bak, _safe_fname,
+    contacts_info, contacts_version, export_dryrun, file_version, mctrade_source, remove_contacts, revert_template,
+    stale_admin, template_info, template_version, upload_contacts, upload_template)

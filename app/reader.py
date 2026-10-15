@@ -54,18 +54,25 @@ def _call(args, data, key=None, mem_mb=None, timeout=None):
         if key: RUNNING[key] = p
         import threading, time
         killed = []
-        def watch():
-            t0 = time.time()
+        def watch():   # memory only; the time budget is enforced by communicate(timeout=...) below
             while p.poll() is None:
                 # audit 2026-10: the hard backstop is enforced here too; macOS ignores RLIMIT_AS and Windows has no RLIMIT
-                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)) or time.time() - t0 > timeout:
+                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)):
                     killed.append(1)
                     try: p.kill()
                     except Exception: pass
                     return
                 time.sleep(0.1)
         threading.Thread(target=watch, daemon=True).start()
-        try: so, se = p.communicate()
+        # audit 2026-10 (Windows CI): the time budget used to start when the watch thread first ran; on a busy machine that
+        # could be after the child had finished, so the budget silently didn't apply. Now it runs from the child's start.
+        try:
+            try: so, se = p.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                killed.append(1)
+                try: p.kill()
+                except Exception: pass
+                so, se = p.communicate()
         finally:
             if key: RUNNING.pop(key, None)
         if killed: raise ReaderError(CALM)
@@ -97,8 +104,22 @@ def _rss_mb(pid):
     except FileNotFoundError: pass
     except Exception: return 0
     if os.name == "nt": return _rss_windows(pid)
-    if sys.platform == "darwin": return _rss_ps(pid)
+    if sys.platform == "darwin": return _rss_darwin(pid) or _rss_ps(pid)
     return 0
+_LIBPROC = []
+def _rss_darwin(pid):
+    """macOS: resident size from libproc's proc_pidinfo(PROC_PIDTASKINFO) - no process start, so it can be read as often
+    as the watch polls (the rate-limited `ps` reading let a short-lived child slip under the cap)."""
+    try:
+        import ctypes
+        if not _LIBPROC: _LIBPROC.append(ctypes.CDLL("/usr/lib/libproc.dylib"))
+        class TaskInfo(ctypes.Structure):   # struct proc_taskinfo (96 bytes)
+            _fields_ = [(n, ctypes.c_uint64) for n in ("virtual", "resident", "user", "system", "threads_user", "threads_system")] + \
+                       [(n, ctypes.c_int32) for n in ("policy", "faults", "pageins", "cow", "msg_sent", "msg_recv", "mach", "unix", "csw", "threadnum", "running", "priority")]
+        ti = TaskInfo()
+        n = _LIBPROC[0].proc_pidinfo(ctypes.c_int(pid), ctypes.c_int(4), ctypes.c_uint64(0), ctypes.byref(ti), ctypes.c_int(ctypes.sizeof(ti)))
+        return ti.resident / (1024 * 1024) if n == ctypes.sizeof(ti) else 0
+    except Exception: return 0
 def _rss_windows(pid):
     try:
         import ctypes

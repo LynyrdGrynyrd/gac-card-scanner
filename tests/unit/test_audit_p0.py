@@ -97,12 +97,12 @@ def test_edit_during_build_refuses_and_marks_nothing(env, monkeypatch):
         res = real(*a, **k)
         c = store.get(cid); store.update(cid, fields=c["fields"] | {"title": "Edited meanwhile"})   # a reviewer saves now
         return res
-    monkeypatch.setattr(ui, "build_export", build_and_edit)
+    monkeypatch.setattr(ui._exporting, "build_export", build_and_edit)
     n_files = len(os.listdir(ui.EXP))
     r = _export(adm, b)
     assert r.status_code == 409 and r.json()["need"] == "stale_review"
     assert not ui.meta(cid).get("exported") and len(os.listdir(ui.EXP)) == n_files
-    monkeypatch.setattr(ui, "build_export", real)
+    monkeypatch.setattr(ui._exporting, "build_export", real)
     r = _export(adm, b); assert r.status_code == 200 and ui.meta(cid).get("exported")
 
 
@@ -112,7 +112,7 @@ def test_card_approved_after_signoff_is_not_exported(env, monkeypatch):
     real = ui._export_claim
     def claim_then_approve(*a, **k):   # a card is approved after the sign-off check passed, before the set is re-read
         r = real(*a, **k); late.append(_approved(ui, store, b)); return r
-    monkeypatch.setattr(ui, "_export_claim", claim_then_approve)
+    monkeypatch.setattr(ui._exporting, "_export_claim", claim_then_approve)
     r = _export(adm, b)
     assert r.status_code == 409 and r.json()["need"] == "stale_review" and not ui.meta(late[0]).get("exported")
 

@@ -4,7 +4,8 @@
 // - downloads/exports saved through a native Save dialog (webviews don't have a download manager)
 (function () {
   const isDesk = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.save_file);
-  const say = (m, ms) => { if (typeof toast === "function") toast(m, ms); };
+  // audit 2026-10 P2: the page code is ES modules now; it hands this glue only window.gac = {toast, enqueue} (set by main.js)
+  const say = (m, ms) => { if (window.gac && window.gac.toast) window.gac.toast(m, ms); };
   const b64 = buf => { const u = new Uint8Array(buf); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
   const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const fname = (res, url) => { const cd = res.headers.get("content-disposition") || "";
@@ -53,7 +54,7 @@
                     r && r.capped ? `Only the first ${files.length} file${files.length === 1 ? "" : "s"} (up to ${r.max_mb || 300} MB) ${files.length === 1 ? "was" : "were"} added: pick a smaller folder, or fewer photos, for the rest.` : ""].filter(Boolean).join(" ");
       if (!files.length) { if (left) say(left, 9000); return; }
       const list = files.map(f => new File([unb64(f.b64)], f.name, {type: f.type}));
-      if (typeof enqueue === "function") { await enqueue(list); if (left) say(left, 9000); }
+      if (window.gac && window.gac.enqueue) { await window.gac.enqueue(list); if (left) say(left, 9000); }
     };
   });
 })();

@@ -5,10 +5,13 @@ import glob, os, re
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 UI = os.path.join(ROOT, "app", "static", "ui")
 PHONE = os.path.join(ROOT, "app", "static", "phone")
-SERVED = sorted(glob.glob(os.path.join(UI, "*.html")) + glob.glob(os.path.join(UI, "*.js")) +
+MODULES = sorted(set(glob.glob(os.path.join(UI, "**", "*.js"), recursive=True)) - {os.path.join(UI, n) for n in ("desktop.js", "login.js", "privacy.js")})
+SERVED = sorted(glob.glob(os.path.join(UI, "*.html")) + glob.glob(os.path.join(UI, "**", "*.js"), recursive=True) +
                 glob.glob(os.path.join(PHONE, "*.html")) + glob.glob(os.path.join(PHONE, "*.js")))
 
 def _src(p): return open(p, encoding="utf-8").read()
+def _page_js():   # audit 2026-10 P2: the page code is ES modules (main.js + core/, ui/, views/); read them all
+    return "\n".join(_src(p) for p in MODULES)
 def _strip_js_comments(s):   # good enough for this code base: // comments that start a line or follow whitespace
     return re.sub(r"(^|\s)//[^\n]*", r"\1", s)
 
@@ -16,7 +19,7 @@ INLINE = re.compile(r"<[a-z][^<>]*?\son[a-z]+\s*=", re.I)   # <a ... onclick=  i
 
 def test_served_files_exist():
     names = {os.path.basename(p) for p in SERVED}
-    assert {"index.html", "ui.js", "login.js", "login.html", "desktop.js", "phone.js", "sw.js"} <= names
+    assert {"index.html", "main.js", "login.js", "login.html", "desktop.js", "phone.js", "sw.js"} <= names
 
 def test_no_inline_event_handlers():
     bad = [(os.path.basename(p), m.group(0)[:80]) for p in SERVED for m in INLINE.finditer(_src(p))]
@@ -35,7 +38,7 @@ def test_no_inline_scripts_in_html():
             assert "src=" in m.group(1) and not m.group(2).strip(), (os.path.basename(p), m.group(0)[:80])
 
 def test_export_it_link_uses_a_delegated_listener():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     assert "data-export-from=" in js and 'closest("a[data-export-from]")' in js
 
 def test_audit_csv_link_is_routed_in_the_desktop_app():
@@ -46,30 +49,30 @@ def test_audit_csv_link_is_routed_in_the_desktop_app():
 def test_every_api_fetch_goes_through_the_shared_auth_handling():
     # audit 2026-10: dl()/tileExport used raw fetch and skipped call()'s 401 handling; only call(), fetchOk() and the
     # public /api/auth/state + /health checks may call fetch() directly
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     raw = [ln.strip()[:90] for ln in js.splitlines() if re.search(r"(?<![\w.])fetch\(", ln)]
     allowed = ("const r = await fetch(u, o)", "const r = await fetch(u, {credentials", "fetch(\"/api/auth/state\"", "fetch(\"/health\")")
     assert all(any(a in ln for a in allowed) for ln in raw), raw
     assert "function handleAuth(" in js and js.count("handleAuth(") >= 3
 
 def test_upload_401_pauses_instead_of_failing():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     assert "x.status === 401" in js and "authPause()" in js and "/api/auth/state" in js
     assert "data-retry=" in js
     assert "Please sign in" not in js.split("function upload(")[1].split("function conn(")[0]
 
 def test_upload_thumbnails_are_small_and_revoked():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     assert "resizeWidth: 96" in js and "URL.revokeObjectURL(r.thumb)" in js
     assert "row.thumb = isPdf(f)" not in js                      # no full-resolution blob URL per row any more
 
 def test_queue_render_is_debounced_and_keeps_focus():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     assert re.search(r'\$\("#fText"\)\.oninput = .*setTimeout\(.*150\)', js)
     assert "vis.includes(" not in js and "focus({preventScroll: true})" in js.split("function renderQueue(")[1].split("\n}\n")[0]
 
 def test_a11y_tabs_toast_ai_box_and_dialogs():
-    html, js = _src(os.path.join(UI, "index.html")), _src(os.path.join(UI, "ui.js"))
+    html, js = _src(os.path.join(UI, "index.html")), _page_js()
     assert 'role="tab' not in html and "aria-selected" not in js           # toggle buttons, not tabs without tabpanels
     assert html.count('aria-pressed="true"') == 2
     assert not re.search(r'id="rAI"[^>]*role=', html) and 'role="status">${p.eta' not in js
@@ -77,7 +80,7 @@ def test_a11y_tabs_toast_ai_box_and_dialogs():
     assert not re.search(r"(?<![\w.])confirm\(", _strip_js_comments(js))   # the app's ask() dialog, not window.confirm
 
 def test_polling_skips_work_while_hidden_and_toast_does_not_poll_undo():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     for fn in ("async function phoneRefresh()", "async function aiQueueTick()", "async function aiHelperRefresh()"):
         assert "document.hidden" in js.split(fn)[1].split("\n}\n")[0][:300], fn
     toast = js.split("const toast = ")[1].split("\n{ const t")[0]
@@ -95,13 +98,55 @@ def test_phone_camera_stops_when_hidden_and_camera_app_is_offered():
     assert 'id="camApp"' in html.split('id="live"')[1].split("</div>\n  <div")[0] and '$("#camApp").onclick' in js
 
 def test_dead_code_stays_gone():
-    js = _src(os.path.join(UI, "ui.js"))
+    js = _page_js()
     for name in ("needWho", "cap16", "ids17", "KIND_", "refreshCounts.t", "Q.loaded", "gacDownload"):
         assert name not in js, name
 
 def test_all_batches_queue_is_paged_and_pending_lists_are_capped():
-    js, html = _src(os.path.join(UI, "ui.js")), _src(os.path.join(UI, "index.html"))
+    js, html = _page_js(), _src(os.path.join(UI, "index.html"))
     assert "limit=0" not in _strip_js_comments(js).replace("&limit=0&batch=", "")               # only one-batch lists ask for everything
     assert 'qs.set("limit", "0")' not in js and "X-Total" in js and "const QPAGE = 200" in js
     assert 'id="qMoreBtn"' in html and "Load more (${Q.cards.length} of ${Q.total} shown)" in js
     assert '"&limit=500"' in js and 'qs.set("limit", "500")' in js
+
+# ---------------------------------------------------------------- audit 2026-10 P2: ES modules
+import shutil, subprocess, pytest
+
+def test_page_loads_as_one_module_entry_point():
+    html = _src(os.path.join(UI, "index.html"))
+    assert re.search(r'<script type="module" src="/static/ui/main\.js\?v=[^"]*"></script>', html)
+    assert "ui.js" not in html and not os.path.exists(os.path.join(UI, "ui.js"))
+    assert len(MODULES) >= 10
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_every_module_is_valid_es_module_syntax():
+    for p in MODULES:
+        with open(p, "rb") as f:
+            r = subprocess.run(["node", "--input-type=module", "--check"], stdin=f, capture_output=True, text=True)
+        assert r.returncode == 0, (os.path.relpath(p, UI), r.stderr[-800:])
+
+IMPORT = re.compile(r'^import\s*(?:\{([^}]*)\}\s*from\s*)?"([^"]+)";', re.M)
+EXPORT = re.compile(r"^export\s*\{([^}]*)\};", re.M)
+
+def test_module_imports_resolve_to_real_exports():
+    # every import is a relative path to an existing module (no import map: the CSP would block an inline one, and the
+    # server revalidates /static/ui/ instead, see auth.py) and every imported name is exported there
+    exports = {p: {n.strip() for m in EXPORT.finditer(_src(p)) for n in m.group(1).split(",") if n.strip()} for p in MODULES}
+    reached = {os.path.join(UI, "main.js")}
+    for p in MODULES:
+        for m in IMPORT.finditer(_src(p)):
+            spec = m.group(2); assert spec.startswith("./") or spec.startswith("../"), (p, spec)
+            tgt = os.path.normpath(os.path.join(os.path.dirname(p), spec)); assert tgt in exports, (p, spec)
+            reached.add(tgt)
+            for n in (m.group(1) or "").split(","):
+                if n.strip(): assert n.strip() in exports[tgt], (os.path.relpath(p, UI), n.strip(), spec)
+    assert reached == set(MODULES), set(MODULES) - reached              # every module is part of the page
+
+def test_shared_mutable_state_lives_in_one_object():
+    js = _page_js()
+    st = _src(os.path.join(UI, "core", "state.js"))
+    for n in ("ME", "B", "cur", "dirty", "SAVING", "CARD_READY", "DLG_DONE", "SIGNING_OUT", "BATCHES"):
+        assert re.search(rf"^\s*{n}:", st, re.M), n
+        assert not re.search(rf"^(let|var|const)\s+{n}\b", js, re.M), n
+    assert "window.gac = Object.freeze({toast, enqueue})" in js
+    d = _src(os.path.join(UI, "desktop.js")); assert "window.gac.toast" in d and "window.gac.enqueue" in d and "typeof toast" not in d

@@ -1,4 +1,4 @@
-import os, uuid, contextlib
+import os, contextlib
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from . import store
@@ -7,9 +7,15 @@ from . import ui as _ui, auth as _auth, phone as _phone, updates as _updates
 
 @contextlib.asynccontextmanager
 async def _lifespan(_app):
-    # Everything with side effects runs here, when uvicorn SERVES the app, never on import (round 6).
-    _startup_checks(); _ai_banner(); _ui.start_workers(); _updates.check_in_background()
+    # Everything with side effects runs here, when uvicorn SERVES the app, never on import (round 6; audit 2026-10 P2: the
+    # AI-helper autostart and the public demo's wipe + re-seed used to run at import too, e.g. in any script importing app.main)
+    from . import ai_helper as _aih, demo as _demo
+    _startup_checks(); _ai_banner(); _aih.autostart()
+    if _demo.enabled(): _demo.start()
+    _ui.start_workers(); _updates.check_in_background()
     yield
+    try: _phone.stop_server()   # shutdown: close the phone LAN listener if one is open
+    except Exception: pass
 app = FastAPI(title="GAC Card Scanner (pilot)", lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)  # no public API explorer
 _HELP_PDFS = {"Reviewer": "GAC-Card-Scanner-Reviewer-Guide.pdf", "Admin": "GAC-Card-Scanner-Admin-Guide.pdf",
               "Help": "GAC-Card-Scanner-Reviewer-Guide.pdf"}   # v0.2.1: the combined guide was split; its old link opens the reviewer guide
@@ -38,12 +44,14 @@ from . import paths
 UP = paths.data("uploads"); os.makedirs(UP, exist_ok=True)
 
 def _ingest(data: bytes, engine: str, ext=".jpg"):
-    name = uuid.uuid4().hex + ext
-    open(os.path.join(UP, name), "wb").write(data)
-    # Fast path via the shared pipeline: QR/vCard + OCR (+ crop pass) + rules. The slow vision-model pass is NOT run here;
-    # the /ui job queue schedules it in the background as an "AI double-check" (see app/ui.py).
-    r = _ui.scan_limited(data, None if engine in (None, "", "tesseract", "auto", "standard", "hybrid") else engine, use_vlm=False)
-    return store.add(r["engine"], r["text"], r["fields"], name)
+    # Audit 2026-10 P2: the same ingest as the /ui upload queue (ui.ingest -> ui.scan_limited: QR/vCard + OCR + rules, the
+    # vision model NOT run here), so a card added through /api/scan also gets its photo hash, file name and history row
+    # (the duplicate-photo check used to miss these cards).
+    import hashlib
+    cid, src = _ui.ingest(data, None if engine in (None, "", "tesseract", "auto", "standard", "hybrid") else engine, ext,
+                          meta_kw={"sha256": hashlib.sha256(data).hexdigest(), "filename": "api-scan" + ext})
+    _ui.set_meta(cid, field_sources=__import__("json").dumps(src)); _ui.log(cid, "API", "scanned", None, "pending", {"file": "api-scan" + ext, "via": "/api/scan"})
+    return cid
 
 @app.post("/api/scan")
 async def api_scan(image: UploadFile = File(...), engine: str = Form("tesseract")):
@@ -56,9 +64,6 @@ async def api_scan(image: UploadFile = File(...), engine: str = Form("tesseract"
     problem = await run_in_threadpool(_ui._check_image, data)
     if problem: return JSONResponse({"error": problem}, 422)
     cid = await run_in_threadpool(_ingest, data, engine); return store.get(cid)
-
-@app.get("/img/{name}")
-def img(name: str): return FileResponse(os.path.join(UP, os.path.basename(name)))  # shadowed by app/ui.py's /img (registered first)
 
 # The old server-rendered pages (/card/{id} form, /queue, /export.*, /sync/dry-run) were retired in round 4:
 # every approval now goes through /api/cards/{id} (one validator). app/ui.py answers the old URLs with a redirect or 410.
@@ -93,9 +98,7 @@ def _ai_banner():
         line = f"AI checker online at {url}" if up else f"AI checker OFFLINE (nothing answers at {url}). Scanning works; the AI double-check is off until start-ai-checker.command runs."
         print("\n" + "=" * 78 + "\n" + line + "\n" + "=" * 78 + "\n", flush=True)
     threading.Thread(target=run, daemon=True).start()
-_startup_checks(); _ai_banner(); _aih.autostart()
 from . import demo as _demo
-if _demo.enabled(): _demo.start()
 @app.get("/api/demo")
 def demo_info():
     """Public: lets a page/script know whether this is the public demo (no secrets beyond the published demo login)."""
