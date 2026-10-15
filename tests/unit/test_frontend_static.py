@@ -82,3 +82,14 @@ def test_polling_skips_work_while_hidden_and_toast_does_not_poll_undo():
         assert "document.hidden" in js.split(fn)[1].split("\n}\n")[0][:300], fn
     toast = js.split("const toast = ")[1].split("\n{ const t")[0]
     assert "if (undo) refreshUndo()" in toast
+
+def test_phone_service_worker_is_network_first_and_versioned():
+    sw = _src(os.path.join(PHONE, "sw.js"))
+    assert '"gac-phone-v1"' not in sw and "caches.delete" in sw
+    assert "caches.match(e.request).then(r => r || fetch" not in sw          # no cache-first: a new phone.js is always seen
+    assert re.search(r"respondWith\(fetch\(e\.request\)", sw)
+
+def test_phone_camera_stops_when_hidden_and_camera_app_is_offered():
+    js, html = _src(os.path.join(PHONE, "phone.js")), _src(os.path.join(PHONE, "index.html"))
+    assert "visibilitychange" in js and "getTracks().forEach(t => t.stop())" in js and "gen !== detGen" in js
+    assert 'id="camApp"' in html.split('id="live"')[1].split("</div>\n  <div")[0] and '$("#camApp").onclick' in js
