@@ -55,7 +55,11 @@ In Claude Code cloud sessions `.claude/hooks/session-start.sh` installs Tesserac
   the pilot's real-card set is not in the repo. Build one from a scanner's database with
   `bench/extract_eval_set.py --data-dir <data folder>` (read-only; writes to the app's corrections folder, covered by
   retention) and score it with `bench/eval_bench.py <out>/gt.json <out> --show`.
-- `OSS-SURVEY.md` lists what was tried and rejected (PP-OCRv5, docTR, usaddress, probablepeople, rembg …) with numbers.
+- `OSS-SURVEY.md` lists what was tried and rejected (PP-OCRv5, docTR, usaddress, probablepeople, rembg, Splink, GLiNER)
+  with numbers. Its 2026-10-15 re-check found RapidOCR 3.x + PP-OCRv6 small clearly better on synthetic cards (not yet
+  adopted: needs a real-card check and the opencv-headless conflict solved).
+- `tests/synth2` is a development set: the same generator with other seeds scores ~20 fields lower. Check a parser
+  change on freshly generated cards too, not only on synth2.
 
 ## Tests and style
 - Every fix gets a test. Unit tests use the session-scoped `env` fixture (shared DB): give your cards a unique batch
