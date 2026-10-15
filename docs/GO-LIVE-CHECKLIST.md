@@ -21,7 +21,7 @@ Do these steps, in order, before the first real event. Tick each one off and not
 - [ ] **Handover (round 13): the pilot box is currently running with `GAC_HOST=0.0.0.0`** so the QA testers can reach it on 127.0.0.2–.7. Before go-live, restart it on 127.0.0.1: stop the server, then run `VLM_URL=http://127.0.0.1:8090 PORT=8765 scripts/serve.sh` (no `GAC_HOST`), and check `curl http://127.0.0.2:8765/health` no longer answers.
 - [ ] Phones use **Scan cards → Scan with phone**. This opens a separate listener only for the phone page, only while a pairing is live.
 - [ ] In **Admin → Settings**, decide on the update check: "Check for scanner updates" is shown there and can be switched off.
-- [ ] Set `GAC_BACKUP_DIR` to another disk, such as a USB drive or network share. The server log warns when backups are on the same disk as the data.
+- [ ] Set `GAC_BACKUP_DIR` to another disk, such as a USB drive or network share. The server log warns when backups are on the same disk as the data. (Defaults: the desktop app uses `<data folder> Backups` next to its data folder; Docker uses the `gac-backups` volume; a source install uses `backups/`.)
 
 ## 4. First real import
 - [ ] Turn on "Update existing MC Trade contacts" only once the update path has been tried. Update rows leave **MemberSince blank**.

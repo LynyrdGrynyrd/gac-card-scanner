@@ -1,5 +1,5 @@
 # Card Scanner: Data team guide
-*Greater Akron Chamber · internal pilot*
+*Greater Akron Chamber*
 
 This guide covers everything the data team does day to day. For first-time installation see **QUICKSTART.md**.
 
@@ -28,7 +28,7 @@ This guide covers everything the data team does day to day. For first-time insta
 - You stay signed in for 12 hours of inactivity. Use **Sign out** on shared computers.
 - **Admin → Reviewers:** add a person (they get a temporary password and must change it), reset a password, deactivate someone who left (their past work stays in the audit log), or change a role.
 
-![Reviewers](shots/16_admin_reviewers.png)
+![Reviewers](app/static/ui/help-img/23_admin_reviewers.webp)
 
 ## 2. Scanning cards
 - **One card per photo.** Lay the card flat on a dark, plain surface, fill the frame, and avoid glare.
@@ -44,7 +44,7 @@ This guide covers everything the data team does day to day. For first-time insta
 - Your filters stay when you refresh the page.
 - **Bulk approve/reject:** tick cards (or the box at the top for all shown), then **Approve selected**. Cards that still need fixing or have a duplicate question are **skipped** and listed, so bulk approve never lets a problem through.
 
-![Queue](shots/04_queue.png)
+![Queue](app/static/ui/help-img/05_queue.webp)
 
 ## 4. Reviewing a card
 - The photo is on the left (click to enlarge), editable fields on the right.
@@ -54,7 +54,7 @@ This guide covers everything the data team does day to day. For first-time insta
 - **History** (under the photo) shows who scanned, edited, approved, exported or undid what, and when.
 - Shortcuts (when not typing in a field): **A** approve · **R** reject · **J** next · **K** previous · **U** undo · **Esc** leaves a field.
 
-![Validation](shots/06_validation_block.png)
+![Validation](app/static/ui/help-img/07_validation_dialog.webp)
 
 ## 5. Duplicates
 Two kinds of possible duplicate, both with plain choices:
@@ -90,7 +90,7 @@ Also available: **Spreadsheet (CSV)**, with reviewer columns, and **Contacts (vC
 
 **Export history** (bottom of the Export page) lists every export (when, who, how many cards), and you can download a copy again while it's kept. After an export, those cards no longer appear under "not yet exported"; the queue's **Not yet exported** filter shows the same thing.
 
-![Export history](shots/12_export_done.png)
+![Export history](app/static/ui/help-img/22_export_history.webp)
 
 ## 8. Privacy, photo deletion and the audit log
 - Read the **Privacy** note (link at the bottom of every page).
@@ -99,7 +99,7 @@ Also available: **Spreadsheet (CSV)**, with reviewer columns, and **Contacts (vC
 - **Admin → Audit log:** every sign-in, failed sign-in, decision, edit, merge, export, re-download, undo, setting change (only what changed, e.g. "AI double-check: on → off"), photo deletion and permanent deletion, with who and when. Re-downloads and deletions carry the card numbers, so searching `#17` finds them. After a removal request the card's rows stay, with the personal details removed. Search it, or **Download as CSV**.
 - **Keep corrected cards as test examples** is **off** by default; turning it on keeps a copy of corrected card photos in bench/corrections (see the Privacy note).
 
-![Audit log](shots/18_admin_audit.png)
+![Audit log](app/static/ui/help-img/26_admin_audit.webp)
 
 ## 9. Phones
 1. In the scanner, open **Scan cards → Scan with phone** and scan the QR code with a phone on the **same office Wi-Fi**.
