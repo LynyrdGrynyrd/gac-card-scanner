@@ -1344,10 +1344,24 @@ async function exportInfo() {
     return r;
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
 }
+// audit 2026-10: say what was really saved. In the desktop app each file goes through a native Save dialog that can be
+// cancelled (desktop.js gacSaveBlob answers {saved} | {cancelled} | {error}); a browser only takes the download over.
+async function saveBlob(blob, name) {
+  const d = window.gacSaveBlob && window.gacSaveBlob(blob, name); if (d) return await d;
+  const a = document.createElement("a"), u = URL.createObjectURL(blob); a.href = u; a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000); return {name, started: true};
+}
+const lostFiles = outs => outs.filter(o => !o.saved && !o.started);
+function savedText(outs) {
+  if (outs.every(o => o.started)) return `Your browser is downloading ${plural(outs.length, "file")}.`;
+  const ok = outs.filter(o => o.saved), no = lostFiles(outs);
+  return ((ok.length ? `Saved ${ok.length === 1 ? ok[0].saved : plural(ok.length, "file") + " to " + ok[0].saved.replace(/[\\/][^\\/]*$/, "")}.` : "") +
+    (no.length ? ` Not saved: ${no.map(o => `${o.name} (${o.cancelled ? "cancelled" : o.error || "failed"})`).join(", ")}.` : "")).trim();
+}
 async function dl(url) {   // fetch + save, so several files can be downloaded from one click
   const r = await fetchOk(url);
-  const nm = (r.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "file", a = document.createElement("a");
-  a.href = URL.createObjectURL(await r.blob()); a.download = decodeURIComponent(nm); document.body.append(a); a.click(); a.remove(); return r;
+  const nm = (r.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "file";
+  return {r, out: await saveBlob(await r.blob(), decodeURIComponent(nm))};
 }
 $("#exPreview").onclick = async () => {
   // round 20 (coordinator r19): Preview shows the files ON SCREEN only; downloading the PREVIEW- copies is a separate button
@@ -1361,9 +1375,9 @@ $("#exPreview").onclick = async () => {
           ((v.warnings || []).length ? `<details class="more"><summary>In the file, with a warning (${v.warnings.length})</summary><ul>${v.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""),
           wide: true, buttons: [{label: "Close", cls: "primary", value: null, primary: true}, {label: "Download preview files (not for import)", value: "dl"}]});
         if (a.value !== "dl") return;
-        const r = await dl(q), comp = (r.headers.get("X-Companions") || "").split(",").filter(Boolean);
-        for (const c of comp) await dl(q + "&companion=" + c);
-        toast(`Saved ${plural(1 + comp.length, "PREVIEW file")} to Downloads. Not for import.`, 4000, true); }
+        const {r, out} = await dl(q), comp = (r.headers.get("X-Companions") || "").split(",").filter(Boolean), outs = [out];
+        for (const c of comp) outs.push((await dl(q + "&companion=" + c)).out);
+        toast(savedText(outs) + " These are PREVIEW files, not for import.", lostFiles(outs).length ? 8000 : 5000); }
   catch (e) { toast("Preview not made: " + e.message, 5000); }
 };
 $("#exDryrun").onclick = () => { window.open(`/api/export/dryrun?status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`, "_blank", "noopener"); };
@@ -1416,7 +1430,7 @@ async function tileExport(t) {
                  (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
         (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
         `</ul></div>`; } } catch {} }
-  const r = await ask({title: `Export ${plural(info.count, "card")}?`, html: so + `<p>Format: <b>${KIND[kind]}</b><br>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b><br>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "One file goes to your Downloads folder."}</p>`,
+  const r = await ask({title: `Export ${plural(info.count, "card")}?`, html: so + `<p>Format: <b>${KIND[kind]}</b><br>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b><br>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p>`,
     buttons: [{label: "Export", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");
@@ -1424,12 +1438,12 @@ async function tileExport(t) {
     const sv = seenV ? Object.entries(seenV).map(([k, x]) => `&seen_${k}=${encodeURIComponent(x)}`).join("") : "";
     const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
     const name = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "export." + kind, n = res.headers.get("X-Card-Count");
-    const blob = await res.blob(), a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove();
+    const outs = [await saveBlob(await res.blob(), name)];
     $("#exDone").hidden = false;
     const eid = res.headers.get("X-Export-Id"), comp = (res.headers.get("X-Companions") || "").split(",").filter(Boolean);
-    for (const c of comp) { let r2; try { r2 = await fetchOk(`/api/exports/${eid}/companion/${c}`); } catch (x) { if (x.status === 401) throw x; continue; }
-      const nm = (r2.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || c, a2 = document.createElement("a");
-      a2.href = URL.createObjectURL(await r2.blob()); a2.download = decodeURIComponent(nm); document.body.append(a2); a2.click(); a2.remove(); }
+    for (const c of comp) { let r2; try { r2 = await fetchOk(`/api/exports/${eid}/companion/${c}`); } catch (x) { if (x.status === 401) throw x; outs.push({name: c, error: x.message}); continue; }
+      const nm = (r2.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || c;
+      outs.push(await saveBlob(await r2.blob(), decodeURIComponent(nm))); }
     $("#exDone").className = "alert ok"; $("#exDone").hidden = false;
     let sm = null; try { sm = JSON.parse(res.headers.get("X-Summary") || "null"); } catch {}
     // round 23 (coordinator/newcomer r22): one short line, plus only what needs action
@@ -1437,8 +1451,10 @@ async function tileExport(t) {
         (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "") +
         (sm.possible.length ? ` <span class="flag low">Maybe in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "")
       : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the .xlsx${comp.includes("updates.xlsx") ? " (updates separately)" : ""}. Read the READ-ME and try 2 rows first.` : "");
+    const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
+    if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
     $("#exDone").dataset.batch = $("#exBatch").value;
-    toast(kind === "xlsx" ? `Saved ${1 + comp.length} files to Downloads. Read the READ-ME first.` : "Saved to Downloads.", 5000); exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
+    toast(savedText(outs) + (kind === "xlsx" && !lost.length ? " Read the READ-ME first." : ""), lost.length ? 9000 : 5000); exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
   } catch (e) { $("#exDone").hidden = false; $("#exDone").className = "alert bad"; $("#exDone").textContent = "Export failed: " + e.message; }
   finally { t.removeAttribute("aria-busy"); }
 }
