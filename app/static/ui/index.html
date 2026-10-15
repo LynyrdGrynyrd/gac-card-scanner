@@ -269,7 +269,7 @@
   </div>
   <div id="t-audit" class="panel" hidden>
     <h2>Audit log</h2>
-    <div class="row"><label class="sr" for="aQ">Search the audit log</label><input type="search" id="aQ" placeholder="Search the log" style="max-width:360px"><a class="btn small" id="aCsv" href="/api/admin/audit?fmt=csv&limit=5000">Download as CSV</a></div>
+    <div class="row"><label class="sr" for="aQ">Search the audit log</label><input type="search" id="aQ" placeholder="Search the log" style="max-width:360px"><a class="btn small" id="aCsv" href="/api/admin/audit?fmt=csv&limit=5000" download>Download as CSV</a></div>
     <div class="tablewrap"><table class="q plain"><caption class="sr">Audit log</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Type</th><th scope="col">Card</th><th scope="col">What happened</th></tr></thead><tbody id="aBody"></tbody></table></div>
   </div>
 <!--ADMIN-END-->
@@ -288,6 +288,6 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <footer class="foot"><div class="wrap">Card Scanner <strong>Pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a> · <span id="appVer"></span></div></footer>
 <script src="/static/ui/ui.js?v=8"></script>
-<script src="/static/ui/desktop.js?v=3"></script>
+<script src="/static/ui/desktop.js?v=4"></script>
 </body>
 </html>

@@ -31,7 +31,7 @@
     if (/^\/static\/.*\.pdf(\?|#|$)/i.test(href) && window.pywebview.api.open_url) {   // Help PDFs: system browser, not a webview download
       ev.preventDefault(); window.pywebview.api.open_url(href.split("#")[0]); return;
     }
-    if (a.hasAttribute("download") || /^\/api\/(export|exports)\b/.test(href)) {
+    if (a.hasAttribute("download") || /^\/api\/(export|exports)\b|^\/api\/admin\/audit\?(.*&)?fmt=csv\b/.test(href)) {   // audit 2026-10: the audit-log CSV too
       ev.preventDefault(); saveUrl(a.href, a.getAttribute("download") || "").catch(e => typeof toast === "function" && toast(e.message, 5000));
     }
   }, true);

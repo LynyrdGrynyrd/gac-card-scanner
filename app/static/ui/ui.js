@@ -24,7 +24,8 @@ async function call(u, o = {}) {
   const av = r.headers.get("X-GAC-Asset");   // round 9: the app was updated while this tab was open
   if (av && ASSET_V && av !== ASSET_V && !$("#verWarn")) {
     if (!dirty && !SAVING && !$("#dlg").open && !$$('[aria-busy="true"]').length) { saveDraft(); location.reload(); }   // round 11 (newcomer r10): never mid-action
-    else document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="alert" role="alert">The scanner was updated. Save your work, then <a href="javascript:location.reload()">reload the page</a>.</div>`);
+    else { document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="alert" role="alert">The scanner was updated. Save your work, then <button type="button" class="link" id="verReload">reload the page</button>.</div>`);
+      $("#verReload").onclick = () => location.reload(); }   // audit 2026-10: a javascript: URL is blocked by the CSP
   }
   const uid = r.headers.get("X-GAC-User");
   if (ME && uid && uid !== String(ME.id) && !$("#swapWarn")) {   // another tab signed this browser in as someone else
@@ -546,7 +547,7 @@ function renderQueue() {
   $("#qEmpty").hidden = rows.length > 0;
   $("#qEmpty").textContent = Q.cards.length ? (anyFilter ? "No cards match. Clear the filters or search." : `No ${({pending: "pending", approved: "approved", rejected: "rejected"})[Q.s] || ""} cards in this batch. ` + (Q.s === "pending" ? "See “All”, or go to Export." : "See “Pending” or “All”.")) : "No cards yet. Go to “Scan cards” to add some.";
   if (!rows.length && Q.batch && Q.s === "pending" && !Q.att && !Q.nx && !Q.dup && !Q.text && Q.cards.length && Q.cardsFor === Q.batch && !(Q.reading && Q.batch === Q.reading))
-    $("#qEmpty").innerHTML = `<b>✓ All done:</b> no pending cards in ${esc(($("#fBatch").selectedOptions[0] || {}).textContent || "this batch")}.` + (Q.cards.some(c => c.status === "approved") ? ` <a href="#export" onclick="sessionStorage.exportFrom=${esc(JSON.stringify(Q.batch || ""))}">Export it</a>` : " Nothing to export: no card was approved.");   // round 20   // round 15 (part-timer r14)
+    $("#qEmpty").innerHTML = `<b>✓ All done:</b> no pending cards in ${esc(($("#fBatch").selectedOptions[0] || {}).textContent || "this batch")}.` + (Q.cards.some(c => c.status === "approved") ? ` <a href="#export" data-export-from="${esc(Q.batch || "")}">Export it</a>` : " Nothing to export: no card was approved.");   // round 20   // round 15 (part-timer r14)
   if (!rows.length && Q.reading && Q.batch === Q.reading) $("#qEmpty").innerHTML = `<span class="spin" aria-hidden="true"></span> Reading your newest batch. Cards appear as they finish.`;
   $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = filtered().map(c => c.id); [...Q.sel].forEach(i => { if (!vis.includes(i) || (Q.cards.find(c => c.id === i) || {}).status !== (Q.s || (Q.cards.find(c => c.id === i) || {}).status)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree
   const inB = Q.cardsFor === Q.batch ? Q.cards.filter(c => inBatch(c, Q.batch)) : [], cnt = {pending: 0, approved: 0, rejected: 0, "": inB.length};
@@ -558,6 +559,8 @@ $("#qBody").addEventListener("click", e => {
   if (e.target.classList.contains("sel")) { e.target.checked ? Q.sel.add(id) : Q.sel.delete(id); syncSel(); return; }
   if (e.target.tagName !== "A") location.hash = "review/" + id;
 });
+// audit 2026-10 C9: "Export it" used an inline onclick, which the CSP (script-src 'self') blocks; one delegated listener instead
+$("#qEmpty").addEventListener("click", e => { const a = e.target.closest("a[data-export-from]"); if (a) SS.exportFrom = a.dataset.exportFrom; });
 // round 8 (newcomer r8 N1): the header box selects YOUR cards (cards in batches you scanned); other people's cards only on request
 $("#selAll").onchange = e => { const rows = filtered().filter(c => inBatch(c, Q.batch)), mine = rows.filter(c => MINE.has(c.batch)), others = rows.filter(c => !MINE.has(c.batch));
   Q.sel.clear(); if (e.target.checked) mine.forEach(c => Q.sel.add(c.id));
