@@ -54,18 +54,25 @@ def _call(args, data, key=None, mem_mb=None, timeout=None):
         if key: RUNNING[key] = p
         import threading, time
         killed = []
-        def watch():
-            t0 = time.time()
+        def watch():   # memory only; the time budget is enforced by communicate(timeout=...) below
             while p.poll() is None:
                 # audit 2026-10: the hard backstop is enforced here too; macOS ignores RLIMIT_AS and Windows has no RLIMIT
-                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)) or time.time() - t0 > timeout:
+                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)):
                     killed.append(1)
                     try: p.kill()
                     except Exception: pass
                     return
                 time.sleep(0.1)
         threading.Thread(target=watch, daemon=True).start()
-        try: so, se = p.communicate()
+        # audit 2026-10 (Windows CI): the time budget used to start when the watch thread first ran; on a busy machine that
+        # could be after the child had finished, so the budget silently didn't apply. Now it runs from the child's start.
+        try:
+            try: so, se = p.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                killed.append(1)
+                try: p.kill()
+                except Exception: pass
+                so, se = p.communicate()
         finally:
             if key: RUNNING.pop(key, None)
         if killed: raise ReaderError(CALM)
