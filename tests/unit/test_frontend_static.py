@@ -98,3 +98,10 @@ def test_dead_code_stays_gone():
     js = _src(os.path.join(UI, "ui.js"))
     for name in ("needWho", "cap16", "ids17", "KIND_", "refreshCounts.t", "Q.loaded", "gacDownload"):
         assert name not in js, name
+
+def test_all_batches_queue_is_paged_and_pending_lists_are_capped():
+    js, html = _src(os.path.join(UI, "ui.js")), _src(os.path.join(UI, "index.html"))
+    assert "limit=0" not in _strip_js_comments(js).replace("&limit=0&batch=", "")               # only one-batch lists ask for everything
+    assert 'qs.set("limit", "0")' not in js and "X-Total" in js and "const QPAGE = 200" in js
+    assert 'id="qMoreBtn"' in html and "Load more (${Q.cards.length} of ${Q.total} shown)" in js
+    assert '"&limit=500"' in js and 'qs.set("limit", "500")' in js

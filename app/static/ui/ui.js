@@ -38,6 +38,7 @@ async function call(u, o = {}) {
   }
   if (r.status === 401) { const e = new Error(handleAuth(401, j)); e.status = 401; e.data = j || {}; throw e; }
   if (!r.ok) { const e = new Error((j && (j.error || j.detail)) || ("Server error " + r.status)); e.status = r.status; e.data = j || {}; throw e; }
+  if (o.meta) o.meta.headers = r.headers;   // audit 2026-10: paged lists read X-Total
   const sm = o.method === "POST" && u.match(/^\/api\/cards\/(\d+)$/); if (sm) dropDraft(+sm[1]);   // saved: the draft is no longer needed
   return j;
 }
@@ -569,11 +570,13 @@ async function loadQueue(force) {
     $("#fBatch").value = Q.batch || "";
     if (($("#fBatch").value || "") !== (Q.batch || "")) { $("#fBatch").insertAdjacentHTML("beforeend", `<option value="${esc(Q.batch)}">(selected batch)</option>`); $("#fBatch").value = Q.batch; }
     pushQueueState(); filterBatchOptions();
-    const want = Q.batch, qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");
+    const want = Q.batch, qs = queueQs(want), key = qs.toString();
     if (Q.cardsFor !== want) { $$("#statusTabs button span").forEach(x => x.textContent = ""); $("#qBody").innerHTML = ""; }   // never show another batch's counts under this name
-    const cards = await call("/api/cards" + (qs.toString() ? "?" + qs : ""));
+    // audit 2026-10: All batches is paged (a reload keeps the cards already loaded with "Load more")
+    const pg = want ? null : await cardsUpTo(qs, Q.cardsFor === want && Q.qsKey === key ? Math.max(QPAGE, Q.cards.length) : QPAGE);
+    const cards = pg ? pg.cs : await call("/api/cards?" + qs);
     if (seq !== qSeq || $("#v-queue").hidden || want !== Q.batch) return;
-    Q.cards = want ? cards.filter(c => inBatch(c, want)) : cards; Q.cardsFor = want;
+    Q.cards = want ? cards.filter(c => inBatch(c, want)) : cards; Q.cardsFor = want; Q.qsKey = key; Q.total = pg ? pg.total : null;
     $("#fBatch").disabled = false;
     renderQueue(); refreshCounts();
     // round 20 (coordinator r19): the list once showed Pending (0) / All (0) for a batch that has cards, until a reload.
@@ -584,6 +587,25 @@ async function loadQueue(force) {
   } catch (e) { if (seq === qSeq) { $("#qEmpty").hidden = false; $("#qEmpty").textContent = "Couldn't load cards: " + e.message + ". Is the scanner window still open?"; } }
   finally { if (seq === qSeq) { $("#qLoading").hidden = true; Q.loading = false; if (Q.again) { Q.again = false; setTimeout(() => loadQueue(), 0); } } }
 }
+// audit 2026-10: "All batches" asked for every card (limit=0: ~9 s at 2,000 cards, each enriched by the server). It is
+// paged now (the server's 200-card page; X-Total/X-Offset/X-Limit) with "Load more"; one-batch views stay unpaged.
+const QPAGE = 200;
+async function cardsPage(qs, off, lim) { const m = {}, p = new URLSearchParams(qs); p.set("limit", String(lim)); p.set("offset", String(off));
+  const cs = await call("/api/cards?" + p, {meta: m}); const t = m.headers && m.headers.get("X-Total"); return {cs, total: t ? +t : off + cs.length}; }
+async function cardsUpTo(qs, n) {   // the first n cards of a paged list (the server sends at most 500 per request)
+  let out = [], total = 0;
+  do { const r = await cardsPage(qs, out.length, Math.min(500, n - out.length)); out = out.concat(r.cs); total = r.total; if (!r.cs.length) break; } while (out.length < Math.min(n, total));
+  return {cs: out, total};
+}
+const queueQs = want => { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else if (Q.s) qs.set("status", Q.s); if (Q.arch) qs.set("archived", "true"); return qs; };
+$("#qMoreBtn").onclick = async e => {
+  const b = e.currentTarget, want = Q.batch, s0 = qSeq, key = Q.qsKey; if (want !== "" || b.getAttribute("aria-busy") === "true") return;
+  b.setAttribute("aria-busy", "true");   // not disabled: that would drop keyboard focus
+  try { const r = await cardsPage(new URLSearchParams(key), Q.cards.length, QPAGE); if (s0 !== qSeq || Q.batch !== want || Q.qsKey !== key) return;
+    const have = new Set(Q.cards.map(c => c.id)); Q.cards = Q.cards.concat(r.cs.filter(c => !have.has(c.id))); Q.total = r.total; renderQueue(); }
+  catch (x) { toast("Couldn't load more cards: " + x.message, 5000); }
+  finally { b.removeAttribute("aria-busy"); }
+};
 const inBatch = (c, b) => !b || (b === "__none__" ? !c.batch : c.batch === b);
 function filtered() {
   const raw = Q.text.toLowerCase().trim(), idOnly = /^#\d+$/.test(raw), q = raw.replace(/^#/, "");
@@ -606,11 +628,12 @@ function scheduleQueuePoll() {
   clearTimeout(qPoll);
   if (Q.cards.some(c => c.ai_status === "queued" || c.ai_status === "checking"))
     qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; if (document.hidden) { scheduleQueuePoll(); return; } const want = Q.batch, s0 = qSeq;   // audit 2026-10: no work while hidden
-      try { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");   // round 16 (skeptic r15 M1): never the 200-card default page
-        const cs = await call("/api/cards" + (qs.toString() ? "?" + qs : "")); if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden) return;
-        const fresh = cs.filter(c => inBatch(c, want));
-        if (Q.cardsFor === want && JSON.stringify(fresh) === JSON.stringify(Q.cards)) { scheduleQueuePoll(); return; }   // audit 2026-10: nothing changed
-        Q.cards = fresh; Q.cardsFor = want; renderQueue(); } catch {} }, 5000);
+      try { const qs = queueQs(want), key = qs.toString();   // round 16 (skeptic r15 M1): never the 200-card default page; audit 2026-10: All batches: the pages already loaded
+        const pg = want ? null : await cardsUpTo(qs, Math.max(QPAGE, Q.cards.length)), cs = pg ? pg.cs : await call("/api/cards?" + qs);
+        if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden || (Q.qsKey && Q.qsKey !== key)) return;
+        const fresh = cs.filter(c => inBatch(c, want)), total = pg ? pg.total : null;
+        if (Q.cardsFor === want && total === Q.total && JSON.stringify(fresh) === JSON.stringify(Q.cards)) { scheduleQueuePoll(); return; }   // audit 2026-10: nothing changed
+        Q.cards = fresh; Q.cardsFor = want; Q.total = total; renderQueue(); } catch {} }, 5000);
 }
 function renderQueue() {
   const ae = document.activeElement, fTr = ae && ae !== document.body && $("#qBody").contains(ae) ? ae.closest("tr") : null;   // audit 2026-10: focus survives a re-render
@@ -632,7 +655,11 @@ function renderQueue() {
   if (!rows.length && Q.reading && Q.batch === Q.reading) $("#qEmpty").innerHTML = `<span class="spin" aria-hidden="true"></span> Reading your newest batch. Cards appear as they finish.`;
   $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = new Set(rows.map(c => c.id)); [...Q.sel].forEach(i => { if (!vis.has(i)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree; audit 2026-10: a Set, not O(n²) (a shown card always has the shown status)
   const inB = Q.cardsFor === Q.batch ? Q.cards.filter(c => inBatch(c, Q.batch)) : [], cnt = {pending: 0, approved: 0, rejected: 0, "": inB.length};
-  inB.forEach(c => cnt[c.status]++); $$("#statusTabs button").forEach(b => b.querySelector("span").textContent = `(${cnt[b.dataset.s]})`);
+  inB.forEach(c => cnt[c.status]++);
+  // audit 2026-10: a paged All batches list only knows the total of the status shown (X-Total)
+  const paged = Q.batch === "" && Q.cardsFor === "" && Q.total != null;
+  $$("#statusTabs button").forEach(b => b.querySelector("span").textContent = paged ? (b.dataset.s === Q.s ? `(${Q.total})` : "") : `(${cnt[b.dataset.s]})`);
+  $("#qMore").hidden = !(paged && Q.total > Q.cards.length); if (!$("#qMore").hidden) $("#qMoreBtn").textContent = `Load more (${Q.cards.length} of ${Q.total} shown)`;
 
 }
 $("#qBody").addEventListener("click", e => {
@@ -837,7 +864,7 @@ async function openCard(id, opts = {}) {
     $("#prev").disabled = i <= 0; $("#next").disabled = i < 0 || i >= o.length - 1; };
   showPos(null);
   { const b_ = d.batch || c.batch || "", seq_ = openSeq;
-    call("/api/cards?status=pending&limit=0" + (b_ ? "&batch=" + encodeURIComponent(b_) : "")).then(cs => {
+    call("/api/cards?status=pending" + (b_ ? "&limit=0&batch=" + encodeURIComponent(b_) : "&limit=500")).then(cs => {   // audit 2026-10: no batch: capped (only ids for Prev/Next)
       if (seq_ !== openSeq || !cur || cur.id !== c.id) return;
       const pend = new Set((cs || []).map(x => x.id)); let o = order();
       o.forEach(x => { if (pend.has(x)) STATUS[x] = "pending"; else if ((STATUS[x] ?? "pending") === "pending" && x !== c.id) STATUS[x] = "decided"; });
@@ -1207,7 +1234,7 @@ async function decide_(status, btn) {
           // round 8 (part-timer r2): 'Next' stays inside THIS card's batch, asked from the server (also when the card was opened
           // by a direct link); "All done" only when that batch has no pending card left at all
           const myB = cur.batch || null, o = order(), i = o.indexOf(sid);
-          let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "0"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}
+          let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "500"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}   // audit 2026-10: capped without a batch
           let nx2;
           if (pl) { const ids = new Set(pl.map(x => x.id));
             nx2 = (i >= 0 ? (o.slice(i + 1).find(x => ids.has(x)) ?? o.slice(0, i).find(x => ids.has(x))) : undefined) ?? (pl.find(x => x.id > sid) || pl[0] || {}).id; }
