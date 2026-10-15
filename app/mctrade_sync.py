@@ -48,6 +48,34 @@ def match(fields, existing=None, near_names=False):
                                      "organization": r["organization"], "score": round(min(score,1),2), "why": why})
     return sorted(res, key=lambda x: -x["score"])
 
+class Index:
+    """Audit 2026-10 P1: the review list compared every card with EVERY contact (16-19 s for a 200-card batch against a
+    10,000-row MC Trade export). A contact can only reach match()'s threshold through the same email, the same phone or a
+    name similarity above 0.85 (company similarity alone tops out at 0.15), so those three lookups find every candidate;
+    match() then scores just those, exactly as before. Built once per contacts file."""
+    def __init__(self, rows):
+        self.rows = rows; self.by_email = {}; self.by_phone = {}
+        self.byid = {str(r["profile_id"]): r for r in rows}
+        self.names = [_nname(r.get("first_name", "") + " " + r.get("last_name", "")) for r in rows]
+        for i, r in enumerate(rows):
+            if r.get("email"): self.by_email.setdefault(r["email"].lower(), []).append(i)
+            d = _digits(r.get("phone"))
+            if d: self.by_phone.setdefault(d, []).append(i)
+    def candidates(self, fields):
+        hit = set()
+        for e in fields.get("emails", []): hit.update(self.by_email.get(e.lower(), ()))
+        for p in fields.get("phones", []): hit.update(self.by_phone.get(_digits(p.get("number")), ()))
+        name = _nname(fields.get("first_name", "") + " " + fields.get("last_name", ""))
+        if name:
+            try:
+                from rapidfuzz import process, fuzz
+                hit.update(i for _, _, i in process.extract(name, self.names, scorer=fuzz.token_sort_ratio, score_cutoff=85, limit=None))
+            except ImportError:
+                return self.rows   # no RapidFuzz: compare with everything, as before
+        return [self.rows[i] for i in sorted(hit)]
+    def match(self, fields, near_names=False):
+        return match(fields, self.candidates(fields), near_names=near_names)
+
 def to_mctrade_profile(f):
     """Maps to MC Trade import-template style columns ('Ind' prefix for individual profiles)."""
     ph = {p["type"]: p["number"] for p in f.get("phones", [])}

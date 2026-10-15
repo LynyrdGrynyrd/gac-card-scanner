@@ -235,3 +235,20 @@ def test_line_break_in_a_phone_blocks_approval():
     from app import mctrade_export as mx
     assert "phones" in mx.content_problems({"phones": [{"type": "work", "number": "330-555-0100\nEND:VCARD"}]})
     assert "address" not in mx.content_problems({"address": "1 Main St\nAkron, OH"})
+
+
+# ---------------------------------------------------------------- CRM look-ups: index gives exactly the full-scan result
+def test_crm_index_matches_full_scan():
+    import random
+    from app import mctrade_sync as ms
+    random.seed(7)
+    first = ["John", "Jon", "Joan", "Maria", "María", "Lee", "Ann", "Anne", "Bob"]
+    last = ["Smith", "Smyth", "Delgado", "Okafor", "Lee", "Brown", "Browne", "Nguyen"]
+    rows = [{"profile_id": str(i), "first_name": random.choice(first), "last_name": random.choice(last),
+             "organization": random.choice(["Acme Inc", "Acme", "Summit Bank", "Summit Valley Bank", ""]),
+             "email": random.choice(["", f"p{i % 40}@acme.com"]), "phone": random.choice(["", f"(330) 555-{i % 50:04d}"])} for i in range(600)]
+    ix = ms.Index(rows)
+    for k in range(300):
+        f = {"first_name": random.choice(first + [""]), "last_name": random.choice(last), "company": random.choice(["Acme", "Summit Bank", ""]),
+             "emails": random.choice([[], [f"p{k % 40}@acme.com"]]), "phones": random.choice([[], [{"number": f"330-555-{k % 50:04d}"}]])}
+        assert ix.match(f) == ms.match(f, rows), f

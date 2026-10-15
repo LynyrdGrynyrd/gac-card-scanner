@@ -480,10 +480,16 @@ def _cands(c, others, metas, ctx):
     for k_ in _bkeys(c["fields"], metas.get(c["id"]) or {}):
         for o in ctx["idx"].get(k_, ()): seen[o["id"]] = o
     return [o for o in others if o["id"] in seen]   # same order as before
+_CRM_IX = {"rows": None, "ix": None}; _CRM_IXL = threading.Lock()
+def _crm_index(rows):
+    """One mctrade_sync.Index per contacts list object (the list is cached by crm_source until the file changes)."""
+    with _CRM_IXL:
+        if _CRM_IX["rows"] is not rows: _CRM_IX.update(rows=rows, ix=mctrade_sync.Index(rows))
+        return _CRM_IX["ix"]
 def dupes(c, others, metas):
     f = c["fields"]; m = metas.get(c["id"]) or {}
     _crm_rows, _crm_sample = crm_source.rows_for_hints()
-    crm = [d | {"sample": _crm_sample} for d in mctrade_sync.match(f, _crm_rows) if d["score"] >= 0.3]
+    crm = [d | {"sample": _crm_sample} for d in _crm_index(_crm_rows).match(f) if d["score"] >= 0.3]
     ctx = _dctx(others, metas)
     # the card's OWN meta is part of the key: approval_check() changes it in place (kept_apart) before asking again
     ck = (c["id"], c["status"], json.dumps(f, sort_keys=True, default=str), json.dumps([m.get(k_) for k_ in _DK], default=str))
@@ -2761,7 +2767,7 @@ def strict_profile_id(c, existing=None):
     sure = []
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return None      # round 7: never a Profile ID from SAMPLE data
-    for m_ in mctrade_sync.match(c["fields"], existing):
+    for m_ in _crm_index(existing).match(c["fields"]):
         exact_name = mctrade_sync._nname(m_["name"]) == mctrade_sync._nname(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}")
         if "email exact" in m_["why"] or (exact_name and "phone exact" in m_["why"] and m_["score"] >= 0.5): sure.append(m_["profile_id"])
     sure = list(dict.fromkeys(sure))
@@ -2770,7 +2776,7 @@ def exact_email_profile(c, existing=None):
     """Profile ID of an existing MC Trade profile with exactly this card's email (create-new cards: would duplicate it)."""
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return None
-    hits = list(dict.fromkeys(m_["profile_id"] for m_ in mctrade_sync.match(c["fields"], existing) if "email exact" in m_["why"]))
+    hits = list(dict.fromkeys(m_["profile_id"] for m_ in _crm_index(existing).match(c["fields"]) if "email exact" in m_["why"]))
     return hits[0] if hits else None
 
 def crm_look(c, existing=None):
@@ -2778,10 +2784,10 @@ def crm_look(c, existing=None):
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return {}
     f = c["fields"]; nm = mctrade_sync._nname(f"{f.get('first_name','')} {f.get('last_name','')}")
-    byid = {str(r_["profile_id"]): r_ for r_ in existing}
+    byid = _crm_index(existing).byid
     cem = {e.strip().lower() for e in f.get("emails") or [] if (e or "").strip()}
     email, strong, name = [], [], []
-    for m_ in mctrade_sync.match(f, existing):
+    for m_ in _crm_index(existing).match(f):
         pid = str(m_["profile_id"]); exact = bool(nm) and mctrade_sync._nname(m_["name"]) == nm
         if "email exact" in m_["why"]: email.append(pid); strong.append(pid)
         elif exact and ("phone exact" in m_["why"] or any(w.startswith("org~") for w in m_["why"])): strong.append(pid)
@@ -2834,7 +2840,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         def _kept_pair(a, b_): return b_ in _kept(metas.get(a) or {}) or a in _kept(metas.get(b_) or {})
         _real = crm_source.real(); _hint_rows, _ = crm_source.rows_for_hints()
         def _hint(c):
-            m_ = mctrade_sync.match(c["fields"], _hint_rows)
+            m_ = _crm_index(_hint_rows).match(c["fields"])
             return f"{m_[0]['name']} ({m_[0]['organization']})" if m_ else None
         res = mx.build(sel, aff, style, hard_errors, kept=_kept_pair, confirmed=lambda f_: list(valid_confirmations(f_)), crm_look=lambda c: crm_look(c, _real),
                        crm_real=_real is not None, crm_hint=_hint, updates_on=auth.get_setting("mctrade_updates_enabled") == "1",
@@ -3245,6 +3251,12 @@ def recover():
             # crash loop), so it is set aside as failed with a calm message instead.
             j = {"id": jid, "kind": args.get("kind"), "state": "error", "file": args.get("fname"), "batch": args.get("batch") or "",
                  "error": CALM_POISON, "finished": time.time()}
+            # audit 2026-10 P1: the crash may have come AFTER the card was saved (history, AI check, enrich). Then the
+            # file was read fine: report the job as done with that card instead of blaming the file.
+            r_ = args.get("sha") and args.get("kind") != "pdf" and db().execute(
+                "SELECT m.card_id FROM card_meta m JOIN cards c ON c.id=m.card_id WHERE m.sha256=? AND COALESCE(m.batch,'')=? AND c.created>=? ORDER BY m.card_id DESC LIMIT 1",
+                (args["sha"], args.get("batch") or "", os.path.getmtime(os.path.join(INBOX, fn)) - 5)).fetchone()
+            if r_: j |= {"state": "done", "error": None, "card": {"id": r_[0]}}
             _done_record(jid, j); _inbox_clear(jid); print("set aside a file that was being read when the server stopped:", jid)
             continue
         if args.get("kind") == "pdf":
