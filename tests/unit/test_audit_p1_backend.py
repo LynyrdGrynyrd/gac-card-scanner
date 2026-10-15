@@ -252,3 +252,9 @@ def test_crm_index_matches_full_scan():
         f = {"first_name": random.choice(first + [""]), "last_name": random.choice(last), "company": random.choice(["Acme", "Summit Bank", ""]),
              "emails": random.choice([[], [f"p{k % 40}@acme.com"]]), "phones": random.choice([[], [{"number": f"330-555-{k % 50:04d}"}]])}
         assert ix.match(f) == ms.match(f, rows), f
+
+
+@pytest.mark.skipif(__import__("sys").platform != "darwin", reason="macOS-only reading (libproc); Linux uses /proc, Windows psapi")
+def test_rss_on_macos_comes_from_libproc():
+    from app import reader
+    assert reader._rss_darwin(os.getpid()) > 10, "proc_pidinfo reading failed (would silently fall back to the slow ps reading)"

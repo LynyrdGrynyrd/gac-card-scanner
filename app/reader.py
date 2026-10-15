@@ -97,8 +97,22 @@ def _rss_mb(pid):
     except FileNotFoundError: pass
     except Exception: return 0
     if os.name == "nt": return _rss_windows(pid)
-    if sys.platform == "darwin": return _rss_ps(pid)
+    if sys.platform == "darwin": return _rss_darwin(pid) or _rss_ps(pid)
     return 0
+_LIBPROC = []
+def _rss_darwin(pid):
+    """macOS: resident size from libproc's proc_pidinfo(PROC_PIDTASKINFO) - no process start, so it can be read as often
+    as the watch polls (the rate-limited `ps` reading let a short-lived child slip under the cap)."""
+    try:
+        import ctypes
+        if not _LIBPROC: _LIBPROC.append(ctypes.CDLL("/usr/lib/libproc.dylib"))
+        class TaskInfo(ctypes.Structure):   # struct proc_taskinfo (96 bytes)
+            _fields_ = [(n, ctypes.c_uint64) for n in ("virtual", "resident", "user", "system", "threads_user", "threads_system")] + \
+                       [(n, ctypes.c_int32) for n in ("policy", "faults", "pageins", "cow", "msg_sent", "msg_recv", "mach", "unix", "csw", "threadnum", "running", "priority")]
+        ti = TaskInfo()
+        n = _LIBPROC[0].proc_pidinfo(ctypes.c_int(pid), ctypes.c_int(4), ctypes.c_uint64(0), ctypes.byref(ti), ctypes.c_int(ctypes.sizeof(ti)))
+        return ti.resident / (1024 * 1024) if n == ctypes.sizeof(ti) else 0
+    except Exception: return 0
 def _rss_windows(pid):
     try:
         import ctypes
