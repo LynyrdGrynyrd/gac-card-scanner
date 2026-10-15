@@ -104,6 +104,6 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: pip install -r requirements.lock.txt
       - name: OCR + parser on tests/cards (must stay 100 %)
-        run: python tests/eval.py --min-overall 100
+        run: python tests/eval.py --min 108   # all 108 fields of tests/cards
       - name: Full pipeline on synth2 (480 fields)
         run: python bench/eval_bench.py tests/synth2_gt.json tests/synth2 --min-overall 96
