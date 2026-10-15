@@ -5,11 +5,16 @@ const SS = sessionStorage;
 const ASSET_V = ((document.currentScript && document.currentScript.src.match(/[?&]v=([0-9a-f]+)/)) || [])[1] || "";
 try { localStorage.removeItem("reviewer"); } catch {}
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
-const hideToast = re_ => { const t = $("#toast"); if (!re_ || re_.test(t.textContent)) { t.classList.remove("show"); clearTimeout(t._h); } };
+// audit 2026-10 (WCAG 2.2.1): the toast waits while the pointer or keyboard focus is in it, and a faded toast leaves no
+// focusable Undo button behind
+const toastOff = t => { t.classList.remove("show"); clearTimeout(t._h); t.querySelectorAll(".toastbtn").forEach(b => b.remove()); };
+const toastLater = (t, ms) => { clearTimeout(t._h); t._h = setTimeout(() => { if (!t.contains(document.activeElement)) toastOff(t); }, ms); };
+const hideToast = re_ => { const t = $("#toast"); if (!re_ || re_.test(t.textContent)) toastOff(t); };
 const toast = (m, ms = 4500, undo = false) => { const t = $("#toast"); t.textContent = m;   /* round 15 (reviewer r14): 2.6 s was too quick */   // undo: true = the card Undo, or a function = its own undo
-  if (undo) { const b = document.createElement("button"); b.className = "toastbtn"; b.textContent = "Undo"; b.onclick = () => typeof undo === "function" ? undo() : doUndo(); t.append(b); ms = Math.max(ms, 6000); }
-  t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); refreshUndo();
-  t.onmouseenter = () => clearTimeout(t._h); t.onmouseleave = () => { clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2500); }; };   // round 17 (reviewer r16 N5)
+  if (undo) { const b = document.createElement("button"); b.type = "button"; b.className = "toastbtn"; b.textContent = "Undo"; b.onclick = () => typeof undo === "function" ? undo() : doUndo(); t.append(b); ms = Math.max(ms, 6000); }
+  t.classList.add("show"); toastLater(t, ms); if (undo) refreshUndo();   // audit 2026-10: no GET /api/undo for every toast, only after undoable actions
+  t.onmouseenter = () => clearTimeout(t._h); t.onmouseleave = () => toastLater(t, 2500); };   // round 17 (reviewer r16 N5)
+{ const t = $("#toast"); t.addEventListener("focusin", () => clearTimeout(t._h)); t.addEventListener("focusout", () => toastLater(t, 2500)); }   // audit 2026-10: keyboard focus pauses it too
 const csrf = () => (document.cookie.match(/(?:^|; )gac_csrf=([^;]*)/) || [])[1] || "";
 let SIGNING_OUT = false;   // reviewer r9: nothing may write a draft once sign-out started (beforeunload ran saveDraft after clearDrafts)
 function saveDraft() { if (SIGNING_OUT) return; if (dirty && cur) try { SS.draft = JSON.stringify({id: cur.id, uid: ME && ME.id, vals: dirtyVals()}); } catch {} keepDraft(); }
@@ -379,7 +384,7 @@ async function poll() {
     saveB(); renderBatch();
     if (j.jobs.some(x => x.state === "done" || x.state === "error")) { refreshCounts(); if (!$("#v-queue").hidden && Q.batch && Q.batch === B.id) loadQueue(); }   // round 15: newly read cards of the batch shown appear without a reload
   } catch (e) { if (e instanceof TypeError) conn(false); }   // network error: say "Reconnecting…" and keep trying
-  pollT = setTimeout(poll, 1200);
+  pollT = setTimeout(poll, document.hidden ? 5000 : 1200);   // audit 2026-10: slower while the tab is hidden
 }
 const ST = {splitting: "Reading PDF…", wait: "Waiting to upload", up: "Uploading…", queued: "In line to be read", reading: "Reading card…", done: "Added", rej: "Not added", dup: "Not added", err: "Failed", cancel: "Cancelled"};
 function rowHTML(r) {
@@ -476,7 +481,7 @@ function applyQueueState(q) {
   Q.batch = q.has("batch") ? (q.get("batch") === "all" ? "" : q.get("batch")) : remembered;
   Q.batchFromMemory = !q.has("batch") && remembered !== null;   // round 24 (newcomer/datamanager r23): the queue always opens on your newest batch
   Q.att = q.get("att") === "1"; Q.nx = q.get("nx") === "1"; Q.dup = q.get("dup") === "1"; Q.text = q.get("q") || ""; Q.arch = q.get("arch") === "1";
-  $$("#statusTabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.s === Q.s));
+  $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.s === Q.s));
   $("#fAtt").checked = Q.att; $("#fNew").checked = Q.nx; $("#fDup").checked = Q.dup; $("#fText").value = Q.text; $("#fArch").checked = Q.arch;
 }
 function pushQueueState() {
@@ -484,7 +489,8 @@ function pushQueueState() {
   SS.queueHash = "#queue?" + p;
   if (location.hash.startsWith("#queue") && !$("#dlg").open) history.replaceState(null, "", "#queue?" + p);   // round 15: never rewrite the URL of another page or under an open question
 }
-$$("#statusTabs button").forEach(b => b.onclick = () => { Q.s = b.dataset.s; $$("#statusTabs button").forEach(x => x.setAttribute("aria-selected", x === b)); Q.sel.clear(); pushQueueState(); loadQueue(); });
+$$("#statusTabs button").forEach(b => b.onclick = () => { Q.s = b.dataset.s; $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x === b));   // audit 2026-10: aria-pressed buttons, not tabs without tabpanels
+ Q.sel.clear(); pushQueueState(); loadQueue(); });
 $("#fAtt").onchange = e => { Q.att = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fNew").onchange = e => { Q.nx = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fDup").onchange = e => { Q.dup = e.target.checked; pushQueueState(); renderQueue(); };
@@ -600,7 +606,7 @@ let qPoll = null;
 function scheduleQueuePoll() {
   clearTimeout(qPoll);
   if (Q.cards.some(c => c.ai_status === "queued" || c.ai_status === "checking"))
-    qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; const want = Q.batch, s0 = qSeq;
+    qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; if (document.hidden) { scheduleQueuePoll(); return; } const want = Q.batch, s0 = qSeq;   // audit 2026-10: no work while hidden
       try { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");   // round 16 (skeptic r15 M1): never the 200-card default page
         const cs = await call("/api/cards" + (qs.toString() ? "?" + qs : "")); if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden) return;
         const fresh = cs.filter(c => inBatch(c, want));
@@ -753,7 +759,7 @@ async function openCard(id, opts = {}) {
   if (switching) {   // round 6 (newcomer F1): never show the previous card's values under the new card's number
     CARD_READY = false; cur = null; $("#rForm").inert = true; $("#rForm").classList.add("loading");
     $$("#rForm input, #rForm textarea").forEach(el => { if (!el.readOnly) { el.readOnly = true; el.dataset.ro16 = "1"; } });   // round 16 (part-timer r15): nothing typed into the empty form while it loads
-    $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; } });
+    $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; e._h = null; } });
     $("#h-r").textContent = `Loading card #${id}…`; $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = true);
   }
   let d; try { d = await call("/api/cards/" + id); } catch { if (tok === openSeq) { toast("Card not found."); location.hash = SS.queueHash || "queue"; } return; }
@@ -917,7 +923,7 @@ function renderAI(d) {
     const typ = p.busy ? "the AI is busy, so this may take a while"
               : p.typical_seconds ? `recent checks took about ${p.typical_seconds} s each` : "about a minute per card";
     // round 21 (all r20 bots): ONE plain sentence
-    h = `<b role="status">${p.eta_seconds ? `AI check in ~${fmtEta(p.eta_seconds)}` : s === "checking" ? "AI check running…" : "AI check soon"}.</b> Keep working.` +
+    h = `<b>${p.eta_seconds ? `AI check in ~${fmtEta(p.eta_seconds)}` : s === "checking" ? "AI check running…" : "AI check soon"}.</b> Keep working.` +
         `<div class="progress mini" aria-hidden="true"><div style="width:${s === "queued" ? 5 : Math.min(95, Math.round(100 * secs / (p.typical_seconds || 60)))}%"></div></div>`;
   }
   const ruleHints = (d.attention || []).filter(a => ["hint", "consistency"].includes(a.code));
@@ -939,7 +945,9 @@ function renderAI(d) {
   if (h && dirty && dirtyIds.size) h = `<p class="flag bad">Not saved yet: ${esc([...dirtyIds].map(i => LABEL[i.replace(/^x_/, "")] || i.replace(/^x_/, "")).join(", "))}. AI checks the saved card. Save, then check again.</p>` + h;   // reviewer r7
   // round 11 (reviewer r10 blocker 1): the AI is labelled plainly. It is a spelling/typo double-check, advisory only.
   if (h) h += `<p class="small aiNote">AI suggestions can be wrong. Check the photo.</p>`;
-  box.hidden = !h; box.innerHTML = h;
+  // audit 2026-10: #rAI is no longer a live region (it was replaced every 4 s and re-announced); a state change is announced
+  // once by the toast. Unchanged content is not rewritten, so focus on its buttons survives the poll.
+  box.hidden = !h; if (box._h !== h || box.dataset.cid !== String(d.id)) { box.innerHTML = h; box._h = h; box.dataset.cid = d.id; }
   box.querySelectorAll("[data-aik]").forEach(b => b.onclick = async () => {
     const k = b.dataset.aik, ch = b.dataset.aic;
     // round 12 (coordinator r4 #4): a second AI choice clicked while the first one was still reloading the card used the old
@@ -951,7 +959,7 @@ function renderAI(d) {
       catch (e) { if (e.data && e.data.need === "stale") { const n = await call("/api/cards/" + d.id); cur.version = n.version; return await post(`/api/cards/${d.id}/ai-decide`, {choices: {[k]: ch}, version: n.version, ...extra}); } throw e; } };
     if (dirty) {   // unsaved typing on the form: merge here in the browser, never on the server
       if (ch === "accept" && !setFormField(k, diff[k].to)) { toast("Save your edits first, then choose.", 4000); return; }
-      try { await send({record_only: true}); toast(ch === "accept" ? `AI value put in ${LABEL[k] || k}. Save to keep it.` : "Kept the current value.", 4000); await openCard(d.id, {keep: true}); }
+      try { await send({record_only: true}); toast(ch === "accept" ? `AI value put in ${LABEL[k] || k}. Save to keep it.` : "Kept the current value.", 4000); refreshUndo(); await openCard(d.id, {keep: true}); }
       catch (e) { toast("Not saved: " + e.message, 5000); box.querySelectorAll("[data-aik]").forEach(x => x.disabled = false); }
       return;
     }
@@ -959,6 +967,7 @@ function renderAI(d) {
     catch (e) { toast("Not saved: " + e.message, 5000); box.querySelectorAll("[data-aik]").forEach(x => x.disabled = false); } });
   if ($("#aiAsk")) $("#aiAsk").onclick = async () => { const typed = dirty; try { const r = await post(`/api/cards/${d.id}/ai-check`, {}); toast("AI double-check started" + (r.ahead ? ` (${r.ahead} ahead of it)` : "") + (typed ? ". It checks the saved card, not unsaved edits." : "."), typed ? 7000 : 3500); openCard(d.id, {keep: true}); } catch (e) { toast(e.message, 5000); } };
   if (s === "queued" || s === "checking") rPoll = setTimeout(async () => {
+    if (document.hidden) { renderAI(d); return; }   // audit 2026-10: no polling while the tab is hidden
     if (!$("#v-review").hidden && cur && cur.id === d.id && ($("#dlg").open || DECIDING)) { renderAI(d); return; }   // round 15 (part-timer r14): never reload the card under an open question (the merge dialog vanished); try again later
     if ($("#v-review").hidden || !cur || cur.id !== d.id || SAVING) return;   // round 10: root cause of the ghost "unsaved" badge: this
     const n = await call("/api/cards/" + d.id);                                 // poll re-opened the card with the TYPED values while a save was in flight
@@ -1501,7 +1510,7 @@ const ADMV = {};   // round 15: versions of the shared admin state as shown on t
 async function loadAdmin() {
   if (!ME) return;   // route() runs again once the signed-in user is known
   if (ME.role !== "admin") { ["users", "settings", "audit"].forEach(t => $("#t-" + t).hidden = true); $("#adminTabs").hidden = true; toast("Only admins can open the Admin page."); return; }
-  $$("#adminTabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.t === adminTab));
+  $$("#adminTabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.t === adminTab));
   ["users", "settings", "audit"].forEach(t => $("#t-" + t).hidden = t !== adminTab);
   if (adminTab === "users") {
     const us = await call("/api/admin/users");
@@ -1571,13 +1580,14 @@ fetch("/health").then(r => r.json()).then(h => { const el = $("#appVer"); if (el
 setInterval(() => { if (!document.hidden) refreshCounts(); }, 15000);
 // round 10 (newcomer r9): the upload list updates by itself (a card approved, rejected or merged elsewhere shows its new state)
 setInterval(() => { if (!document.hidden && B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); }, 15000);
-window.addEventListener("focus", () => { if (B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); });
+window.addEventListener("focus", () => { refreshUndo(); if (B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); });   // audit 2026-10: Undo state from other tabs
 $(".skip").onclick = e => { e.preventDefault(); $("#main").focus(); };   // the hash is the router: don't navigate to "#main"
 
 /* ---------- phone mode (Scan with phone) ---------- */
 let phT = null;
 async function phoneRefresh() {
   clearTimeout(phT);
+  if (document.hidden) { phT = setTimeout(phoneRefresh, 5000); return; }   // audit 2026-10: no work while the tab is hidden
   try { const st = await call("/api/phone/status"); $("#bPhone").hidden = !st.allowed;
     if (!st.active) { $("#phonePanel").hidden = true; return; }
     $("#phoneCount").textContent = st.uploads || 0; const m = Math.max(0, Math.round((st.expires - Date.now() / 1000) / 60));
@@ -1604,6 +1614,7 @@ function aiWord(a) { return !a.enabled ? "AI check: off" : a.available ? "AI che
 function aiHeader(a) { const el = $("#aiQueue"); if (!el) return; el.hidden = false; el.textContent = aiWord(a);
   el.title = !a.enabled ? "AI check is off (Admin → Settings)." : a.available ? "AI check is on: unclear cards get a later typo check." : "The AI isn't answering right now. Scanning still works. See Help."; }
 async function aiQueueTick() {
+  if (document.hidden) { setTimeout(aiQueueTick, 20000); return; }   // audit 2026-10: no work while the tab is hidden
   try { const a = await call("/api/ai/status"), q = a.queue || {}, n = (q.waiting || 0) + (q.running || 0);
     // round 16 (coordinator r15 #2): everyone sees whether the AI double-check is on (read-only; an admin changes it in Settings)
     $("#aiQueue").hidden = false;
@@ -1623,6 +1634,8 @@ setTimeout(async () => { try { const u = await call("/api/update");
 // ---- Desktop "AI helper" download/start/stop (Admin > Settings). Shown only in the packaged desktop app.
 var aiHelperTimer = null;
 async function aiHelperRefresh() {
+  if (document.hidden && aiHelperRefresh.ran) { clearTimeout(aiHelperTimer); aiHelperTimer = setTimeout(aiHelperRefresh, 8000); return; }   // audit 2026-10
+  aiHelperRefresh.ran = true;
   let s; try { s = await call("/api/admin/ai-helper"); } catch (e) { return; }
   const box = $("#aiHelper"); if (!box) return;
   box.hidden = !(s.desktop || s.installed) || !s.supported;
@@ -1638,5 +1651,7 @@ async function aiHelperRefresh() {
   clearTimeout(aiHelperTimer); if (busyNow || (s.running && !box.hidden)) aiHelperTimer = setTimeout(aiHelperRefresh, busyNow ? 1500 : 8000);
 }
 for (const [id, path] of [["#aiHelperDl", "download"], ["#aiHelperStart", "start"], ["#aiHelperStop", "stop"], ["#aiHelperRm", "remove"]])
-  if ($(id)) $(id).onclick = async () => { if (path === "remove" && !confirm("Delete the downloaded AI helper files?")) return;
+  if ($(id)) $(id).onclick = async () => {   // audit 2026-10: the app's own dialog, not the browser's confirm()
+    if (path === "remove" && !(await ask({title: "Delete the AI helper?", html: "<p>The downloaded AI helper files are deleted from this computer. You can download them again later.</p>",
+        buttons: [{label: "Delete", cls: "danger", value: 1}, {label: "Cancel", value: null, primary: true, focus: true}]})).value) return;
     try { await post("/api/admin/ai-helper/" + path, {}); } catch (e) { toast(e.message, 5000); } aiHelperRefresh(); };

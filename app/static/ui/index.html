@@ -83,11 +83,11 @@
       <button class="btn danger" id="bulkReject" disabled>Reject selected</button></div></div>
   <p id="selNote" class="small" role="status" hidden></p>
   <div class="filters" role="group" aria-label="Filters">
-    <div class="seg" role="tablist" aria-label="Status" id="statusTabs">
-      <button role="tab" data-s="pending" aria-selected="true">Pending <span></span></button>
-      <button role="tab" data-s="approved" aria-selected="false">Approved <span></span></button>
-      <button role="tab" data-s="rejected" aria-selected="false">Rejected <span></span></button>
-      <button role="tab" data-s="" aria-selected="false">All <span></span></button>
+    <div class="seg" role="group" aria-label="Status" id="statusTabs">
+      <button type="button" data-s="pending" aria-pressed="true">Pending <span></span></button>
+      <button type="button" data-s="approved" aria-pressed="false">Approved <span></span></button>
+      <button type="button" data-s="rejected" aria-pressed="false">Rejected <span></span></button>
+      <button type="button" data-s="" aria-pressed="false">All <span></span></button>
     </div>
     <div class="fbatch"><label for="fBatch" class="inline">Batch</label><input id="fBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="12"><select id="fBatch" disabled><option value="">Loading…</option></select></div>
     <label class="chk"><input type="checkbox" id="fAtt"> Needs attention</label>
@@ -128,7 +128,7 @@
       <div id="rRisk" class="alert" role="status" hidden></div>
       <div id="rWarn" class="alert info" hidden></div>
       <div id="rCons" class="alert" role="status" hidden></div>
-      <div id="rAI" class="alert info" role="status" hidden></div>
+      <div id="rAI" class="alert info" hidden></div>
       <div class="grid2" id="fields">
         <div class="f"><label for="first_name">First name <span class="req">*</span></label><input id="first_name" data-c="name" aria-describedby="e_name"></div>
         <div class="f"><label for="last_name">Last name</label><input id="last_name" data-c="name"></div>
@@ -187,8 +187,8 @@
 <section id="v-admin" class="view" aria-labelledby="h-a" hidden>
   <h1 id="h-a">Admin</h1>
 <!--ADMIN-BEGIN-->
-  <div class="seg" role="tablist" aria-label="Admin sections" id="adminTabs">
-    <button role="tab" data-t="users" aria-selected="true">Reviewers</button><button role="tab" data-t="settings" aria-selected="false">Settings</button><button role="tab" data-t="audit" aria-selected="false">Audit log</button>
+  <div class="seg" role="group" aria-label="Admin sections" id="adminTabs">
+    <button type="button" data-t="users" aria-pressed="true">Reviewers</button><button type="button" data-t="settings" aria-pressed="false">Settings</button><button type="button" data-t="audit" aria-pressed="false">Audit log</button>
   </div>
   <div id="t-users" class="panel">
     <h2>Reviewers</h2>

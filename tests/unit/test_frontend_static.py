@@ -67,3 +67,18 @@ def test_queue_render_is_debounced_and_keeps_focus():
     js = _src(os.path.join(UI, "ui.js"))
     assert re.search(r'\$\("#fText"\)\.oninput = .*setTimeout\(.*150\)', js)
     assert "vis.includes(" not in js and "focus({preventScroll: true})" in js.split("function renderQueue(")[1].split("\n}\n")[0]
+
+def test_a11y_tabs_toast_ai_box_and_dialogs():
+    html, js = _src(os.path.join(UI, "index.html")), _src(os.path.join(UI, "ui.js"))
+    assert 'role="tab' not in html and "aria-selected" not in js           # toggle buttons, not tabs without tabpanels
+    assert html.count('aria-pressed="true"') == 2
+    assert not re.search(r'id="rAI"[^>]*role=', html) and 'role="status">${p.eta' not in js
+    assert ".toastbtn\").forEach(b => b.remove())" in js and '"focusin"' in js
+    assert not re.search(r"(?<![\w.])confirm\(", _strip_js_comments(js))   # the app's ask() dialog, not window.confirm
+
+def test_polling_skips_work_while_hidden_and_toast_does_not_poll_undo():
+    js = _src(os.path.join(UI, "ui.js"))
+    for fn in ("async function phoneRefresh()", "async function aiQueueTick()", "async function aiHelperRefresh()"):
+        assert "document.hidden" in js.split(fn)[1].split("\n}\n")[0][:300], fn
+    toast = js.split("const toast = ")[1].split("\n{ const t")[0]
+    assert "if (undo) refreshUndo()" in toast
