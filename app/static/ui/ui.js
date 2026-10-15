@@ -90,7 +90,6 @@ function ask({title, html = "", input = null, buttons, wide = false, check = nul
 /* ---------- signed-in user ---------- */
 let ME = null;
 const who = () => ME ? ME.initials : "";
-const needWho = async () => true;
 async function loadMe() {
   ME = await call("/api/me");
   { const w = document.getElementById("scanWho"); if (w && ME) w.innerHTML = `Scanning as <b>${esc(ME.display || ME.username)}</b> (${esc(ME.initials || "")}). Not you? <a href="/login">Sign in as yourself</a>.`; }   // round 15 (coordinator r14 #4)
@@ -575,7 +574,7 @@ async function loadQueue(force) {
     const cards = await call("/api/cards" + (qs.toString() ? "?" + qs : ""));
     if (seq !== qSeq || $("#v-queue").hidden || want !== Q.batch) return;
     Q.cards = want ? cards.filter(c => inBatch(c, want)) : cards; Q.cardsFor = want;
-    Q.loaded = true; $("#fBatch").disabled = false;
+    $("#fBatch").disabled = false;
     renderQueue(); refreshCounts();
     // round 20 (coordinator r19): the list once showed Pending (0) / All (0) for a batch that has cards, until a reload.
     // If the batch list says it has cards but none came back, load it once more.
@@ -661,14 +660,13 @@ function syncSel() { const n = Q.sel.size; $("#bulkApprove").disabled = $("#bulk
     else if (nt && !nt.hidden && $("#selOthers")) { const b_ = nt.querySelector("b"); if (b_) b_.textContent = String(n); } }
   $("#bulkApprove").textContent = n ? `Approve ${n} selected card${n > 1 ? "s" : ""}` : "Approve selected"; $("#bulkReject").textContent = n ? `Reject ${n} selected card${n > 1 ? "s" : ""}` : "Reject selected"; }
 async function bulk(status, btn) {
-  const ids = [...Q.sel]; if (!ids.length || !await needWho()) return;
+  const ids = [...Q.sel]; if (!ids.length) return;
   $("#bulkApprove").disabled = $("#bulkReject").disabled = true;   // round 15 (reviewer r14): both off while one runs
   try { return await bulk_(status, btn, ids); } finally { syncSel(); }
 }
 // round 17 (newcomer r16 #2): "Approve all 1" read oddly: natural wording for 1 and 2
 const allN17 = (n, tail) => `Approve ${n}`;   // round 21 (newcomer r20): one approve label
 const cap17 = (xs, f, n = 10) => xs.slice(0, n).map(f).join("") + (xs.length > n ? `<li>…and ${xs.length - n} more (open the cards from the queue)</li>` : "");
-const ids17 = (xs, n = 10) => xs.slice(0, n).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ") + (xs.length > n ? ` …and ${xs.length - n} more` : "");
 async function bulk_(status, btn, ids) {
   const sel = Q.cards.filter(c => Q.sel.has(c.id)), decided = sel.filter(c => c.status !== "pending" && c.status !== status);
   const verb = status === "approved" ? "Approve" : "Reject";
@@ -685,13 +683,12 @@ async function bulk_(status, btn, ids) {
   const lk0 = pre ? pre.lookalikes || [] : [], ai0 = pre ? pre.ai_pending || [] : [], sk0 = pre ? pre.skipped || [] : [];
   // round 16 (reviewer r15 N2, coordinator r15 #6): words instead of raw scores, and long lists are capped
   const why16 = w => String(w || "").replace(/\bname~[\d.]+/g, "similar name").replace(/\borg~[\d.]+/g, "similar company").replace(/\bemail exact\b/g, "same email").replace(/\bphone exact\b/g, "same phone");
-  const cap16 = (xs, f) => xs.slice(0, 10).map(f).join("") + (xs.length > 10 ? `<li>…and ${xs.length - 10} more (open the cards from the queue)</li>` : "");
   // round 21 (r20 bots): about 5 short lines; ids and reasons behind "Show" / More
   const show = (n, inner) => `<details class="more small"><summary>Show ${n}</summary><ul>${inner}</ul></details>`;
   const line = [];
-  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap16(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
+  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
   if (ai0.length) line.push(`<li>${plural(ai0.length, "card")}: AI check not finished (approving cancels it).</li>`);
-  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap16(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
+  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
   if (decided.length) line.push(`<li>${plural(decided.length, "card")} already decided.</li>`);
   const preHtml = line.length ? `<ul>${line.join("")}</ul>` : "";
   const restN = pre ? (pre.would_approve || []).filter(i => !lk0.some(w => w.id === i)).length : 0;
@@ -725,20 +722,19 @@ async function bulk_(status, btn, ids) {
   if (res) {
       const warn = res.warnings || [];
       const msg = `Done: ${plural(res.updated.length, "card")} ${status}.` + (res.skipped.length ? ` ${res.skipped.length} skipped (still pending: open them from the queue).` : "") + (warn.length ? ` ${plural(warn.length, "card")} may already be in MC Trade.` : "");   // round 21: no second dialog repeating the list
-      toast(msg, res.skipped.length || warn.length ? 7000 : 4500, res.updated.length > 0); refreshUndo(); refreshCounts.t = 0; refreshCounts();   // round 12 (reviewer r10): nav badge follows a bulk decision
+      toast(msg, res.skipped.length || warn.length ? 7000 : 4500, res.updated.length > 0); refreshUndo(); refreshCounts();   // round 12 (reviewer r10): nav badge follows a bulk decision
   }
   syncSel(); setTimeout(syncSel, 0);   // busy() restored the old label ("… (3)"); show the real count
 }
 $("#bulkApprove").onclick = e => bulk("approved", e.currentTarget); $("#bulkReject").onclick = e => bulk("rejected", e.currentTarget);
 $("#archiveBatch").onclick = async e => { const btn = e.currentTarget;
-  const opt = $("#fBatch").selectedOptions[0]; if (!Q.batch || !await needWho()) return;
+  const opt = $("#fBatch").selectedOptions[0]; if (!Q.batch) return;
   const r = await ask({title: "Archive this batch?", html: `<p><b>${esc(opt.textContent)}</b> will be hidden from the queue and exports. Nothing is deleted. Tick “Show archived” to see it.</p>`,
     buttons: [{label: "Archive batch", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return;
   await busy(btn, "Archiving…", async () => { const x = await post("/api/batches/archive", {batch: Q.batch, reviewer: who()}); Q.batch = ""; pushQueueState(); toast(`${plural(x.archived, "card")} archived.`, 4500, x.archived > 0); await loadQueue(); });
 };
 $("#archiveAll").onclick = async e => { const btn = e.currentTarget;
-  if (!await needWho()) return;
   const r = await ask({title: "Archive all test data?", html: "<p>Hides every card in the queue from the queue and exports. Nothing is deleted. Undo brings them back.</p>",
     input: {label: "Type CLEAR to confirm", required: "Type CLEAR to confirm."}, buttons: [{label: "Archive everything", cls: "danger", value: 1, needInput: true, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return; if (r.input.trim() !== "CLEAR") { toast("Not cleared: you didn't type CLEAR."); return; }
@@ -1124,7 +1120,6 @@ function collect() {
 }
 async function act(btn, extra, okMsg, sid = cur && cur.id) {
   if (!CARD_READY || !cur) { toast("Wait for the card to finish loading before saving.", 4000); return; }
-  if (!await needWho()) return;
   if (SAVING && !await waitSaveIdle()) { toast("Not saved: the last save is still running. Try again in a moment.", 6000); return; }   // round 14
   // round 11 (part-timer r4 CRITICAL): the card is fixed when the action starts. If the page moved to another card meanwhile
   // (e.g. while the merge dialog was open), nothing is saved: before, the merge was sent for the card now on screen, so the
@@ -1147,7 +1142,6 @@ async function decide(status, btn) {
 async function decide_(status, btn) {
   if (!CARD_READY) { toast("Wait for the card to finish loading before saving.", 4000); return; }
   const sid = cur.id;   // round 11 (part-timer r4): the card is fixed when the action starts (see act())
-  if (status && !await needWho()) return;
   // round 14 (LOST SAVE): a click while the previous save is still running used to be ignored without a word (busy button).
   // It now waits for that save, then saves what is on the form at that moment.
   if (SAVING || btn.getAttribute("aria-busy") === "true") {
@@ -1379,7 +1373,7 @@ async function exportInfo() {
       $("#xKeepAll").onclick = async () => {
         const r = await ask({title: `Mark ${pairs.length} pairs as different people?`, html: `<p>This saves a “different person” link on each listed card for the card next to it (${esc(pairs.slice(0, 12).map(([a, w]) => `#${a}↔#${w}`).join(", "))}${pairs.length > 12 ? "…" : ""}). Duplicate scans aren't included. Undo is available.</p>`,
           buttons: [{label: "Mark them all", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
-        if (!r.value || !await needWho()) return; let ok = 0, bad = 0;
+        if (!r.value) return; let ok = 0, bad = 0;
         for (const [a, w] of pairs) { try { const cv = (await call(`/api/cards/${a}`)).version; await post(`/api/cards/${a}`, {keep_apart: [w], card_id: a, version: cv}); ok++; } catch { bad++; } }
         toast(`${ok} pair(s) marked as different people` + (bad ? `, ${bad} not changed (open them)` : "") + ".", 4000, ok > 0); exportInfo(); };
     }
@@ -1443,7 +1437,7 @@ async function loadExportHistory() {
     <td>${x.available ? `<a href="/api/exports/${x.id}/download">${esc(x.filename)}</a>` + (x.companions || []).map(c => ` · <a href="/api/exports/${x.id}/companion/${c}">${c === "readme.txt" ? "READ ME" : c === "updates.xlsx" ? "UPDATES file" : "extra columns"}</a>`).join("") : `${esc(x.filename)} <span class="sub">(${x.mine ? "copy deleted" : "only " + esc(x.initials) + " or an admin can download it"})</span>`}</td></tr>`).join("") || `<tr><td colspan="5">No exports yet.</td></tr>`;
 }
 $("#exHistEveryone") && ($("#exHistEveryone").onchange = () => loadExportHistory());
-const KIND_ = 0; const KIND = {xlsx: "MC Trade import (Excel)", csv: "Spreadsheet (CSV)", vcf: "Contacts (vCard)"};
+const KIND = {xlsx: "MC Trade import (Excel)", csv: "Spreadsheet (CSV)", vcf: "Contacts (vCard)"};
 $$(".tile").forEach(t => t.onclick = async () => {   // round 14 (parttimer r6): busy at once, one click only, checks in parallel
   if (t.getAttribute("aria-busy") === "true") return;
   t.setAttribute("aria-busy", "true"); const lbl0 = t.style.cursor; t.style.cursor = "progress"; toast("Preparing the export…", 1500);
@@ -1453,7 +1447,6 @@ async function tileExport(t) {
   const kind = t.dataset.ex, st = $("#exStatus").value;
   const pre = kind === "xlsx" ? call(`/api/export/xlsx?preview=1&view=1&status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`).catch(e => ({__err: e})) : null;
   const info = await exportInfo(); if (!info || !info.count || info.duplicates.length) return;
-  if (!await needWho()) return;
   { const eb_ = $("#exBatch").value, bo = (BATCHES || []).find(b => b.batch === eb_) || (exportInfo.list || []).find(b => b.batch === eb_);   // round 24 (reviewer r23): warn before exporting someone else's batch
     if (eb_ === "" || (bo && !bo.own)) { const who_ = bo && bo.owner ? bo.owner : "other people";
       const a_ = await ask({title: eb_ === "" ? "Export everyone's batches?" : `This batch belongs to ${who_}`, html: `<p>${eb_ === "" ? "You chose All batches: cards other people scanned are included." : `“${esc(bo.batch_label || bo.batch)}” was scanned by ${esc(who_)}, not you.`} Export it anyway?</p>`,

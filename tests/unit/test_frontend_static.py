@@ -93,3 +93,8 @@ def test_phone_camera_stops_when_hidden_and_camera_app_is_offered():
     js, html = _src(os.path.join(PHONE, "phone.js")), _src(os.path.join(PHONE, "index.html"))
     assert "visibilitychange" in js and "getTracks().forEach(t => t.stop())" in js and "gen !== detGen" in js
     assert 'id="camApp"' in html.split('id="live"')[1].split("</div>\n  <div")[0] and '$("#camApp").onclick' in js
+
+def test_dead_code_stays_gone():
+    js = _src(os.path.join(UI, "ui.js"))
+    for name in ("needWho", "cap16", "ids17", "KIND_", "refreshCounts.t", "Q.loaded", "gacDownload"):
+        assert name not in js, name
