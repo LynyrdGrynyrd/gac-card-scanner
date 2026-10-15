@@ -3479,7 +3479,8 @@ def _check_template(data):
     crm_source.check_xlsx(data)
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True)
-        sheets = [[("" if x is None else str(x)) for x in (next(w.iter_rows(min_row=1, max_row=1, max_col=1000, values_only=True), ()) or ())] for w in wb.worksheets]
+        try: sheets = [[("" if x is None else str(x)) for x in (next(w.iter_rows(min_row=1, max_row=1, max_col=1000, values_only=True), ()) or ())] for w in wb.worksheets]
+        finally: wb.close()
     except Exception: raise ValueError("That isn't an Excel (.xlsx) file.")
     hdr = next((r for r in sheets if any(mx._hnorm(x) in ("indemail", "affcode1") for x in r)), None)
     if hdr is None: raise ValueError("No sheet has an IndEmail or AffCode1 column in its first row: this doesn't look like the MC Trade import template.")

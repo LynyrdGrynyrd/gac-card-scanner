@@ -49,7 +49,9 @@ def dr_has_first(path, dr):
     try:
         if path.lower().endswith(".xlsx"):
             from openpyxl import load_workbook
-            wb = load_workbook(path, read_only=True); hdr = [str(h or "") for h in next(wb.worksheets[-1].iter_rows(max_row=1, values_only=True), ())]
+            wb = load_workbook(path, read_only=True)
+            try: hdr = [str(h or "") for h in next(wb.worksheets[-1].iter_rows(max_row=1, values_only=True), ())]
+            finally: wb.close()   # audit 2026-10: else Windows can't delete or replace the file afterwards
         else:
             with open(path, newline="", encoding="utf-8-sig") as fh: hdr = next(csv.reader(fh), [])
     except Exception: return False

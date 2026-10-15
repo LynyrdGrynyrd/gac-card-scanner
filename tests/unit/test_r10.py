@@ -105,5 +105,10 @@ def test_phone_candidates_hide_docker(monkeypatch):
     class R: stdout = "2: eth0    inet 192.168.1.20/24 brd x\n3: docker0    inet 172.17.0.1/16 brd x\n4: virbr0    inet 192.168.122.1/24 x\n"
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [])
+    class NoRoute:   # audit 2026-10 (macOS CI): the default-route probe must not add the test machine's own address
+        def __init__(self, *a, **k): pass
+        def connect(self, *a): raise OSError("no route")
+        def close(self): pass
+    monkeypatch.setattr(socket, "socket", NoRoute)
     c = phone.lan_candidates()
     assert "172.17.0.1" not in c and "192.168.122.1" not in c and c[0] == "192.168.1.20"

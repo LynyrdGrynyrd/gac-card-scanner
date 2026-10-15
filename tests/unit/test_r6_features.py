@@ -119,8 +119,9 @@ def test_ai_queue_eta(env):
     c1, c2 = mk(ui, env["store"]), mk(ui, env["store"])   # round 14: only cards that will really be checked are counted
     ui.AI_TIMES[:] = [20, 20]; ui.AI_WAIT.clear(); ui.AI_WAIT[c1] = (1, 1); ui.AI_WAIT[c2] = (1, 2); ui.AI_RUNNING.update(cid=5, since=time.time() - 5)
     try:
-        p = ui.ai_progress(c2); assert p["position"] == 2 and p["ahead"] == 1 and p["eta_seconds"] == 20 + 15 + 20
-        q = env["rev"].get("/api/ai/status").json()["queue"]; assert q["waiting"] == 2 and q["running"] == 1 and q["eta_seconds"] == 55
+        # audit 2026-10 (Windows CI): 'running for 5 s' can read 6 s on a slow runner (rounded), so the ETA may be 1 s less
+        p = ui.ai_progress(c2); assert p["position"] == 2 and p["ahead"] == 1 and p["eta_seconds"] in (20 + 15 + 20, 20 + 14 + 20)
+        q = env["rev"].get("/api/ai/status").json()["queue"]; assert q["waiting"] == 2 and q["running"] == 1 and q["eta_seconds"] in (55, 54)
     finally: ui.AI_WAIT.clear(); ui.AI_RUNNING.clear(); ui.AI_TIMES.clear()
 
 def test_vlm_field_subset():
