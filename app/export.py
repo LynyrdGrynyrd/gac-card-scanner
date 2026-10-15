@@ -39,7 +39,8 @@ def to_vcard(cards):
         if f["title"]: v.append(f"TITLE:{_e(f['title'])}")
         v += [f"EMAIL;TYPE=INTERNET:{e}" for e in f["emails"]]
         tm = {"work":"WORK,VOICE","mobile":"CELL","fax":"WORK,FAX"}
-        v += [f"TEL;TYPE={tm.get(p['type'],'VOICE')}:{p['number']}" for p in f["phones"]]
+        from . import mctrade_export as _mx   # round 21 (skeptic r20 L2): same phone style as CSV/XLSX ('330-555-0142 x12')
+        v += [f"TEL;TYPE={tm.get(p['type'],'VOICE')}:{_mx.phone(p['number']) or p['number']}" for p in f["phones"]]
         if f["website"]: v.append(f"URL:{f['website']}")
         if f["address"]: v.append(f"ADR;TYPE=WORK:;;{_e(f['address'])};;;;")
         v += [f"X-SOCIALPROFILE:{s}" for s in f.get("social", [])]

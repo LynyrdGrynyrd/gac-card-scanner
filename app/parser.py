@@ -64,8 +64,11 @@ def _norm_line(l):
         l = re.sub(r"\b(e-?mail|email|web|www)\s*:\s*", lambda m: m.group(0).strip() + " ", l, flags=re.I)
     return l
 
+ACRONYMS = {"CEO", "CFO", "COO", "CTO", "CIO", "CMO", "CRO", "CPO", "CISO", "SVP", "EVP", "AVP", "VP", "HR", "IT", "PR", "LLC", "LLP",
+            "PLLC", "PC", "USA", "CPA", "MBA", "CFP", "RN", "MD", "DDS", "ESQ", "PE", "AIA", "UPS", "IBM", "GAC", "NASA", "OSU", "UA"}
 def _tc(s):
-    return " ".join(w.capitalize() if (w.isupper() and len(w) > 2 and not re.search(r"\d", w)) or (w.isupper() and len(w) <= 2 and w.isalpha() and False) else w for w in s.split()) if s.isupper() else s
+    # round 22 (reviewer r21): job-title acronyms such as CFO stay in capitals ('Cfo' was a misread look)
+    return " ".join(w if re.sub(r"[^A-Z]", "", w) in ACRONYMS and w.isupper() else w.capitalize() if (w.isupper() and len(w) > 2 and not re.search(r"\d", w)) or (w.isupper() and len(w) <= 2 and w.isalpha() and False) else w for w in s.split()) if s.isupper() else s
 
 def _strip_label(l):
     return re.sub(r"^(?:e-?mail|email|web|website|url|www:)\s*:?\s*", "", l, flags=re.I)
@@ -230,6 +233,8 @@ def parse(text: str, meta=None) -> dict:
         if len(w) == 1 and i + 1 < n and i + 1 not in used and _first_name(w[0]):
             w2 = name_tokens(lines[i+1])
             if 1 <= len(w2) <= 2 and all(x[:1].isupper() for x in w2) and not TITLE.search(lines[i+1]) and not COMPANY.search(lines[i+1]): w = w + w2; single_join = True
+        # round 22 (datamanager r21): 'Elena lbarra' is Elena Ibarra (l/I misread): fill it, with a low confidence so it is flagged
+        if len(w) >= 2 and w[0][:1].isupper(): w = [("I" + x[1:]) if k > 0 and re.fullmatch(r"l[a-z]{3,}", x) else x for k, x in enumerate(w)]
         if not (2 <= len(w) <= 4) or not all(re.fullmatch(r"[A-Za-z\u00C0-\u017F][\w\u00C0-\u017F'.-]*", x) for x in w): continue
         if any(len(x) == 1 for x in (w[0], w[-1])): continue
         s_ = 0.0
@@ -260,6 +265,7 @@ def parse(text: str, meta=None) -> dict:
             if sj: used.add(bi + 1)
             strong = s_ >= 2 and (_first_name(best[0].strip(".")) or any(len(x) >= 3 and x.lower().strip(".") in lc for lc in locals_ for x in (best[0], best[-1])))
             conf["name"] = 0.9 if strong else 0.6
+            if f["last_name"][:1] == "I" and re.search(r"\bl" + re.escape(f["last_name"][1:]), name_line): conf["name"] = 0.5   # l/I fixed: flag it
             name_i = bi + (1 if sj else 0)
         else: name_i = None; conf["name"] = 0
     else: name_i = None; conf["name"] = 0

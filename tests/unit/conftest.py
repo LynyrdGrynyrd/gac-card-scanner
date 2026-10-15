@@ -1,4 +1,5 @@
 import os, sys, pytest
+os.environ.setdefault("OCR_CHILD", "0")   # round 21: unit tests patch pipeline.scan in-process; test_r21 covers the child
 os.environ["GAC_ALLOW_REMOTE_SETUP"] = "1"; os.environ["VLM_URL"] = "http://127.0.0.1:9"
 import tempfile as _tf   # round 7: the tests never read or replace the data folder's real template / contacts export
 os.environ["MCTRADE_TEMPLATE"] = os.path.join(_tf.mkdtemp(prefix="gac-tpl-"), "mctrade_template.xlsx")

@@ -89,7 +89,7 @@ def test_update_without_certain_id_routed_to_review(env, monkeypatch):
     r = adm.get("/api/export/xlsx?status=approved&batch=r6u&preview=1"); assert r.status_code == 200
     assert "updates.xlsx" not in r.headers["X-Companions"]
     rd = adm.get("/api/export/xlsx?status=approved&batch=r6u&preview=1&companion=readme.txt").text
-    assert "NEEDS REVIEW before importing" in rd and f"#{cid}" in rd
+    assert "Check, to review" in rd and f"#{cid}" in rd
 
 def test_email_strict_at_approval(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]

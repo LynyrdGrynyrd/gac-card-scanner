@@ -101,7 +101,9 @@ def test_r10_suggestion():
 
 def test_website_hints():
     from app import plausibility as p
-    codes = lambda f: {x["code"] for x in p.check(f)}
+    codes = lambda f: {c for x in p.check(f) for c in x.get("codes", [x["code"]])}
+    # round 20: the website hints are ONE line (codes kept for the record)
+    assert len([x for x in p.check({"first_name": "A", "last_name": "B", "company": "Acme Tire", "emails": ["a@acmetire.com"], "website": "www.evil-phish.com"}) if x["field"] == "website"]) == 1
     assert {"website_suspicious", "website_mismatch"} <= codes({"first_name": "A", "last_name": "B", "company": "Acme Tire", "emails": ["a@acmetire.com"], "website": "www.evil-phish.com"})
     assert "website_invalid" in codes({"website": "acme", "emails": []})
     assert not codes({"company": "Acme Tire", "emails": ["a@acmetire.com"], "website": "www.acmetire.com"}) & {"website_suspicious", "website_mismatch", "website_invalid"}

@@ -188,3 +188,25 @@ input[type=checkbox],input[type=radio]{width:auto;height:auto;min-height:0;paddi
 #rForm.loading input, #rForm.loading textarea, #rForm.loading select { background: #f3f4f6; color: #9ca3af; cursor: wait; }   /* round 16 (part-timer r15): read-only until the card is loaded */
 /* round 17 (reviewer r16 N5): the toast (and its Undo) sits above the footer, never under it, and stays clickable while it fades */
 #toast{bottom:84px;z-index:5000}
+/* round 19: UI/UX polish (8px grid, settings cards, disclosures, chips, 44px targets) */
+.btn.small{min-height:44px}
+details.more{margin:8px 0}
+details.more>summary{display:inline-flex;align-items:center;min-height:32px;color:var(--teal-d);font-weight:600;font-size:.85rem}
+details.more[open]{background:#f3f7f8;border-radius:8px;padding:8px 16px 16px;color:var(--ink)}
+#t-settings{display:flex;flex-direction:column;gap:16px;max-width:760px;margin-top:16px}
+#t-settings[hidden]{display:none}
+.scard{margin-top:0}
+.scard h2{font-size:1.15rem;margin:0 0 8px}
+.scard h3{font-size:1rem;margin:16px 0 8px}
+.scard .chk{margin-top:8px}
+.scard p.small{margin:4px 0 8px}
+details.adv>summary{list-style:revert}
+details.adv>summary h2{display:inline;margin:0}
+details.adv[open]>summary{margin-bottom:8px}
+.savebar{margin:0}
+.chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.8rem;font-weight:600;line-height:1.5;border:1px solid transparent}
+.chip.ok{background:#e3f3e8;color:#155c2d}.chip.mid{background:#e3f0f3;color:#1f5866}.chip.low{background:var(--low);color:#6b4500}.chip.bad{background:#fbe4e2;color:#8c1d16}
+/* round 22 (reviewer r21): 'Unsaved changes: first name' in sentence case; the header never wraps because of the badge */
+.pill.dirty{text-transform:none}
+nav a,.badge{white-space:nowrap}
+.top nav{flex-wrap:nowrap;overflow-x:auto}

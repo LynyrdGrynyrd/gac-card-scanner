@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.0 (2026-10-15)
+Brings the desktop app up to date with the pilot's review rounds 18–24.
+
+### New inputs
+- **PDF and iPhone HEIC/HEIF photos** can be scanned (each PDF page becomes a card). The desktop builds now bundle pypdfium2 and pillow-heif.
+- **Cancel** a long scan: "Stopped. N kept, M not scanned"; nothing arrives late.
+- **Skip AI** per scan, for busy events.
+
+### Review
+- Clear misreads **block approval** until fixed: a digit in a name, a phone with a letter or without an area code, a garbled company, an email or website with a lost dot, a house number with a letter in it.
+- A value that really is printed that way can be **confirmed with a reason** (email, website and address by an admin). One audit row per confirmation.
+- Real brand names such as LinkedIn, HubSpot, QuickBooks and E*Trade are no longer blocked.
+- Each warning is shown once; plainer wording throughout.
+
+### Batches and export
+- The Review queue and Export open on **your newest batch**, and stay on it after an export.
+- Exporting **someone else's batch** (or all batches) asks first and names the owner.
+- The READ-ME is plain: totals first, "Check" lines, no internal jargon; "1 row" for a one-row file.
+
+### Help
+- Help is split into **Reviewer Start Here** and the **Admin & MC Trade Guide** (in-app pages and printable PDFs).
+
 ## v0.2.1 (2026-10-14)
 Hotfix for the desktop app (Windows, Mac).
 

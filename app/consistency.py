@@ -24,6 +24,13 @@ def _dom(s):
     s = (s or "").lower().strip()
     s = re.sub(r"^https?://", "", s).split("/")[0]
     return s[4:] if s.startswith("www.") else s
+def reg(d):
+    """Round 22: registrable domain (last two labels; three for co.uk-style endings): mail.acme.com and shop.acme.com match."""
+    p = (d or "").lower().strip(".").split(".")
+    return ".".join(p[-3:]) if len(p) >= 3 and p[-2] in ("co", "com", "org", "net", "ac", "gov") and len(p[-1]) == 2 else ".".join(p[-2:])
+def lost_dot(ed, web):
+    """Round 22: 'firestoneparkhardwexample.com' is 'firestoneparkhardw.example.com' with a dot lost."""
+    return len(web) >= 6 and ed != web and (ed.endswith(web) and not ed.endswith("." + web) or ed.replace(".", "") == web.replace(".", ""))
 def _core(d): return d.rsplit(".", 1)[0] if "." in d else d       # acme-widgets.com -> acme-widgets
 def _alpha(s): return re.sub(r"[^a-z]", "", (s or "").lower())
 def _sim(a, b): return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
@@ -65,7 +72,7 @@ def check(f):
     if biz and web:
         best = max(biz, key=lambda d: _sim(_core(d), _core(web)))
         s = _sim(_core(best), _core(web))
-        if best == web or best.endswith("." + web) or web.endswith("." + best):
+        if best == web or best.endswith("." + web) or web.endswith("." + best) or reg(best) == reg(web) or lost_dot(best, web):
             _adj(conf, "emails", +0.1); _adj(conf, "website", +0.1); notes["email_web"] = "match"
         elif s >= 0.75:
             _adj(conf, "emails", -1, floor=0.45); conf["emails"] = min(conf.get("emails") or 0.45, 0.45) if conf.get("emails") is not None else None

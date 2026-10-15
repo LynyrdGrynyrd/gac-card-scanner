@@ -2,7 +2,7 @@
 so every path goes through the same checks). /api/scan contract untouched.
 UI state (batches, hashes, archive, audit history, duplicate decisions, undo snapshots, exports, field sources)
 lives in extra tables in the same SQLite DB so store.py stays unchanged."""
-import copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, html as _html
+import asyncio, copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, html as _html
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse, FileResponse, Response, RedirectResponse, JSONResponse
@@ -120,6 +120,8 @@ def _seal():
             cd, md = _row_state(s_["card"]["id"]); s_["after"] = {"card": cd, "meta": md}
         with db() as c: c.execute("UPDATE actions SET snapshot=? WHERE id=?", (json.dumps(snap), aid))
 
+def _s(n, w):   # round 21: '1 card' / '3 cards' instead of 'card(s)'
+    return w if n == 1 else w + 's'
 def _who(request): return request.state.user["initials"]
 
 # ---------------------------------------------------------------- validation & attention (single source of truth)
@@ -167,6 +169,17 @@ def clean_note(n):
     if re.match(r"^[\s]*[=+\-@\t]", n) and not re.match(r"^\s*-\s", n): n = "'" + n.lstrip()
     return n
 
+REASON_MAX = 300
+def clean_reason(r):
+    """Round 22 (skeptic r21 L1): an 'approve anyway' reason: invisible characters removed, at least 3 real letters/digits,
+    at most 300 characters, no formula start or HTML. Returns (clean text, problem or None)."""
+    if not isinstance(r, str): return "", "The reason must be text."
+    r = re.sub(r"\s+", " ", ZW.sub("", r).replace("\u00a0", " ")).strip()
+    if len(re.findall(r"\w", r)) < 3: return r, "Write a short reason (at least 3 letters)."
+    if len(r) > REASON_MAX: return r, f"The reason is too long (at most {REASON_MAX} characters)."
+    if re.match(r"^[=+\-@]", r) or re.search(r"<\s*[a-z/!]|&#|javascript:", r, re.I): return r, "The reason can't contain formulas or HTML code."
+    return r, None
+
 def payload_problems(fields):
     """Shared server-side check for every endpoint that writes card values (save, approve, merge, AI accept, validate):
     only the values being sent are checked. HTML, formula text, invisible characters, impossible emails/phones."""
@@ -188,11 +201,173 @@ def hard_errors(f):
         err["name"] = "First name is required." if f.get("last_name") else "Name is required (at least a first name)."
     bad = [f"{e} ({email_syntax(e)})" for e in f.get("emails", []) if email_syntax(e)]
     if bad: err["emails"] = "Not a valid email address: " + ", ".join(bad) + ". Fix or delete it."
-    badp = [p["number"] for p in f.get("phones", []) if len(_digits(p.get("number"))) < 7]
-    if badp: err["phones"] = "Not a phone number (too few digits): " + ", ".join(badp) + ". Fix or delete it."
+    _hasl = lambda n: bool(re.search(r"[A-Za-z]", _mx_ext_strip(n)))   # round 24 (mctrade-admin r23 L1): '33o-555-0100' has a letter, not a missing area code
+    letp = [p["number"] for p in f.get("phones", []) if _hasl(p.get("number"))]
+    if letp: err["phones"] = "Phone " + ", ".join(f"“{x}”" for x in letp) + " has a letter in it. Check the photo and fix it."
+    badp = [p["number"] for p in f.get("phones", []) if not _hasl(p.get("number")) and len(_digits(p.get("number"))) < 7]
+    if letp: pass
+    elif badp: err["phones"] = "Not a phone number (too few digits): " + ", ".join(badp) + ". Fix or delete it."
+    else:   # round 23 (mctrade-admin r22 M3): '555-0100' (7 digits, no area code) can't go to MC Trade
+        shortp = [p["number"] for p in f.get("phones", []) if not _hasl(p.get("number")) and phone_no_area(p.get("number"))]
+        if shortp: err["phones"] = "Phone " + ", ".join(f"“{x}”" for x in shortp) + " has no area code. Add it from the card, or delete it."
     from . import mctrade_export as _mx
     for k, msg in _mx.content_problems(f).items(): err.setdefault(k, msg[0].upper() + msg[1:] + ". Fix it: it can't go into MC Trade.")
+    for k, msg in garbled_errors(f).items(): err.setdefault(k, msg)
     return err
+
+_MIXNUM = re.compile(r"\b\d+[oOlI]+(?:\d+[A-Za-z]*|\b|(?=[A-Z]))")   # round 21: '38ooEmbassy Pkwy' too
+_GARB_SYM = re.compile(r"[@#%|¦~€!$^*_=<>{}\\\[\]]")
+_GARB_MIX = re.compile(r"(?<=[A-Za-z])[01]{1,2}(?=[A-Za-z])|\b[01](?=[a-z]{2})")   # 0/O and 1/l swaps inside or starting a word: 'J0hn', 'Gr0up', 'Mar1a', '0livia'; 'Test3', 'Person0', 'Manager1792' are not swaps
+_GARB_LOOK = re.compile(r"\b(?:[A-Z][a-z]*[Il][a-z]*\|)|[a-z]\|[a-z]")
+def name_garbled(v, allow_digits=False):
+    """Round 21 (reviewer r20 HIGH): 'M@r#ia%%', 'Vlce Pres|dent ¦¦ ~~ Comm€rc!al', 'J0hn'. None if clean, else the bad bit."""
+    v = str(v or "")
+    if not v.strip(): return None
+    m = _GARB_SYM.search(v)
+    if m: return m.group(0)
+    if not allow_digits:
+        m = _GARB_MIX.search(v)
+        if m: return m.group(0)
+    return None
+def garbled_errors(f):
+    """Round 20 (coordinator r19): misreads that reached the export with only a soft hint now BLOCK approval until fixed:
+    a house number with a letter in it ('118o S Main St'), a garbled website ('wwwsummit…', 'wvw.c0m.xq'), and an email
+    domain that is 1-2 letters off the website ('pembertn.com' vs 'pemberton.com')."""
+    err = {}
+    for k, lab in (("first_name", "First name"), ("last_name", "Last name"), ("title", "Job title"),
+                   ("company", "Company"), ("department", "Department")):   # round 22 (reviewer r21 HIGH): company/department too
+        v_ = f.get(k)
+        if k in ("company", "department"): v_ = re.sub(r"!+\s*$", "", str(v_ or ""))   # 'Yahoo!' is a real name
+        if k in ("company", "department"): v_ = re.sub(r"(?<=[A-Za-z])\*(?=[A-Za-z])", "", v_)   # round 23 (mctrade-admin r22 M1): 'E*Trade' is a real name
+        bad = name_garbled(v_, allow_digits=(k == "title"))
+        if not bad and k in ("first_name", "last_name"):   # round 23 (part-timer r22 HIGH): 'Morg4n': a digit in a name is always a misread
+            m_ = re.search(r"\d", str(v_ or "")); bad = m_.group(0) if m_ else None
+        if not bad and k == "title":   # round 22 (newcomer r21): 'Acc0unt Manager' (a 0/1 inside a word); '1st', 'Level 3' are fine
+            m_ = re.search(r"(?<=[A-Za-z])[01]{1,2}(?=[A-Za-z])", str(v_ or "")); bad = m_.group(0) if m_ else None
+        if bad: err["name" if k == "first_name" else k] = f"{lab} “{f.get(k)}” has “{bad}” in it: a misread. Check the photo and fix it."
+    for p_ in f.get("phones") or []:
+        n_ = str((p_ or {}).get("number") or "")
+        if re.search(r"(?<![A-Za-z])[oOlI](?=\d)|(?<=\d)[oOlI](?![A-Za-z])|\d[oOlIsS]+\d|\([\doOlI]*[oOlI][\doOlI]*\)|\d{3}\)?[ .-]?\d{2,3}[oOlI]", n_):
+            err["phones"] = f"Phone “{n_}” has a letter inside the number (0/o, 1/l). Check the photo and fix it."; break
+    for k in ("address", "other_address"):
+        v = str(f.get(k) or "")
+        m = _MIXNUM.search(v) or re.search(r"\b[A-Za-z]+0[A-Za-z]*\b|\bl\d+\b", v)   # round 21 (mctrade-admin r20): S0uth, l18
+        if m: err[k] = f"“{m.group(0)}” has letters mixed with digits. Check the photo."
+        elif re.match(r"^\s*[a-z]\s+(?:[NSEW]\.?\s+)?[A-Z]", v):   # round 22: 'g W Exchange St' (house number read as a letter)
+            err[k] = f"Address “{v[:100]}” starts with “{v.strip()[0]}” where the house number should be. Check the photo and fix it."
+        else:
+            m = re.search(r"[|¦~€!$^*_=<>{}\\\[\]]", v)   # round 22: garbled symbols in the address
+            if m: err[k] = f"Address “{v[:100]}” has “{m.group(0)}” in it: a misread. Check the photo and fix it."
+    if "company" not in err and f.get("company"):   # round 22 (newcomer r21): a gibberish company ('Higneniscdaie CoffeeCa') blocks
+        try:
+            from . import plausibility as _pl
+            if company_gibberish(f.get("company")):   # round 23 (r22 reviewer/newcomer/datamanager): 'CoffeeCo.' is run-together, not gibberish
+                err["company"] = f"Company “{f.get('company')}” looks misread. Check the photo."
+        except Exception: pass
+    w = str(f.get("website") or "").strip()
+    ems = [e for e in f.get("emails") or [] if "@" in str(e)]
+    for e in ems:   # round 22 (datamanager r21 M2): a lost dot is caught with no website too ('…hardwexample.com', '…comcom.com')
+        ed = str(e).lower().rsplit("@", 1)[-1].strip(); sld = ed.rsplit(".", 1)[0].split(".")[-1]
+        m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sld)
+        if m_ and (m_.group(2) == "example" or re.search(r"(com|net|org)$", m_.group(1))):
+            err["emails"] = f"Email domain “{ed}” looks like a dot is missing. Check the photo and fix it."; break
+    if w and "website" not in err:   # round 24 (datamanager r23 M1): the website gets the same lost-dot check as emails
+        wd = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; wd = wd[4:] if wd.startswith("www.") else wd
+        sldw = wd.rsplit(".", 1)[0].split(".")[-1]
+        m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sldw)
+        if "." in wd and m_ and (m_.group(2) == "example" or re.search(r"(com|net|org)$", m_.group(1))):
+            err["website"] = f"Website “{w}” looks like a dot is missing. Check the photo and fix it."
+    if "website" in err: pass
+    elif w and (re.match(r"^(https?://)?(www(?![.\d])|wvw\.|vvww?\.)", w, re.I) or ".." in w or not plausible_site(w, ems)):
+        err["website"] = f"Website “{w}” looks misread. Check the photo and fix it, or clear it."
+    elif w:
+        d = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; d = d[4:] if d.startswith("www.") else d
+        from difflib import SequenceMatcher as _SMg
+        for e in ems:
+            ed = str(e).lower().rsplit("@", 1)[-1].strip()
+            if ed == d or ed.endswith("." + d) or d.endswith("." + ed): continue
+            # round 21 (datamanager r20 HIGH): a dot lost in the domain ('firestoneparkhardwexample.com' vs 'example.com')
+            if len(d) >= 6 and (ed.endswith(d) or ed.replace(".", "") == d.replace(".", "")):
+                err["emails"] = (f"Email domain “{ed}” looks like the website “{d}” with a dot missing: a misread. Fix it (e.g. “…{ed[:-len(d)] if ed.endswith(d) else ''}.{d}”)."); break
+            a_, b_ = ed.rsplit(".", 1)[0], d.rsplit(".", 1)[0]
+            if a_.replace("-", "") == b_.replace("-", ""): continue   # acmegroup.com vs acme-group.com
+            dd = _lev(a_, b_) if a_ and b_ else 9   # 'same' vs 'acme' is two companies; 'pembertn' vs 'pemberton' is a misread
+            if dd == 1 and min(len(a_), len(b_)) >= 5 or dd == 2 and min(len(a_), len(b_)) >= 8:
+                err.setdefault("emails", f"Email domain “{ed}” and website “{d}” differ by a letter or two: one is misread. Fix the wrong one."); break
+    ok = valid_confirmations(f)   # round 23: only confirmations that pass today's rules (re-checked everywhere, also at export)
+    for k in list(err):   # round 21 (mctrade-admin r20): a reviewer said 'This is correct' for exactly this value
+        fk = "first_name" if k == "name" else k
+        if fk in ok and json.dumps(f.get(fk), sort_keys=True) == ok[fk]: err.pop(k)
+    return err
+
+def _mx_ext_strip(n):
+    from . import mctrade_export as _mx
+    return _mx.EXT.sub("", str(n or ""))
+def phone_no_area(n):
+    """Round 23: a US-style number with 7-9 digits (extension removed): the area code is missing. '+' numbers are left alone."""
+    n = str(n or "").strip()
+    if n.startswith("+"): return False
+    from . import mctrade_export as _mx
+    d = _digits(_mx.EXT.sub("", n))
+    return 7 <= len(d) <= 9
+
+_CO_TAIL = {"Co", "Inc", "Ltd", "Corp", "Llc", "Lp", "Pc", "Pa", "Plc"}
+def company_gibberish(c):
+    """Round 23: a company word that can't be a word ('Higneniscdaie', 'CoffeeCa'). 'CoffeeCo.' (two words run together,
+    ending in a usual company abbreviation) is only a spacing hint, never a block."""
+    from . import plausibility as _pl
+    for w_ in re.findall(r"[A-Za-z]+", str(c or "")):
+        rare = sum(1 for i in range(len(w_) - 1) if w_[i:i + 2].lower() in _pl._RARE2)
+        if (len(w_) >= 10 and rare >= 1) or rare >= 2 or re.search(r"[bcdfghjklmnpqrstvwxz]{5,}", w_.lower()): return w_
+        if w_ in _pl.CAMEL_OK or w_ in ("QuickBooks", "LinkedIn", "HubSpot", "PayPal", "DoorDash", "SoundCloud", "GitHub", "DropBox", "MailChimp"): continue   # round 24 (mctrade-admin r23 M1)
+        m_ = re.search(r"[a-z]{3,}([A-Z][a-z]?)$", w_)
+        if m_ and m_.group(1).capitalize() not in _CO_TAIL: return w_
+    return None
+
+CONFIRM_FIELDS = ("first_name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
+def valid_confirmations(f):
+    """Round 23 (mctrade-admin r22 H1, datamanager r22 H1): the 'This is correct' confirmations that still count, re-checked
+    against today's rules every time (save, approve, export): one field each, a known person, a reason, admin-only fields
+    confirmed by an admin, the exact saved value, and never a phone, a formula or HTML. Older confirmations (before r23:
+    no author/reason recorded) no longer count, so those values block again until fixed or confirmed again."""
+    ok = f.get("confirmed_ok") if isinstance(f.get("confirmed_ok"), dict) else {}
+    cm = f.get("confirmed_meta") if isinstance(f.get("confirmed_meta"), dict) else {}
+    out = {}
+    from . import mctrade_export as _mx
+    cp = _mx.content_problems({k: v for k, v in f.items() if k in CONFIRM_FIELDS})
+    for fk, val in ok.items():
+        m = cm.get(fk) if isinstance(cm.get(fk), dict) else None
+        k = "name" if fk == "first_name" else fk
+        if fk not in CONFIRM_FIELDS or not m or not m.get("user") or not m.get("reason") or m.get("value") != val: continue
+        if json.dumps(f.get(fk), sort_keys=True) != val or fk in cp or k in cp: continue
+        if k in ADMIN_OVERRIDE and m.get("role") != "admin": continue
+        vs = f.get(fk) if isinstance(f.get(fk), str) else json.dumps(f.get(fk))
+        if re.search(r"(^|[\s\"])[=+@]|^\s*-|<[a-z/!]", vs or "", re.I): continue
+        out[fk] = val
+    return out
+
+# round 22: phones are never overridable (a letter in a phone number is never right)
+OVERRIDABLE = ("name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
+ADMIN_OVERRIDE = ("emails", "website", "address", "other_address")
+def overridable(f):
+    """Fields whose hard check can be confirmed with 'This is correct': only garbled-looking values, never formula/HTML."""
+    from . import mctrade_export as _mx
+    g = garbled_errors({**f, "confirmed_ok": {}}); cp = _mx.content_problems(f)
+    out = []
+    for k in g:
+        fk = "first_name" if k == "name" else k
+        if k in OVERRIDABLE and k not in cp and fk not in cp:
+            v = f.get(fk); vs = json.dumps(v) if not isinstance(v, str) else v
+            if not re.search(r"(^|[\s\"])[=+@]|^\s*-|<[a-z/!]", vs, re.I): out.append(k)
+    return out
+def _lev(a, b):
+    if abs(len(a) - len(b)) > 2: return 9
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1): cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
 
 def address_validates(a):
     """Round 10 (part-timer r3): an address that splits cleanly into street, city, a real state and a zip is readable,
@@ -405,10 +580,15 @@ def attention(c, d, cards=None, names=None):
     f = c["fields"]; r = []
     v = validate(f)
     for k, msg in v.items(): r.append({"code": "invalid", "field": k, "text": msg})
+    # round 21 (datamanager/part-timer r20): hard problems are in To check as soon as the card opens, not only at Approve
+    try: hard = {k: m_ for k, m_ in hard_errors(f).items() if k not in v and not (k == "name" and "name" in v)}
+    except Exception: hard = {}
+    for k, msg in hard.items(): r.append({"code": "hard", "field": "first_name" if k == "name" else k, "text": "Blocks approval: " + msg})
+    hard_f = {"first_name" if k == "name" else k for k in hard} | set(v)
     try: _src = json.loads((d.get("meta") or {}).get("field_sources") or "{}")
     except Exception: _src = {}
-    for k in low_fields(f, _src):
-        if k not in v: r.append({"code": "low", "field": k, "text": f"Hard to read: {LABEL.get(k, k)}"})
+    # round 22: ONE line for 'hard to read' and 'missing' (they used to be several lines)
+    lows_ = [k for k in low_fields(f, _src) if k not in v and k not in hard_f]
     # round 13 (reviewer r11): decided cards keep their checks and hints (a rejected card no longer turns "Looks good")
     if True:   # re-checked live, so a fix by the reviewer clears it
         from . import consistency
@@ -418,29 +598,42 @@ def attention(c, d, cards=None, names=None):
         try:
             from . import plausibility
             for sg in plausibility.check(json.loads(json.dumps(f))):
+                if sg.get("field") in hard_f: continue   # round 21: never 'Suggestion' AND 'blocks' for one value
+                if sg.get("field") in valid_confirmations(f): continue   # round 24 (coordinator r23): a confirmed value gets no second note
+                if sg.get("field") in {x_.get("field") for x_ in r if x_.get("code") == "hint"}: continue   # round 24 (newcomer r23 'CoffeeCo' twice): one note per field
                 r.append({"code": "hint", "field": sg.get("field"), "text": "Suggestion: " + (sg.get("text") or ""), "suggestion": sg.get("suggestion")})
         except Exception: pass
     if True:   # round 7 (coordinator r1 #4): 'Looks good' needs company, email and website
         miss = [LABEL[k] for k in ("company", "emails", "website") if not (f.get(k) if k != "emails" else [e for e in f.get("emails") or [] if e])]
         if not [p_ for p_ in f.get("phones") or [] if (p_.get("number") or "").strip()]: miss.append(LABEL.get("phones", "Phone"))   # round 14 (coordinator r6 #5)
-        if miss: r.append({"code": "missing", "field": "company" if "Company" in miss else "emails" if "Email" in miss else "website",
-                           "text": "Missing: " + ", ".join(miss) + " (check the photo; leave blank if the card has none)"})
+        parts_ = ([f"Hard to read: {', '.join(LABEL.get(k, k) for k in lows_)}"] if lows_ else []) + (["Missing: " + ", ".join(miss)] if miss else [])
+        if parts_:
+            r.append({"code": "low" if lows_ else "missing", "field": lows_[0] if lows_ else ("company" if "Company" in miss else "emails" if "Email" in miss else "website"),
+                      "fields": lows_, "text": " · ".join(parts_) + ". Check the photo."})   # round 23: shorter
+        t_ = str(f.get("title") or "").strip()   # round 22: a job title that stops mid-phrase ('Director of', 'Sales &')
+        if t_ and "title" not in hard_f and re.search(r"(?:[&,/+-]|\b(?:of|and|for|the|to|in|at|&amp))$", t_, re.I):
+            r.append({"code": "hint", "field": "title", "text": f"Suggestion: Job title “{t_}” looks cut off. Check the photo."})
     if d["unresolved_queue"]: r.append({"code": "dup_queue", "text": "May be the same person as card " + _ids10(x['card_id'] for x in d["open"] if x["blocking"])})
     # round 11 (reviewer r10 blocker 2): 'Looks good' never shows while a card has ANY open look-alike or MC Trade match
     # round 17 (reviewer r16 NO-GO #1): a same-batch look-alike that no longer blocks (it, or this card, was rejected) gets
     # its OWN line. Before, it shared one 5-id list with the other-batch look-alikes and was cut off when a person had been
     # scanned in many earlier batches, so after a bulk reject the in-batch twin vanished from the queue and "Why...".
-    nb = [x for x in d["open"] if not x["blocking"]]
+    decided = (d.get("resolution") == "keep_both")   # round 21: 'Different person' silences every duplicate line
+    nb = [] if decided else [x for x in d["open"] if not x["blocking"]]
     sb_ = [x for x in nb if x.get("same_batch")]
     if sb_:
         rj = all(x.get("other_status") == "rejected" for x in sb_)
         r.append({"code": "dup_other", "text": "May be the same person as card " + _ids10(x["card_id"] for x in sb_) + (" (rejected, this batch)" if rj else " (this batch)")
                   + (": a hint only, it doesn't block" if c["status"] != "rejected" else "")})
     ob_ = [x for x in nb if not x.get("same_batch")]
+    if not d["unresolved_queue"] and ob_ and d["queue"] and c["status"] == "pending":   # round 21: short; the Seen-before box has the details
+        r.append({"code": "dup_other", "text": f"Seen before: similar to {plural(len(ob_), 'other card')}"}); ob_ = []
     if not d["unresolved_queue"] and ob_:
         op = ob_; rej_all = all(x.get("other_status") == "rejected" for x in op)
         tag = ", ".join(t for t in ("rejected" if rej_all else "", "another batch") if t)
-        r.append({"code": "dup_other", "text": ("May be the same person as card " if rej_all else "Looks like card ") + _ids10(x["card_id"] for x in op)
+        if c["status"] != "pending" and len(op) > 3:   # round 22 (part-timer r21): a decided card shows a count, not 28 card numbers
+            r.append({"code": "dup_other", "text": f"Looks like {plural(len(op), 'other card')} ({tag})"})
+        else: r.append({"code": "dup_other", "text": ("May be the same person as card " if rej_all else "Looks like card ") + _ids10(x["card_id"] for x in op)
                   + f" ({tag})" + (": a hint only, it doesn't block" if rej_all and c["status"] != "rejected" else "" if c["status"] != "pending" else ": check before approving")})
     if d["crm"] and not d["crm_action"]: r.append({"code": "dup_crm", "text": f"May already be in MC Trade: {d['crm'][0]['name']}"})
     elif d["crm"] and "email exact" not in (d["crm"][0].get("why") or []) and c["status"] == "pending":
@@ -473,7 +666,7 @@ def attention(c, d, cards=None, names=None):
         _la = {x["card_id"] for x in d.get("queue") or []}
         pool = (names or {}).get(nm) if names is not None else [x for x in (cards or []) if _nm(x.get("fields")) == nm]
         twins = [x for x in (pool or []) if x["id"] != c["id"] and x["id"] not in _la and x["status"] != "rejected"]
-        if twins: r.append({"code": "same_name", "field": "name", "text": "Same first and last name as card " + ", ".join("#" + str(x["id"]) for x in twins[:5]) + ": MC Trade may treat them as one person; confirm they are different (other email/company) before exporting"})
+        if twins: r.append({"code": "same_name", "field": "name", "text": "Same first and last name as card " + ", ".join("#" + str(x["id"]) for x in twins[:5]) + ": MC Trade may merge them. Check they are different people."})
         rows = crm_source.real()
         if rows:
             if not hasattr(attention, "_crm_names") or attention._crm_key != id(rows):
@@ -495,7 +688,7 @@ def _active(include_archived=False):
     if not include_archived: cards = [c for c in cards if not (metas.get(c["id"]) or {}).get("archived")]
     return cards, metas
 
-def _shown_conf(f, a):
+def _shown_conf(f, a, src=None):
     """Confidence shown in lists (part-timer r1: 90 % next to a blank name). Capped below 'high' while a required field is
     blank or a check/hint is open, so a high number never sits next to a problem."""
     v = f.get("overall_confidence")
@@ -509,6 +702,9 @@ def _shown_conf(f, a):
         # round 12 (coordinator r4 #7): min(v, 0.59) put every well-read card with one flag at exactly 56 %. The read score is
         # now SCALED into the band below "looks good" (so a clear card still shows higher than a blurred one), then lowered per problem
         return round(max(0.05, 0.6 * min(v, 0.99) - 0.03 * min(len(probs), 5)), 2)
+    # round 20 (datamanager r19): the chip is about the CURRENT data. A card a person has edited or confirmed, with no
+    # open problem left, is no longer "Unclear" because of the original photo read.
+    if v < 0.6 and any(str(x).startswith(("edited", "confirmed")) for x in (src or {}).values()): return 0.8
     return v
 def enrich(c, cards, metas, full=False, names=None):
     d = dupes(c, cards, metas); m = metas.get(c["id"]) or meta(c["id"]); a = attention(c, d, cards, names)
@@ -517,21 +713,31 @@ def enrich(c, cards, metas, full=False, names=None):
     except Exception: src = {}
     out = {"id": c["id"], "status": c["status"], "image": c["image"], "created": c["created"],
            "name": f"{f.get('first_name','')} {f.get('last_name','')}".strip(), "company": f.get("company", ""),
-           "email": (f.get("emails") or [""])[0], "conf": _shown_conf(f, a), "reviewer": c.get("reviewer"),
+           "email": (f.get("emails") or [""])[0], "conf": _shown_conf(f, a, src), "reviewer": c.get("reviewer"),
            "attention": a, "needs_attention": bool(a), "version": card_version(c), "dup": bool(d["queue"] or d["crm"]), "lookalikes_elsewhere": d["lookalikes_elsewhere"],
            "batch": m.get("batch"), "batch_label": m.get("batch_label"), "filename": m.get("filename"),
            "archived": bool(m.get("archived")), "exported": m.get("exported"), "qr": "qr" in src.values(),
            "image_deleted": m.get("image_deleted"), "ai_status": m.get("ai_status"),
-           "ai_detail": json.loads(m["ai_detail"]) if m.get("ai_detail") else None,
+           "ai_detail": calm_ai_detail(json.loads(m["ai_detail"])) if m.get("ai_detail") else None,
            "override": _ov(m) or None, "reexport": m.get("reexport"), "back_image": m.get("back_image"),
            "ai_progress": ai_progress(c["id"]) if m.get("ai_status") in ("queued", "checking") else None}
+    try: out["blocked"] = c["status"] == "pending" and bool(hard_errors(f))   # round 23 (datamanager r22 M3): the chip never says OK on a blocked card
+    except Exception: out["blocked"] = False
     if full:
         d = {k: v for k, v in d.items() if k != "meta"}
         # round 11 (part-timer r4): the review page warns BEFORE Approve when this person was already approved+exported elsewhere
         xb = [x for x in _cross_batch(c, f, cards, metas) if x["exported"] and {"same email", "same phone", "same photo"} & set(x["why"])]
         with db() as conn:
             nexp = {x["card_id"]: conn.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='exported'", (x["card_id"],)).fetchone()[0] for x in xb}
-        out["exported_elsewhere"] = [x | {"times": nexp.get(x["card_id"], 1)} for x in xb]
+        _kx = _kept(m)   # round 21: after 'Different person' (or for kept-apart cards) the 'already exported' warning is silent
+        out["exported_elsewhere"] = [] if (m.get("dup_resolution") == "keep_both" or c["status"] != "pending") else [x | {"times": nexp.get(x["card_id"], 1)} for x in xb if x["card_id"] not in _kx]
+        out["dup_decided"] = m.get("dup_resolution") == "keep_both"
+        try:   # round 22: hard blocks + which of them 'This is correct' may confirm, so the card shows them (and the button) on open
+            hard_ = hard_errors(f)   # the page hides admin-only ones (ADMIN_OVERRIDE) for reviewers; the server checks the role anyway
+            out |= {"hard": hard_, "overridable": [k for k in overridable(f) if k in hard_], "admin_override": list(ADMIN_OVERRIDE)}
+            _cm = f.get("confirmed_meta") if isinstance(f.get("confirmed_meta"), dict) else {}   # round 23: confirmed values are marked on Review
+            out["confirmed"] = {k: {"by": _cm[k].get("by"), "reason": _cm[k].get("reason")} for k in valid_confirmations(f)}
+        except Exception: pass
         out |= {"version": card_version(c), "card": c | {"fields": f | {"confidence": calibrated_conf(f)}}, "dupes": d, "history": history(c["id"]), "errors": validate(f), "low": _low_after_ai(f, src, m), "sources": src}
         for x in d["queue"]:
             o = store.get(x["card_id"])
@@ -629,10 +835,52 @@ POOL = ThreadPoolExecutor(max_workers=SCAN_WORKERS)
 # Caps how many photos are read (OCR) at the same time across ALL entry points (the /ui job pool, /api/scan, back-of-card),
 # so a burst of uploads queues instead of multiplying RAM use.
 SCAN_SEM = threading.BoundedSemaphore(SCAN_WORKERS)
+OCR_CHILD = os.environ.get("OCR_CHILD", "1") == "1"   # round 21 (skeptic r20 M1): OCR runs in the capped reader child
 def scan_limited(*a, **k):
-    from . import pipeline
-    with SCAN_SEM: return pipeline.scan(*a, **k)
+    from . import pipeline, reader
+    with SCAN_SEM:
+        if OCR_CHILD and not k.get("use_vlm") and isinstance(a[0], (bytes, bytearray)):
+            try: return reader.run_ocr(bytes(a[0]), a[1] if len(a) > 1 else k.get("engine"), key=k.pop("key", None))
+            except reader.ReaderError: raise
+        k.pop("key", None)
+        return pipeline.scan(*a, **k)
+
+def _calm_read_error(ex):
+    """Round 22: never show exception class names (e.g. 'ReaderError') to the user."""
+    from . import reader
+    print("read error:", type(ex).__name__, str(ex)[:200], flush=True)
+    if isinstance(ex, reader.ReaderError) and str(ex) and str(ex) != reader.CALM: return str(ex)
+    return "Couldn't read this page. Try again, or use a photo or a smaller PDF."
+
+MEM_MIN_MB = int(os.environ.get("MEM_MIN_MB", "1000"))   # round 21 (skeptic r20): pause new reads below ~1 GB free
+def mem_free_mb():
+    try:
+        with open("/proc/meminfo") as fh:
+            for ln in fh:
+                if ln.startswith("MemAvailable:"): return int(ln.split()[1]) // 1024
+    except Exception: pass
+    return 10 ** 6
+MEM_LONG_S = 900
+def wait_for_memory(jid=None, max_s=None):
+    """Hold a read while the computer is short of memory ('Waiting for memory…'), so the server and AI stay safe.
+    Round 22 (skeptic r21 L4): never reads anyway after 15 min; it keeps waiting with a calm message. With max_s (tests)
+    it gives up (False) instead of reading."""
+    t0 = time.time()
+    while mem_free_mb() < MEM_MIN_MB:
+        if max_s is not None and time.time() - t0 >= max_s: return False
+        if jid:
+            with JLOCK:
+                j = JOBS.get(jid) or {}
+                if j.get("state") == "cancelled": return False
+                j["waiting_memory"] = True
+                if time.time() - t0 > MEM_LONG_S:
+                    j["waiting_memory_msg"] = "Still waiting for free memory. Nothing is lost: this starts by itself, or Cancel it."
+        time.sleep(2)
+    if jid:
+        with JLOCK: j = JOBS.get(jid) or {}; j.pop("waiting_memory", None); j.pop("waiting_memory_msg", None)
+    return True
 JOBS, JLOCK = {}, threading.Lock()
+CANCELLED_BATCH = {}   # (who, batch) -> time Cancel was pressed: an upload that lands just after it is not scanned (round 21)
 MAX_BYTES = 25 * 1024 * 1024
 
 # Only plain raster formats are decoded (no EPS/PDF/etc. plugins, which can shell out to external tools), and images above
@@ -652,7 +900,7 @@ def _check_image(data):
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
         return "This picture is far too large (too many pixels). Use a normal phone photo."
     except Exception:
-        return "This file isn't a photo the scanner can open (use JPG or PNG)."
+        return "This file isn't a photo the scanner can open (use JPG, PNG, HEIC or PDF)."
     w, h = im.size
     if w < 200 or h < 100: return f"Photo is too small ({w}×{h} pixels). Take the picture closer to the card."
     g = im.convert("L"); g.thumbnail((400, 400))
@@ -660,12 +908,13 @@ def _check_image(data):
     return None
 
 QR_KEYS = ("first_name", "last_name", "title", "company", "department", "emails", "phones", "website", "address", "social")
-def ingest(data, engine, ext):
+class _Cancelled(Exception): pass
+def ingest(data, engine, ext, jid=None, meta_kw=None):
     """Image -> card using the shared pipeline (QR/vCard decode + OCR + parser). Returns (card_id, field_sources)."""
     from . import pipeline, qr
     name = uuid.uuid4().hex + ext
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
-    r = scan_limited(data, None if engine in (None, "", "auto", "standard", "tesseract") else engine, use_vlm=False)
+    r = scan_limited(data, None if engine in (None, "", "auto", "standard", "tesseract") else engine, use_vlm=False, **({"key": jid} if jid else {}))
     f = r["fields"]; src = {}
     qrv = None
     if (f.get("sources") or {}).get("qr"):
@@ -674,16 +923,29 @@ def ingest(data, engine, ext):
             if qrv: break
     for k in QR_KEYS:
         if f.get(k): src[k] = "qr" if qrv and qrv.get(k) and qrv.get(k) == f.get(k) else "ocr"
-    cid = store.add(r["engine"], r["text"], f, name)
+    # round 22 (newcomer r21 HIGH): Cancel is atomic. The card is created (with its batch) under JLOCK only if the job was
+    # not cancelled meanwhile; Cancel takes the same lock and can no longer stop a job that already has a card.
+    with JLOCK:
+        if jid and (JOBS.get(jid) or {}).get("state") == "cancelled":
+            try: os.remove(os.path.join(UP, name))
+            except OSError: pass
+            raise _Cancelled()
+        cid = store.add(r["engine"], r["text"], f, name)
+        if meta_kw: set_meta(cid, **meta_kw)
+        if jid and jid in JOBS: JOBS[jid]["card_id"] = cid
     return cid, src
 
-def _run(jid, data, engine, ext, batch, label, fname, sha, who):  # noqa: PLR0913
-    with JLOCK: JOBS[jid]["state"] = "reading"; JOBS[jid]["started"] = time.time()
+def _run(jid, data, engine, ext, batch, label, fname, sha, who, skip_ai=False):  # noqa: PLR0913
+    wait_for_memory(jid)
+    with JLOCK:
+        if (JOBS.get(jid) or {}).get("state") != "queued": return   # round 19: cancelled while waiting in line
+        JOBS[jid]["state"] = "reading"; JOBS[jid]["started"] = time.time()
     try:
         if data is None:   # queued jobs keep only a file on disk, not the photo bytes in memory
             with open(os.path.join(INBOX, jid + ".bin"), "rb") as fh: data = fh.read()
-        cid, src = ingest(data, engine, ext)
-        set_meta(cid, batch=batch, batch_label=label, filename=fname, sha256=sha, field_sources=json.dumps(src))
+        open(os.path.join(INBOX, jid + ".reading"), "w").close()   # round 20 poison guard: a crash now -> not re-queued
+        cid, src = ingest(data, engine, ext, jid=jid, meta_kw={"batch": batch, "batch_label": label, "filename": fname, "sha256": sha}); data = None
+        set_meta(cid, field_sources=json.dumps(src))
         log(cid, who, "scanned", None, "pending", {"file": fname, "batch": label, "qr": "qr" in src.values()})
         bp = os.path.join(INBOX, jid + ".back")
         if os.path.isfile(bp):   # phone mode: front + back sent together
@@ -691,28 +953,39 @@ def _run(jid, data, engine, ext, batch, label, fname, sha, who):  # noqa: PLR091
             if not _check_image(bdata):
                 r = attach_back(cid, bdata, ".jpg", who, confirm_other_person=False)
                 if isinstance(r, tuple): log(cid, who, "back_skipped", detail={"why": r[0].get("error", "")[:200]})
-        maybe_ai_check(cid)
+        if skip_ai: set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"note": f"AI check skipped at scan by {who} (Skip AI)"}))
+        else: maybe_ai_check(cid)
         cards, metas = _active()
         e = enrich(store.get(cid), cards, metas)
         with JLOCK: JOBS[jid] |= {"state": "done", "card": e, "finished": time.time()}
     except Exception as ex:
-        with JLOCK: JOBS[jid] |= {"state": "error", "error": f"Could not read this card ({type(ex).__name__}).", "finished": time.time()}
+        with JLOCK:
+            if (JOBS.get(jid) or {}).get("state") == "cancelled" or isinstance(ex, _Cancelled): JOBS[jid] |= {"state": "cancelled", "finished": time.time()}
+            else: JOBS[jid] |= {"state": "error", "error": _calm_read_error(ex), "finished": time.time()}
     finally:
         with JLOCK: j = dict(JOBS.get(jid) or {})
         try:
             with open(os.path.join(DONE, jid + ".json"), "w") as fh:
                 json.dump({k: j.get(k) for k in ("id", "state", "file", "batch", "error", "created", "started", "finished")} | {"card_id": (j.get("card") or {}).get("id")}, fh)
         except Exception: pass
-        for x in (".bin", ".json", ".back"):
-            try: os.remove(os.path.join(INBOX, jid + x))
-            except FileNotFoundError: pass
+        _inbox_clear(jid)
 
 @router.post("/api/jobs")
 async def create_job(request: Request, image: UploadFile = File(...), engine: str = Form("auto"), batch: str = Form(""),
-                     batch_label: str = Form(""), allow_duplicate: str = Form("")):
-    data = await image.read(); fname = image.filename or "photo"
+                     batch_label: str = Form(""), allow_duplicate: str = Form(""), skip_ai: str = Form("")):
+    t0 = time.time(); data = await image.read(); fname = image.filename or "photo"
     batch = batch_for(batch, batch_label, _who(request))
-    return await enqueue_upload(data, fname, engine=engine, batch=batch, batch_label=batch_label, allow_duplicate=allow_duplicate, who=_who(request))
+    if _cancelled_since(_who(request), batch, t0):   # round 21: landed just after Cancel -> not scanned
+        return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
+    return await enqueue_upload(data, fname, engine=engine, batch=batch, batch_label=batch_label, allow_duplicate=allow_duplicate, who=_who(request), t0=t0,
+                                skip_ai=skip_ai.strip().lower() in ("1", "true", "yes", "on"))
+
+def _cancelled_since(who, batch, t0=None):
+    """Round 23 (part-timer r22 HIGH): an upload is not scanned when Cancel was pressed for its batch while it was on its
+    way (after the request started: e.g. a multi-card photo still being cut up), or up to 8 s before it arrived."""
+    ct = CANCELLED_BATCH.get((who, batch or ""))
+    if not ct: return False
+    return time.time() - ct < 8 or (t0 is not None and ct >= t0 - 0.5)
 
 BATCH_OWNER = {}; _BATCH_LOCK = threading.Lock()
 def batch_for(batch, label, who=""):
@@ -755,14 +1028,51 @@ def unique_batch_label(label, batch, extra_taken=()):
     while f"{label} ({k})".lower() in taken: k += 1
     return f"{label} ({k})"
 
-async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", allow_duplicate="", who="?", back=None):
+MAX_PARTS = 400   # round 18: most cards one upload (PDF pages x cards per page) may create
+async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", allow_duplicate="", who="?", back=None, _part=False, t0=None, skip_ai=False):
     """Shared by the desktop upload (/api/jobs) and phone mode (app/phone.py). back = optional back-of-card photo bytes,
-    attached to the new card after it is read (same rules as "Add back of card")."""
+    attached to the new card after it is read (same rules as "Add back of card").
+    Round 18: a HEIC/HEIF photo is converted to JPEG first; a PDF becomes one card per page; a page or flatbed scan
+    holding several cards becomes one card per card (app/formats.py). Several cards answer {"job": first, "jobs": [...]}."""
     if len(data) > MAX_BYTES: return JSONResponse({"error": "File is larger than 25 MB."}, 422)
     if not data: return JSONResponse({"error": "File is empty."}, 422)
     batch_label = clean_batch_label(batch_label)
     from starlette.concurrency import run_in_threadpool
-    problem = await run_in_threadpool(_check_image, data)
+    if not _part:
+        from . import formats, reader
+        if formats.is_pdf(data):
+            # round 20 (skeptic H1): pages are COUNTED here (in the reader child, no rendering); one background job
+            # then renders them one at a time and adds a card job per card as it goes (progress + Cancel work)
+            try: n = await run_in_threadpool(reader.run_count, data)
+            except reader.ReaderError as e: return JSONResponse({"error": str(e)}, 422)
+            return await run_in_threadpool(_enqueue_pdf, data, fname, n, engine, batch, batch_label, allow_duplicate, who, bool(back), t0, skip_ai)
+        try: parts = await run_in_threadpool(reader.run_photo, data, fname)
+        except reader.ReaderError as e: return JSONResponse({"error": str(e)}, 422)
+        if parts is not None and len(parts) > MAX_PARTS:
+            return JSONResponse({"error": f"This file holds {len(parts)} cards; the limit is {MAX_PARTS} per upload. Split it into smaller files."}, 422)
+        if parts is not None and len(parts) == 1: data, fname = parts[0]
+        elif parts:
+            jobs = []
+            for pdata, label in parts:
+                jobs.append(_part_result(label, await run_in_threadpool(_enqueue_one, pdata, label, engine, batch, batch_label, allow_duplicate, who, None, t0, skip_ai)))
+            ok = [j for j in jobs if j.get("job")]
+            if not ok: return JSONResponse({"error": f"None of the {len(parts)} cards in this file could be added: " + jobs[0]["error"], "jobs": jobs}, 409 if all(j["status"] == 409 for j in jobs) else 422)
+            return {"job": ok[0]["job"], "jobs": jobs, "state": "queued", "ahead": ok[0]["ahead"], "batch": batch, "source": os.path.basename(fname or ""),
+                    "back_skipped": bool(back)}
+    return await run_in_threadpool(_enqueue_one, data, fname, engine, batch, batch_label, allow_duplicate, who, back, t0, skip_ai)
+
+def _part_result(label, r):
+    if isinstance(r, Response):
+        try: body = json.loads(r.body)
+        except Exception: body = {}
+        return {"file": label, "status": r.status_code, "error": body.get("error") or "Not added.", "duplicate_of": body.get("duplicate_of")}
+    return {"file": label, "job": r["job"], "ahead": r.get("ahead", 0)}
+
+def _enqueue_one(data, fname, engine, batch, batch_label, allow_duplicate, who, back, t0=None, skip_ai=False):
+    """One card photo -> one queued job (sync; the checks of round 7-19 unchanged)."""
+    from . import formats
+    data = formats.prepare_for_ocr(data)   # round 20: photos above 16 MP are downscaled before they are stored/queued
+    problem = _check_image(data)
     if problem: return JSONResponse({"error": problem}, 422)
     sha = hashlib.sha256(data).hexdigest()
     if allow_duplicate.strip().lower() in ("", "0", "false", "no"):
@@ -783,9 +1093,12 @@ async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", a
     jid = uuid.uuid4().hex[:12]; ext = os.path.splitext(fname)[1].lower() or ".jpg"
     if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"): ext = ".jpg"
     with JLOCK:
-        ahead = sum(1 for j in JOBS.values() if j["state"] in ("queued", "reading"))
+        if t0 is not None and _cancelled_since(who, batch, t0):   # round 23: Cancel was pressed while this upload was on its way
+            return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
+        ahead = sum(1 for j in JOBS.values() if j["state"] in ("queued", "reading") and j.get("kind") != "pdf")
         JOBS[jid] = {"id": jid, "state": "queued", "file": fname, "batch": batch, "sha": sha, "created": time.time(), "ahead": ahead, "who": who}
     args = dict(engine=engine, ext=ext, batch=batch or None, label=batch_label or None, fname=fname, sha=sha, who=who)
+    if skip_ai: args["skip_ai"] = True   # round 23 (coordinator r22 #7): 'Skip AI' for this scan
     with open(os.path.join(INBOX, jid + ".bin"), "wb") as fh: fh.write(data)
     if back:
         with open(os.path.join(INBOX, jid + ".back"), "wb") as fh: fh.write(back)
@@ -793,11 +1106,148 @@ async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", a
     POOL.submit(_run, jid, None, **args)
     return {"job": jid, "state": "queued", "ahead": ahead, "batch": batch}
 
-@router.get("/api/jobs")
-def list_jobs(ids: str = "", batch: str = ""):
-    want = set(filter(None, ids.split(",")))
+SPLIT_POOL = ThreadPoolExecutor(max_workers=1)   # round 20: PDFs are rendered here, one page at a time, never in a request
+CALM_POISON = "This file stopped the scanner while it was being read, so it was set aside. Save it as JPG or a smaller PDF and try again."
+def _enqueue_pdf(data, fname, n, engine, batch, batch_label, allow_duplicate, who, had_back, t0=None, skip_ai=False):
+    if t0 is not None and _cancelled_since(who, batch, t0):
+        return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
+    jid = uuid.uuid4().hex[:12]
+    args = dict(kind="pdf", engine=engine, batch=batch or "", label=batch_label or "", fname=fname, pages=n, allow_duplicate=allow_duplicate, who=who, skip_ai=bool(skip_ai))
+    with open(os.path.join(INBOX, jid + ".pdf"), "wb") as fh: fh.write(data)
+    with open(os.path.join(INBOX, jid + ".json"), "w") as fh: json.dump(args, fh)
+    with JLOCK: JOBS[jid] = {"id": jid, "kind": "pdf", "state": "queued", "file": fname, "batch": batch or "", "created": time.time(),
+                             "who": who, "pages": n, "page": 0, "children": []}
+    SPLIT_POOL.submit(_split_pdf, jid)
+    return {"job": jid, "pdf": True, "pages": n, "state": "queued", "ahead": 0, "batch": batch, "source": os.path.basename(fname or ""), "back_skipped": had_back}
+
+def _inbox_clear(jid, exts=(".bin", ".json", ".back", ".pdf", ".reading")):
+    for x in exts:
+        try: os.remove(os.path.join(INBOX, jid + x))
+        except FileNotFoundError: pass
+
+def _done_record(jid, j):
+    try:
+        with open(os.path.join(DONE, jid + ".json"), "w") as fh:
+            json.dump({k: j.get(k) for k in ("id", "kind", "state", "file", "batch", "error", "created", "started", "finished", "pages", "page", "children")}
+                      | {"card_id": (j.get("card") or {}).get("id")}, fh)
+    except Exception: pass
+
+def _split_pdf(jid):
+    """Round 20: render one page at a time in the reader child (memory-limited), add each page's cards as jobs at once."""
+    from . import reader
     with JLOCK:
-        js = [dict(j) for j in JOBS.values() if (j["id"] in want) or (batch and j["batch"] == batch)]
+        j = JOBS.get(jid)
+        if not j or j.get("state") != "queued": return
+        j["state"] = "splitting"; j["started"] = time.time()
+    try:
+        with open(os.path.join(INBOX, jid + ".json")) as fh: a = json.load(fh)
+        with open(os.path.join(INBOX, jid + ".pdf"), "rb") as fh: data = fh.read()
+        open(os.path.join(INBOX, jid + ".reading"), "w").close()     # poison guard: present only while a page is read
+        n = a["pages"]; made = 0; err = None
+        for i in range(n):
+            with JLOCK:
+                if JOBS[jid].get("state") == "cancelled": break
+                JOBS[jid]["page"] = i + 1
+            try: parts = reader.run_page(data, i, n, a["fname"], key=jid)
+            except reader.ReaderError as e:
+                with JLOCK:
+                    if JOBS[jid].get("state") == "cancelled": break
+                    JOBS[jid]["children"].append({"file": f"{os.path.splitext(os.path.basename(a['fname']))[0]}.pdf (page {i + 1} of {n})", "status": 422, "error": str(e)})
+                continue
+            for pdata, label in parts:
+                if made >= MAX_PARTS:
+                    err = f"This file holds more than {MAX_PARTS} cards; the first {MAX_PARTS} were added. Split it to add the rest."; break
+                with JLOCK:
+                    if JOBS[jid].get("state") == "cancelled": break
+                r = _part_result(label, _enqueue_one(pdata, label, a["engine"], a["batch"], a["label"], a["allow_duplicate"], a["who"], None, JOBS[jid].get("created"), bool(a.get("skip_ai"))))
+                made += 1
+                with JLOCK: JOBS[jid]["children"].append(r)
+            del parts
+            if err: break
+        del data
+        with JLOCK:
+            j = JOBS[jid]
+            if j.get("state") != "cancelled":
+                ok = [c for c in j["children"] if c.get("job")]
+                if ok or not j["children"]: j |= {"state": "split", "note": err}
+                else: j |= {"state": "error", "error": f"None of the {len(j['children'])} cards in this file could be added: " + j["children"][0]["error"]}
+            j["finished"] = time.time(); jj = dict(j)
+        _done_record(jid, jj)
+    except Exception as ex:
+        with JLOCK: JOBS[jid] |= {"state": "error", "error": "This PDF couldn't be read. Save it again and retry.", "finished": time.time()}; jj = dict(JOBS[jid])
+        _done_record(jid, jj); print("pdf split error:", type(ex).__name__, ex)
+    finally:
+        _inbox_clear(jid)
+        reader.CANCELLED.discard(jid)
+
+@router.post("/api/jobs/cancel")
+async def cancel_jobs(request: Request):
+    """Round 19: Cancel on the Scan screen. Cards still waiting in line are dropped; cards already read (or being read) stay.
+    Only your own jobs are cancelled (an admin may cancel anyone's)."""
+    try: body = await request.json()
+    except Exception: body = {}
+    ids = [str(x) for x in (body.get("ids") or []) if isinstance(x, str)][:2000]
+    user = request.state.user; me = _who(request); n = 0
+    bt = str(body.get("batch") or "")
+    with JLOCK:
+        if body.get("all_waiting") is True and bt:   # round 21 (part-timer r20): Cancel stops EVERY waiting card of the batch
+            CANCELLED_BATCH[(me, bt)] = time.time()
+            ids = list(dict.fromkeys(ids + [k for k, j in JOBS.items() if j.get("batch") == bt and j.get("who") == me and j.get("state") in ("queued", "reading")]))
+        for jid in ids:
+            j = JOBS.get(jid)
+            # round 22: a card being READ is cancelled too (atomic with card creation, see ingest), unless its card exists
+            if not j or j.get("state") not in (("queued", "splitting") if j.get("kind") == "pdf" else ("queued", "reading")) or j.get("card_id"): continue
+            if j.get("who") != me and user.get("role") != "admin": continue   # round 20 (skeptic M1): recovered jobs keep their owner
+            was = j["state"]; j |= {"state": "cancelled", "finished": None}; n += 1
+            if was in ("splitting", "reading"):
+                from . import reader; reader.stop(jid)                       # stops the page / OCR being run now
+    for jid in ids:
+        with JLOCK: st = (JOBS.get(jid) or {}).get("state")
+        if st != "cancelled": continue
+        with JLOCK: jj = dict(JOBS.get(jid) or {})
+        if os.path.exists(os.path.join(INBOX, jid + ".reading")) and jj.get("kind") != "pdf": continue   # the reader thread finishes up
+        if jj.get("kind") == "pdf":
+            if not os.path.exists(os.path.join(INBOX, jid + ".reading")): _inbox_clear(jid)   # else the splitter cleans up
+            continue
+        try:
+            with open(os.path.join(DONE, jid + ".json"), "w") as fh: json.dump({"id": jid, "state": "cancelled", "card_id": None}, fh)
+        except Exception: pass
+        _inbox_clear(jid)
+    # round 23 (skeptic/part-timer r22): ONE final, truthful count: wait until no job of this upload is still being read
+    # (a cancelled read stops; one that already made its card finishes), then count the cards THIS upload made
+    sess = [str(x) for x in (body.get("session") or []) if isinstance(x, str)][:2000] or ids
+    def _sess_jobs():
+        with JLOCK:
+            out_ = []
+            for jid in sess:
+                j = JOBS.get(jid)
+                if not j: continue
+                out_.append(dict(j))
+                if j.get("kind") == "pdf": out_ += [dict(JOBS.get(c_["job"]) or {}) for c_ in j.get("children") or [] if c_.get("job")]
+            return out_
+    for _ in range(60):
+        if not any(j.get("state") in ("reading", "splitting") or (j.get("state") == "cancelled" and os.path.exists(os.path.join(INBOX, str(j.get("id")) + ".reading"))) for j in _sess_jobs()): break
+        await asyncio.sleep(0.25)
+    kept_ids = set()
+    for jid in sess:   # jobs of an earlier server run are in the done records
+        try:
+            with open(os.path.join(DONE, jid + ".json")) as fh: d_ = json.load(fh)
+            if d_.get("card_id"): kept_ids.add(int(d_["card_id"]))
+        except Exception: pass
+    for j in _sess_jobs():
+        cid_ = j.get("card_id") or (j.get("card") or {}).get("id")
+        if cid_: kept_ids.add(int(cid_))
+    kept_ids = {i for i in kept_ids if store.get(i)}
+    if n:   # round 20 (reviewer r19): Cancel leaves an audit row
+        log(None, me, "upload_cancelled", detail={"not_scanned": n, "kept": len(kept_ids), "batch": clean_batch_label(body.get("batch_label") or "") or str(body.get("batch") or "")[:80]})
+    return {"cancelled": n, "kept": len(kept_ids), "kept_ids": sorted(kept_ids)}
+
+@router.get("/api/jobs")
+def list_jobs(request: Request, ids: str = "", batch: str = ""):
+    want = set(filter(None, ids.split(",")))
+    u_ = getattr(request.state, "user", None) or {}; me_ = u_.get("initials"); adm_ = u_.get("role") == "admin"
+    with JLOCK:   # round 21 (skeptic r20 L4): listing by batch shows only your own jobs (an admin sees all)
+        js = [dict(j) for j in JOBS.values() if (j["id"] in want) or (batch and j["batch"] == batch and (adm_ or j.get("who") == me_))]
         missing = want - set(JOBS)
     for jid in missing:   # finished before a restart: answer from the result record
         if not re.fullmatch(r"[0-9a-f]{12}", jid): continue
@@ -813,7 +1263,7 @@ def list_jobs(ids: str = "", batch: str = ""):
     for j in js: j.pop("sha", None)
     # round 14 (newcomer r12): cards from OTHER people waiting to be read ahead of these (the reading line is shared)
     mine = [j.get("created") or 0 for j in js if j.get("state") in ("queued", "reading")]
-    with JLOCK: ahead = sum(1 for j in JOBS.values() if j["id"] not in want and j.get("state") in ("queued", "reading")
+    with JLOCK: ahead = sum(1 for j in JOBS.values() if j["id"] not in want and j.get("state") in ("queued", "reading") and j.get("kind") != "pdf"
                             and mine and (j.get("created") or 0) < max(mine))
     return {"jobs": js, "avg_seconds": avg, "queue_ahead": ahead}
 
@@ -883,8 +1333,28 @@ def ai_reason(f):
     if not (f.get("first_name") or f.get("last_name")): low.append("name")
     if not f.get("company"): low.append("company")
     ov = f.get("overall_confidence")
+    # round 21 (datamanager r20): faster AI line. A field that proves itself (a valid email on the website's domain, a full
+    # 10-digit phone, an address that splits into street/city/state/zip) doesn't need the slow AI look
+    def _proven(x):
+        try:
+            if x == "emails":
+                d_ = re.sub(r"^[a-z]+://", "", str(f.get("website") or "").lower()).split("/")[0].removeprefix("www.")
+                return bool(d_) and bool(f.get("emails")) and all(not email_syntax(e) and (e.lower().rsplit("@", 1)[1] == d_ or e.lower().endswith("." + d_)) for e in f["emails"])
+            if x == "phones": return bool(f.get("phones")) and all(len(_digits(p.get("number"))) in (10, 11) for p in f["phones"]) and "phones" not in hard_errors(f)
+            if x == "address": return address_validates(f.get("address")) and "address" not in garbled_errors(f)
+        except Exception: return False
+        return False
+    low = [x for x in low if not _proven(x)]
     if low or (ov is not None and ov < 0.8): return sorted(set(low)) or ["overall"]
     return None
+
+AI_OFF = "AI check is off right now. Scanning still works."
+_RAW = re.compile(r"URLError|Errno|refused|Traceback|Exception|Error:|urlopen|HTTPConnection|socket", re.I)
+def calm_ai_detail(d):
+    """Round 20 (a): older cards may still hold a raw error ('URLError Errno 111 ...'); show the calm line instead."""
+    if isinstance(d, dict) and isinstance(d.get("error"), str) and _RAW.search(d["error"]):
+        d = dict(d, error=AI_OFF, offline=True)
+    return d
 
 def ai_available():
     try:
@@ -945,7 +1415,8 @@ def _ai_run(cid, why):
         # round 7 (reviewer r7): a value the person already declined ("Keep current") is not offered again
         changed = {k: {"from": f.get(k), "to": g.get(k), "edited_by_person": k in edited}
                    for k in QR_KEYS + ("credentials", "other_address") if k in g and g.get(k) != f.get(k)
-                   and json.dumps(rej.get(k), sort_keys=True) != json.dumps(g.get(k), sort_keys=True)}
+                   and json.dumps(rej.get(k), sort_keys=True) != json.dumps(g.get(k), sort_keys=True)
+                   and not (k in garbled_errors(dict(f, **{k: g.get(k)})) and k not in garbled_errors(f))}   # round 20: never offer a garbled value over a clean one
         secs = round(time.time() - started, 1)
         if meta(cid).get("ai_status") != "checking":   # cancelled meanwhile (the card was approved/rejected during the check)
             log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": [], "seconds": secs, "cancelled": True}); return
@@ -954,13 +1425,15 @@ def _ai_run(cid, why):
         log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": list(changed), "seconds": secs})
     except Exception as e:
         slow = isinstance(e, TimeoutError) or "timed out" in str(e).lower()
-        msg = ("The AI model was too busy to answer in time (other jobs are using it). Nothing was changed; you can try again later."
-               if slow else f"{type(e).__name__}: {str(e)[:160]}")
         refused = "refused" in str(e).lower() or "urlerror" in type(e).__name__.lower() or "connection" in str(e).lower()
+        print(f"AI check error on card {cid}: {type(e).__name__}: {str(e)[:200]}", flush=True)   # technical detail: console only
+        # round 20 (a): never show 'URLError Errno 111' on a card
+        msg = ("The AI was too busy to answer. Nothing changed. Try again later." if slow
+               else AI_OFF if refused else "The AI check hit a problem. Nothing changed. Scanning still works.")
         n = AI_RETRIES.get(cid, 0)
         if refused and n < 3:   # round 7: the AI server restarting -> retry by itself, and say so
             AI_RETRIES[cid] = n + 1; wait = 60 * (n + 1)
-            set_meta(cid, ai_status="failed", ai_detail=json.dumps({"why": why, "error": f"The AI checker couldn't be reached ({msg[:80]}). Trying again automatically in {wait} s (attempt {n + 2} of 4).", "retrying": True}))
+            set_meta(cid, ai_status="failed", ai_detail=json.dumps({"why": why, "error": AI_OFF, "offline": True, "retrying": True}))
             def _again(cid=cid, why=why, n=n):
                 c_ = store.get(cid)
                 if c_ and c_["status"] == "pending" and meta(cid).get("ai_status") == "failed":
@@ -969,7 +1442,7 @@ def _ai_run(cid, why):
                     AI_Q.put((0, key[1], cid, why))
             t_ = threading.Timer(wait, _again); t_.daemon = True; t_.start()
         else:
-            set_meta(cid, ai_status="busy" if slow else "failed", ai_detail=json.dumps({"why": why, "error": msg + (" (tried 4 times)" if refused else "")}))
+            set_meta(cid, ai_status="busy" if slow else "failed", ai_detail=json.dumps({"why": why, "error": msg, "offline": refused}))
         return
     AI_RETRIES.pop(cid, None)
 
@@ -1047,7 +1520,7 @@ def _ai_decide(cid, request, body):
     _ai_settle(cid)
     if made: log(cid, rv, "ai_suggestion", detail=made)
     if stale and not made:
-        return JSONResponse({"error": "This AI suggestion is out of date (the card or that value changed, or it was already decided). Nothing was changed. Run the check again if needed.",
+        return JSONResponse({"error": "This AI suggestion is out of date. Nothing changed. Check with AI again if needed.",
                              "need": "stale_suggestion", "fields": stale}, 409)
     return card(cid) | ({"stale": stale} if stale else {})
 
@@ -1074,13 +1547,75 @@ def _ai_settle(cid, saved=False):
         set_meta(cid, ai_status="checked", ai_detail=json.dumps(det))
 
 @router.post("/api/validate")
-def validate_api(body: dict = Body(...)):
+def validate_api(request: Request, body: dict = Body(...)):
     """Same checks as approval, for every field approval checks (skeptic R7-7: other_address, department, credentials, social)."""
     f = {"first_name": "", "last_name": "", "title": "", "company": "", "website": "", "address": "", "department": "",
          "credentials": "", "other_address": "", "note": "", "emails": [], "phones": [], "social": []}
     _apply_fields(f, body.get("fields") or {})
     if isinstance(body.get("note"), str): f["note"] = body["note"]
-    return {"errors": validate(f), "hard": hard_errors(f)}
+    try:   # round 21: values a reviewer confirmed as correct ('This is correct') stay confirmed while unchanged
+        c_ = store.get(int(body.get("card_id"))) if str(body.get("card_id") or "").isdigit() else None
+        if c_:
+            for k_ in ("confirmed_ok", "confirmed_meta"):
+                if isinstance(c_["fields"].get(k_), dict): f[k_] = c_["fields"][k_]
+    except Exception: pass
+    hard = hard_errors(f)
+    adm = (getattr(request.state, "user", None) or {}).get("role") == "admin"
+    over = [k for k in overridable(f) if k in hard and (adm or k not in ADMIN_OVERRIDE)]
+    return {"errors": validate(f), "hard": hard, "overridable": over}
+
+@router.post("/api/cards/{cid}/confirm-correct")
+def confirm_correct(cid: CardId, request: Request, body: dict = Body(...)):
+    """Round 21 (mctrade-admin r20): a hard 'looks misread' check can be wrong (www2., smithlaw/smithlaws). The reviewer
+    says 'This is correct' for one field: that exact saved value is accepted from then on, and the audit says who did it."""
+    # Round 22 (skeptic r21 M1/M2, mctrade-admin r21 M1/M2): body {field, value, version}; archived cards and stale versions
+    # are refused; the exact value the reviewer saw must still be the saved one; admin-only for email/website/address.
+    with WRITE_LOCK:
+        c = store.get(cid)
+        if not c: return JSONResponse({"error": "Card not found."}, 404)
+        if meta(cid).get("archived"): return _archived_409(cid)
+        k = str(body.get("field") or ""); fk = "first_name" if k == "name" else k
+        if k not in OVERRIDABLE: return JSONResponse({"error": "This check can't be overridden."}, 400)
+        u = request.state.user
+        if k in ADMIN_OVERRIDE and u.get("role") != "admin":
+            return JSONResponse({"error": "Only an admin can confirm this field. Ask an admin, or fix the value."}, 403)
+        vp = _version_problem(c, body.get("version"), cid)
+        if vp: return vp
+        f = c["fields"]
+        if "value" not in body or json.dumps(body.get("value"), sort_keys=True) != json.dumps(f.get(fk), sort_keys=True):
+            return JSONResponse({"error": "The saved value is different from the one you checked. Reload the card and check again.", "need": "stale"}, 409)
+        g = garbled_errors({**f, "confirmed_ok": {}})
+        if k not in g: return JSONResponse({"error": "Nothing to confirm: save the card first, then confirm the saved value."}, 409)
+        if k not in overridable(f): return JSONResponse({"error": "This value can't be confirmed (it looks like a formula or code). Fix it."}, 400)
+        ok = dict(f.get("confirmed_ok") or {}); val = json.dumps(f.get(fk), sort_keys=True)
+        cm = dict(f.get("confirmed_meta") or {})
+        if ok.get(fk) == val and fk in valid_confirmations(f): return {"ok": True, "field": fk, "already": True, "version": card_version(c)}   # replay: no duplicate audit rows
+        why_, bad_ = clean_reason(body.get("reason") or "")   # round 23 (datamanager r22 H1): a reason is always required
+        if bad_: return JSONResponse({"error": bad_ if body.get("reason") else "Say why it is correct (e.g. “printed like this on the card”).", "need": "reason"}, 422)
+        ok[fk] = val
+        cb = dict(f.get("confirmed_by") or {}); cb[fk] = u["initials"]
+        cm[fk] = {"user": u["username"], "by": u["initials"], "role": u.get("role"), "reason": why_, "value": val, "ts": time.time()}
+        store.update(cid, fields=f | {"confirmed_ok": ok, "confirmed_by": cb, "confirmed_meta": cm}, status=c["status"], reviewer=c.get("reviewer"), note=c.get("note"))
+        rv = _who(request); log(cid, rv, "hard_check_override", detail={"field": fk, "value": f.get(fk), "check": g[k], "reason": why_, "user": u["username"]})
+        # round 24 (datamanager/mctrade-admin r23 L2): one audit row per confirm (the card-history row above)
+        return {"ok": True, "field": fk, "version": card_version(store.get(cid))}
+
+def confirmed_lines(f):
+    """Round 23: '#621 Email confirmed by QA: x (reason)' lines for the READ-ME / extra columns: only confirmations that
+    still pass today's rules (valid_confirmations), with the value in plain words."""
+    ok = valid_confirmations(f); cm = f.get("confirmed_meta") if isinstance(f.get("confirmed_meta"), dict) else {}
+    return [f"{LABEL.get(k, k)} confirmed by {cm[k].get('by')}: {_fmtv(f.get(k))} ({cm[k].get('reason')})" for k in sorted(ok)]
+
+@router.post("/api/admin/ai/skip-waiting")
+def ai_skip_waiting(request: Request):
+    """Round 22: busy event: an admin skips every AI check that is still WAITING (a running one finishes). Cards stay
+    pending and can still be checked one by one with 'Ask the AI'."""
+    n = 0
+    for cid in list(AI_WAIT):
+        AI_WAIT.pop(cid, None); n += 1
+        set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"note": "AI check skipped by an admin (busy event)"}))
+    auth.alog(request.state.user["username"], f"skipped {n} waiting AI {'check' if n == 1 else 'checks'} (busy event)")
+    return {"ok": True, "skipped": n}
 
 @router.post("/api/admin/cards/{cid}/delete")
 def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
@@ -1285,6 +1820,14 @@ def batches(request: Request):
        WHERE m.batch IS NOT NULL AND h.id=(SELECT MIN(h2.id) FROM card_history h2 JOIN card_meta m2 ON m2.card_id=h2.card_id
        WHERE m2.batch=m.batch AND h2.action='scanned') AND h.reviewer=?""", (ini,))}
     for r in out: r["mine"] = r["batch"] in mine; r["own"] = r["batch"] in own
+    # round 24 (reviewer r23): the owner's name, for the "this batch belongs to …" warning
+    try:
+        names = {u_["initials"]: (u_["display"] or u_["initials"]) for u_ in auth.db().execute("SELECT initials, display FROM users")}
+        for b_, ini_ in db().execute("""SELECT m.batch, h.reviewer FROM card_meta m JOIN card_history h ON h.card_id=m.card_id AND h.action='scanned'
+               WHERE h.id=(SELECT MIN(h2.id) FROM card_history h2 JOIN card_meta m2 ON m2.card_id=h2.card_id WHERE m2.batch=m.batch AND h2.action='scanned') GROUP BY m.batch"""):
+            for r in out:
+                if r["batch"] == b_: r["owner"] = names.get(ini_, ini_)
+    except Exception: pass
     nob = db().execute("SELECT COUNT(*) FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL AND COALESCE(m.archived,0)=0").fetchone()[0]
     if nob: out.append({"batch": "__none__", "batch_label": "Earlier cards (no batch)", "n": nob})
     return out
@@ -1323,10 +1866,10 @@ def _apply_fields(f, body_fields):
 WRITE_LOCK = threading.RLock()
 def _version_problem(c, v, cid):
     if v in (None, "", 0, "0", False) or not isinstance(v, str):
-        return JSONResponse({"error": "This save didn't say which version of the card it was made from. Reload the card and save again.",
+        return JSONResponse({"error": "Nothing was saved: the page is out of date. Reload the card and save again.",
                              "need": "version", "version": card_version(c)}, 409)
     if v != card_version(c):
-        return JSONResponse({"error": f"Card #{cid} changed since you opened it (another person, tab or the AI). Nothing was saved. Reload it, check, and save again.",
+        return JSONResponse({"error": f"Card #{cid} changed since you opened it. Nothing was saved. Reload, check and save again.",
                              "need": "stale", "version": card_version(c)}, 409)
     return None
 
@@ -1346,6 +1889,10 @@ def _update(cid, request, body, internal=False):
     c = store.get(cid)
     if not c: raise HTTPException(404, "Card not found")
     if not internal and meta(cid).get("archived"): return _archived_409(cid)
+    if not internal and "override_reason" in body and body.get("override_reason") not in (None, ""):
+        why_, bad_ = clean_reason(body.get("override_reason"))
+        # hard problems are reported first (approval_check); a bad reason is refused only where a reason is needed
+        body = dict(body, override_reason="" if bad_ else why_, _reason_bad=bad_)
     body = {k: v for k, v in body.items() if k != "_via_ai"} if isinstance(body, dict) else body   # client can't hide an edit (skeptic R6-2)
     if isinstance(body, dict) and isinstance(body.get("note"), str): body["note"] = clean_note(body["note"])   # skeptic R9-3
     if isinstance(body, dict):
@@ -1486,6 +2033,8 @@ def _update(cid, request, body, internal=False):
             tn = ((merge_tgt.get("note") or "") + f" | From #{cid}: {dn}").strip(" |")
             with db() as conn: conn.execute("UPDATE cards SET note=? WHERE id=?", (tn, merge_tgt["id"]))
             filled["note"] = dn
+        for k_ in ("confirmed_ok", "confirmed_meta", "confirmed_by"):   # round 23: a merged-in value is never 'confirmed'
+            if isinstance(tf.get(k_), dict): tf[k_] = {x: y for x, y in tf[k_].items() if x not in filled and x not in replaced}
         store.update(merge_tgt["id"], fields=tf); log(merge_tgt["id"], rv, "merged_from", detail={"card": cid, "added": filled} | ({"replaced": replaced} if replaced else {}))
         sb, tb = meta(cid).get("back_image"), meta(merge_tgt["id"]).get("back_image")
         if sb and not tb:   # carry the back photo over with the back's details
@@ -1545,6 +2094,8 @@ def approval_check(c, f2, body, changes=None):
                              "errors": all_e, "hard": list(hard)}, 422)
     errs = validate(f2)
     kept_override = c["status"] == "approved" and meta(cid).get("override") and not changes
+    if errs and body.get("_reason_bad"):
+        return JSONResponse({"error": body["_reason_bad"], "need": "reason", "errors": {"override_reason": body["_reason_bad"]}}, 422)
     if errs and not (body.get("override_reason") or "").strip() and not kept_override:
         return JSONResponse({"error": "Please fix: " + "; ".join(errs.values()), "need": "fix_or_override", "errors": errs}, 422)
     cs, metas = _active()
@@ -1562,11 +2113,11 @@ def approval_check(c, f2, body, changes=None):
     # confirm. A same-photo match alone only warns (it is shown in the box; newcomer r7 F2). Kept-apart pairs were already decided.
     kept_ = _kept(metas.get(cid) or {})
     ka_ = {int(x) for x in body["keep_apart"] if str(x).isdigit()} if isinstance(body.get("keep_apart"), list) else set()
-    other = [x for x in _cross_batch(c, f2, cs, metas) if {"same email", "same phone"} & set(x["why"]) and x["card_id"] not in kept_ | ka_]
+    other = [] if (metas.get(cid) or {}).get("dup_resolution") == "keep_both" else [x for x in _cross_batch(c, f2, cs, metas) if {"same email", "same phone"} & set(x["why"]) and x["card_id"] not in kept_ | ka_]
     if other and not body.get("confirm_cross_batch"):   # skeptic R8-1: keep_apart only covers the cards it names
         x = other[0]; ex_ = any(o["exported"] for o in other)
         lst = ", ".join(f"#{o['card_id']} ({', '.join(o['why'])}{', exported' if o['exported'] else ''})" for o in other)
-        return JSONResponse({"error": f"Approved card(s) in another batch look like the same person: {lst}"
+        return JSONResponse({"error": f"Approved cards in another batch look like the same person: {lst}"
                              + ". Approving this one too may send the same person to MC Trade twice.", "need": "confirm_cross_batch",
                              "other": x["card_id"], "others": [o["card_id"] for o in other], "exported": bool(ex_)}, 409)
     if d["crm"] and not d["crm_action"]:
@@ -1635,6 +2186,10 @@ def merge_pick(tf, sf, k):
     if k == "website" and (re.match(r"^(https?://)?www(?!\.)", str(b), re.I) or not plausible_site(b, list(tf.get("emails") or []) + list(sf.get("emails") or []))):
         return None   # round 11 (coordinator r4 N1): a garbled website ("wwwsummit…") is never carried over
     t2 = dict(tf); t2[k] = b
+    tf = dict(tf, confirmed_ok={}); t2["confirmed_ok"] = {}   # round 23 (mctrade-admin r22 H1): a confirmation never rides a merge
+    # round 20 (coordinator r19): a garbled value never replaces a clean one ('118o' over '1180')
+    if k in garbled_errors(t2) and k not in garbled_errors(tf) and a: return "tgt"
+    if k in garbled_errors(t2) and not a: return None
     # round 12 (coordinator r4 #3): the other card's value is taken only when it passes validation and plausibility
     if k != "title" and _field_flagged(t2, k): return "tgt" if a else None
     if not a: return "src"
@@ -1745,9 +2300,12 @@ async def add_back(cid: CardId, request: Request, image: UploadFile = File(...),
     data = await image.read()
     if not data or len(data) > MAX_BYTES: return JSONResponse({"error": "File is empty or larger than 25 MB."}, 422)
     from starlette.concurrency import run_in_threadpool
+    from . import formats
+    try: data = await run_in_threadpool(formats.normalize_photo, data)
+    except formats.FormatError as e: return JSONResponse({"error": str(e)}, 422)
     problem = await run_in_threadpool(_check_image, data)
     if problem: return JSONResponse({"error": problem}, 422)
-    r = await run_in_threadpool(attach_back, cid, data, os.path.splitext(image.filename or "")[1].lower(), request.state.user["initials"], bool(confirm_other_person), request.state.user)
+    r = await run_in_threadpool(attach_back, cid, data, (".jpg" if formats.is_jpeg(data) else os.path.splitext(image.filename or "")[1].lower()), request.state.user["initials"], bool(confirm_other_person), request.state.user)
     if isinstance(r, tuple): return JSONResponse(*r)
     return r
 
@@ -1864,7 +2422,7 @@ def _bulk(request, body):
     sb = body.get("batch")   # round 15 (newcomer r14 BLOCKER): a bulk action made from a one-batch queue only touches THAT batch
     if isinstance(sb, str) and sb and sb != "all":
         out_ = [i for i in ids if ((meta(i).get("batch") or "__none__") != sb)]
-        if out_: return JSONResponse({"error": f"{len(out_)} selected card(s) are not in the batch shown ({', '.join(f'#{i}' for i in out_[:20])}). Nothing was changed: reload the queue and select again.", "need": "wrong_batch", "ids": out_}, 409)
+        if out_: return JSONResponse({"error": f"{len(out_)} selected {_s(len(out_), 'card')} are not in the batch shown ({', '.join(f'#{i}' for i in out_[:20])}). Nothing was changed: reload the queue and select again.", "need": "wrong_batch", "ids": out_}, 409)
     todo, skipped, warnings = [], [], []
     vers = body.get("versions") if isinstance(body.get("versions"), dict) else {}
     cs, metas = _active()
@@ -1880,18 +2438,23 @@ def _bulk(request, body):
             _e = {**validate(c["fields"]), **hard_errors(c["fields"])}   # round 14 (coordinator r6 #1): name the problem
             if _e: skipped.append({"id": i, "why": "; ".join(dict.fromkeys(_e.values()))[:300]}); continue
             ref = approval_check(c, c["fields"], {"confirm_cross_batch": True})   # cross-batch look-alikes: approved, with a warning
+            if ref is not None and json.loads(ref.body).get("need") == "crm_choice" and auth.get_setting("mctrade_updates_enabled") != "1":
+                # round 20 (newcomer r19): with updating switched off there is no choice to make: bulk adds the person as new
+                set_meta(i, crm_action="create_new"); log(i, _who(request), "mc_trade_choice", detail="create_new")
+                ref = approval_check(store.get(i), c["fields"], {"confirm_cross_batch": True})
             if ref is not None:   # say WHICH check stopped it (newcomer r6: the old reason was vague)
                 need = json.loads(ref.body).get("need"); oth = json.loads(ref.body).get("other")
                 skipped.append({"id": i, "need": need, "why": {"crm_choice": "MC Trade choice needed (open it: update existing or add as new)",
                                 "confirm_cross_batch": f"an approved card #{oth} in another batch looks like the same person (open it to confirm)",
                                 "resolve_duplicate": f"possible duplicate of approved card #{oth} (open it to merge or keep both)"}.get(need, "possible duplicate (open it)")}); continue
             d = dupes(c, cs, metas)
-            if d["unresolved_queue"]:   # round 15: name WHICH card(s)
+            if d["unresolved_queue"]:   # round 15: name WHICH cards
                 bl = [x for x in d["open"] if x["blocking"]]
                 skipped.append({"id": i, "need": "resolve_duplicate", "others": [x["card_id"] for x in bl], "why": "possible duplicate of " + ", ".join(f"#{x['card_id']}" + (f" {x.get('name')}" if x.get("name") else "") + f" ({', '.join(x.get('why') or [])})" for x in bl[:5]) + " (open it to merge or keep both)"}); continue
-            xb = _cross_batch(c, c["fields"], cs, metas)
+            _mi = metas.get(i) or {}
+            xb = [] if _mi.get("dup_resolution") == "keep_both" else [x for x in _cross_batch(c, c["fields"], cs, metas) if x["card_id"] not in _kept(_mi)]   # round 21
             if xb: warnings.append({"id": i, "others": [x["card_id"] for x in xb],
-                                    "why": "approved card(s) in another batch look like the same person: "
+                                    "why": "approved cards in another batch look like the same person: "
                                            + ", ".join(f"#{x['card_id']} ({_why(x['why'] + (['already exported'] if x.get('exported') else []))})" for x in xb[:10]) + (f" …and {len(xb) - 10} more" if len(xb) > 10 else "")})
         todo.append(c)
     if body.get("dry_run") is True:   # round 14 (coordinator r6): everything the ONE confirmation dialog needs, nothing changed
@@ -1900,11 +2463,11 @@ def _bulk(request, body):
     # Round 9 (coordinator N7): ask BEFORE approving, like the single-card path. Nothing is changed until the person
     # confirms (confirm_cross_batch) or leaves those cards out (the browser re-sends without them).
     if st == "approved" and warnings and not body.get("confirm_cross_batch"):
-        return JSONResponse({"error": f"{len(warnings)} of these card(s) look like a person already approved in another batch. Nothing was changed yet.",
+        return JSONResponse({"error": f"{len(warnings)} of these {_s(len(warnings), 'card')} look like a person already approved in another batch. Nothing was changed yet.",
                              "need": "confirm_cross_batch", "lookalikes": warnings, "would_approve": [c["id"] for c in todo],
                              "skipped": skipped}, 409)
     if todo:
-        snapshot([c["id"] for c in todo], user, f"Bulk {({'approved': 'approve', 'rejected': 'reject', 'pending': 'move to pending'})[st]} {len(todo)} card(s)")
+        snapshot([c["id"] for c in todo], user, f"Bulk {({'approved': 'approve', 'rejected': 'reject', 'pending': 'move to pending'})[st]} {len(todo)} {_s(len(todo), 'card')}")
         for c in todo:
             nt = c.get("note")
             if st == "approved" and STALE_DUP.search(nt or ""): nt = STALE_DUP.sub("", nt).strip(" |"); set_meta(c["id"], dup_resolution=None)
@@ -1928,10 +2491,10 @@ def archive(request: Request, body: dict = Body(...)):
     elif b == "__none__": ids = [r[0] for r in db().execute("SELECT c.id FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL")]
     else: ids = [r[0] for r in db().execute("SELECT card_id FROM card_meta WHERE batch=?", (b,))]
     ids = [i for i in ids if not meta(i).get("archived")]
-    if ids: snapshot(ids, user, f"Archive {len(ids)} card(s)")
+    if ids: snapshot(ids, user, f"Archive {len(ids)} {_s(len(ids), 'card')}")
     for i in ids: set_meta(i, archived=1); log(i, rv, "archived", detail={"batch": b})
     _seal()
-    if b == "__all__": auth.alog(user["username"], f"Clear all test data: archived {len(ids)} card(s) (nothing deleted; Undo restores them): " + ", ".join(f"#{i}" for i in ids[:200]))
+    if b == "__all__": auth.alog(user["username"], f"Clear all test data: archived {len(ids)} {_s(len(ids), 'card')} (nothing deleted; Undo restores them): " + ", ".join(f"#{i}" for i in ids[:200]))
     return {"archived": len(ids)}
 
 # ---------------------------------------------------------------- undo
@@ -1961,7 +2524,7 @@ def undo(request: Request, body: dict = Body(default={})):
     conflicts = {}; restored = {}
     with WRITE_LOCK:
         if any("after" not in s_ for s_ in snap):
-            return JSONResponse({"error": "This action was recorded before undo could check for later changes, so it can't be undone safely. Change the card by hand instead.", "need": "legacy_action"}, 409)
+            return JSONResponse({"error": "This action can't be undone safely. Change the card by hand.", "need": "legacy_action"}, 409)
         with db() as c:
             for s_ in snap:
                 b_c, b_m = s_["card"], s_["meta"] or {}; a_c, a_m = s_["after"]["card"] or {}, s_["after"]["meta"] or {}
@@ -2007,7 +2570,7 @@ def undo(request: Request, body: dict = Body(default={})):
 XCOLS = ["IndFirstName", "IndLastName", "IndTitle", "OrgName", "IndEmail", "IndEmail2", "IndPhone", "IndCellPhone", "IndFax",
          "WebAddress", "Address", "AffCode1"]
 MORE = ["Credentials", "Department", "OtherAddress", "AllEmails", "AllPhones", "Note"]
-AUDIT = ["ScanCardID", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "NeedsAttention"]
+AUDIT = ["ScanCardID", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "Check"]
 FILTERS = {"approved_new": "approved, not yet exported", "approved": "all approved", "all": "all cards", "pending": "pending only", "rejected": "rejected only"}
 
 def _export_set(status, batch=""):
@@ -2068,7 +2631,13 @@ def _fname(kind, status, ext, batch_label=""):
     n = 2; base, dot = fn.rsplit(".", 1)
     while fn in used: fn = f"{base}-{n}.{dot}"; n += 1
     return fn
-def same_names(sel):
+def plural(n, one, many=None): return f"{n} {one if n == 1 else (many or one + 's')}"
+def ids3(ids, k=3):
+    """Round 20: '#4, #9, #12 and 7 more' (never a wall of ids)."""
+    ids = list(ids); h = ", ".join("#" + str(i) for i in ids[:k])
+    return h + (f" and {len(ids) - k} more" if len(ids) > k else "")
+
+def same_names(sel, contacts_from=None):
     """Round 15 (mctrade r14 M1): rows of one export that share a first + last name with another row of the export or with
     an MC Trade contact (real export only). MC Trade's import may treat same first+last as one duplicate: review first."""
     by = {}
@@ -2076,6 +2645,11 @@ def same_names(sel):
         n = _nm(c["fields"])
         if n and " " in n: by.setdefault(n, []).append(c["id"])
     out = [{"name": n.title(), "cards": ids, "with": "export"} for n, ids in by.items() if len(ids) > 1]
+    if contacts_from is not None:   # round 20: the MC Trade match looks at every exported card, the 'twice' check at file rows
+        by = {}
+        for c in contacts_from:
+            n = _nm(c["fields"])
+            if n and " " in n: by.setdefault(n, []).append(c["id"])
     rows = crm_source.real()
     if rows:
         have = {}
@@ -2153,11 +2727,12 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         m = metas.get(c["id"]) or {}; ov = _ov(m); errs = validate(c["fields"]); out = []
         if ov: out.append(f"APPROVED ANYWAY by {ov.get('by')}: {ov.get('reason')}")
         if errs: out.append("CHECK: " + "; ".join(errs.values()))
+        out += confirmed_lines(c["fields"])   # round 22: hard-check overrides are visible to the importer
         xb = db().execute("SELECT detail FROM card_history WHERE card_id=? AND action='cross_batch_confirmed' ORDER BY id DESC LIMIT 1", (c["id"],)).fetchone()
         if xb:
             try: oth = (json.loads(xb[0] or "{}") or {}).get("cards") or []
             except Exception: oth = []
-            out.append("CROSS-BATCH: approved over a look-alike in another batch" + (" (" + ", ".join(f"#{o}" for o in oth) + ")" if oth else "") + ": check for a double import")
+            out.append("Also in another batch: approved over a look-alike" + (" (" + ", ".join(f"#{o}" for o in oth) + ")" if oth else "") + ": check for a double import")
         return " | ".join(out)
     def aud(c):
         m = metas.get(c["id"]) or {}
@@ -2185,7 +2760,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         def _hint(c):
             m_ = mctrade_sync.match(c["fields"], _hint_rows)
             return f"{m_[0]['name']} ({m_[0]['organization']})" if m_ else None
-        res = mx.build(sel, aff, style, hard_errors, kept=_kept_pair, crm_look=lambda c: crm_look(c, _real),
+        res = mx.build(sel, aff, style, hard_errors, kept=_kept_pair, confirmed=lambda f_: list(valid_confirmations(f_)), crm_look=lambda c: crm_look(c, _real),
                        crm_real=_real is not None, crm_hint=_hint, updates_on=auth.get_setting("mctrade_updates_enabled") == "1",
                        action=lambda c: (metas.get(c["id"]) or {}).get("crm_action") or "")
         hdr, source, rows, left, upd = res["headers"], res["source"], res["rows"], res["left"], res["updates"]
@@ -2201,8 +2776,8 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         rfn = ("PREVIEW-" if preview else "") + fn   # round 10 (coordinator r3 3c): the READ-ME names the files as they are saved
         # companion files (not for import): every non-template column + rows left out, and the READ ME notes
         e = io.StringIO(); w = csv.writer(e)
-        w.writerow(["ScanCardID", "InImportFile", "WhyLeftOut", "FirstName", "LastName", "Email2", "Website", "Credentials", "Department", "OtherAddress",
-                    "AllEmails", "AllPhones", "Social", "Note", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "NeedsAttention"])
+        w.writerow(["ScanCardID", "InImportFile", "Why left out", "FirstName", "LastName", "Email2", "Website", "Credentials", "Department", "OtherAddress",
+                    "AllEmails", "AllPhones", "Social", "Note", "ReviewedBy", "DecidedAt", "Batch", "MCTradeAction", "Check"])
         why = {c["id"]: r for c, r in left}; updids = {c["id"] for c, _ in upd}
         for c in sel:
             f_ = c["fields"]; a = aud(c); em = f_.get("emails") or []
@@ -2222,47 +2797,54 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                     d_ = h.get("detail") if isinstance(h.get("detail"), dict) else {}
                     xb_ids[c["id"]] = d_.get("cards") or []
         tpl_real = source == "GAC template file"
+        cnt_ = mx.counts(res["decisions"])   # round 22 (mctrade-admin r21 H1): ONE source for every count (README, sign-off, dry run)
+        conf_ = [(c["id"], ln) for c in sel for ln in confirmed_lines(c["fields"])]
+        ovr_ = [c["id"] for c in sel if _ov(metas.get(c["id"]) or {})]
         readme = "\n".join([
             *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
+            # round 22: the 5 lines that matter come first
             "GAC Card Scanner: MC Trade import file (internal pilot)",
+            readme_totals(cnt_),
+            "Before you import: read the lines below that start with “Check”, " + ("import this 1 row as a test first" if len(rows) + len(upd) == 1 else "import 2 rows first") + " (an import can't be undone)"
+            + (", and import new profiles and updates separately." if upd else "."),
+            (f"Overrides: {len(conf_)} confirmed, {len(ovr_)} approved anyway (see the Check column in the CSV)." if conf_ or ovr_ else "Overrides: none."),
+            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the companion CSV and this READ-ME (not for import).",
+            *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
+            (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
             ("MC Trade contacts compared against: " + cinfo["source"] + "." if cinfo["real"] else
-             "*** SAMPLE DATA: no real MC Trade contacts export is loaded (Admin > Settings > Upload MC Trade contacts export). "
-             "'Possible existing member' hints came from 5 FAKE sample contacts, and NO Profile IDs were assigned. ***"),
-            f"Created {_when(time.time())} by {who}; {len(rows)} new-profile row(s) and {len(upd)} update row(s) from {len(sel)} card(s), filter = {FILTERS.get(status, status)}" + (f", batch {batch_label}" if batch_label else "") + ".",
-            f"New profiles: {rfn} (one sheet, columns = {source}, in template order; template version {template_version()}).",
-            (f"Updates of existing MC Trade profiles: {comp_name(rfn, '-UPDATES.xlsx')} ({len(upd)} row(s), with ProfileID). "
-             "MemberSince is left BLANK in update rows, so an import can't overwrite a member's real Member Since date (manager-r9 M-r9-2). MC Trade needs new profiles and updates in SEPARATE imports."
+             "Test data: no real MC Trade contacts file is loaded, so no Profile IDs were assigned."),
+            f"Created {_when(time.time())} by {who}; {len(rows)} new-profile {_s(len(rows), 'row')} and {len(upd)} update {_s(len(upd), 'row')} from {len(sel)} {_s(len(sel), 'card')}, filter = {FILTERS.get(status, status)}" + (f", batch {batch_label}" if batch_label else "") + ".",
+            f"New profiles: {rfn} (one sheet; " + ("columns from GAC's template" if tpl_real else "the scanner's default column names, not checked against MC Trade") + ").",
+            (f"Updates of existing MC Trade profiles: {comp_name(rfn, '-UPDATES.xlsx')} ({len(upd)} {_s(len(upd), 'row')}, with ProfileID). "
+             "MemberSince is left BLANK in update rows, so it can't overwrite a member's real date. Import new profiles and updates SEPARATELY."
              if upd else "No 'update existing' cards in this export."),
-            "Before importing: in MC Trade Admin > Import Profiles download GAC's template and save it as data/mctrade_template.xlsx",
-            "on the scanner computer; exports then copy its header row exactly. Test with two rows first: an import can't be undone.",
             (f"Template columns the scanner does not fill (left blank): {', '.join(res['unknown_cols'])}." if res["unknown_cols"] else
              "Every column of GAC's template was recognised." if tpl_real else
-             "No GAC template uploaded: the column headers are the scanner's DEFAULT set and are UNVERIFIED until GAC's template is uploaded (Admin > Settings)."),
+             "Columns not checked: upload GAC's template (Admin > Settings)."),
             (f"Scanner fields with no column in this template (in the companion CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
-            f"AffCode1 = '{aff}' (Admin > Settings). The code must already exist in MC Trade exactly, or the file is refused.",
-            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; an extension stays in the same cell, written like 330-555-0170 x4271)'}; addresses are split into street/city/state/zip.",
+            f"Affiliation code: '{aff}' (it must already exist in MC Trade).",
+            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; extensions like 330-555-0170 x4271)'}; addresses are split into street/city/state/zip.",
             ("Website: the card's website is in the import file's " + ", ".join(h for h in hdr if mx.canonical(h) in ("Website", "IndWebsite")) + " column (and in the companion CSV)."
              if any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h) else
              "Website: this template has NO website column, so websites are only in the companion CSV (not imported)."),
-            "Text that a spreadsheet could run as a formula (=, +, -, @) or HTML code can't be approved; older cards with it are left out as FIX FIRST.",
-            f"Rows left out of the import files: {len(left)} (same person twice or the same Profile ID twice: their details were combined into one row; a value that must be fixed first; or an update without a Profile ID). See the companion CSV.",
-            f"Cards approved anyway or still failing a soft check: {nflag}. See NeedsAttention in the companion CSV.",
-            *[f"SAME NAME, check before importing: {g['name']} is on card(s) {', '.join('#' + str(i) for i in g['cards'])}"
-              + (" (twice in this export)" if g["with"] == "export" else f" and already in MC Trade (profile {', '.join(g.get('profiles') or [])})")
-              + ". MC Trade's import may treat the same first + last name as one duplicate: confirm they are different people (other email/company) or merge them." for g in same_names(sel)],
-            (f"NEEDS REVIEW before importing ({len(res['review'])} card(s): {', '.join('#' + str(i) for i in res['review'])}): "
-             "uncertain Profile ID, a 'create new' person who already exists or is being updated, or a 'different people' choice "
-             "on identical cards. See WhyLeftOut." if res["review"] else
-             ("No cards are held back for review." if cinfo["real"] else "No cards are held back for review, because only SAMPLE contacts are loaded: no card was checked against GAC's real MC Trade contacts.") + (f" {nflag} exported card(s) still carry a warning (see NeedsAttention and the CROSS-BATCH lines below)." if nflag else "")),
-            (f"SAMPLE CONTACTS ONLY: {len(_smp)} card(s) ({', '.join('#' + str(i) for i in _smp)}) share an email with a SAMPLE test contact. They ARE in the new-profiles file, "
-             "because no real MC Trade contacts export is loaded (Admin > Settings). With GAC's real export loaded, an email match is NEEDS REVIEW." if _smp else ""),
-            (f"POSSIBLE EXISTING MEMBER: check in MC Trade ({len(res['possible'])} card(s): {', '.join('#' + str(i) for i in res['possible'])}). "
-             "See WhyLeftOut / InImportFile in the companion CSV." if res["possible"] else ""),
-            *[("CONFLICT: " + x) for x in res["conflicts"]],
-            *[f"CHECK WEBSITE before importing: card #{i} has the website {w} ({why}). Open the card and compare it with the photo." for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))],
-            *[f"CROSS-BATCH: card #{i} was approved although approved card(s) {', '.join('#' + str(o) for o in os_)} in another batch look like the same person"
-              " (some may already be exported): check before importing so nobody is imported twice." for i, os_ in xb_ids.items()],
-            "Audit details (reviewer, batch, notes, extra emails/phones, credentials, department) are in the companion CSV, not in the import file."])
+            f"Left out: {cnt_[mx.LEFT]} {_s(cnt_[mx.LEFT], 'card')} (combined with another row, or values to fix first). The CSV says why.",
+            # round 20 (mctrade-admin r19 F1): 'in this export N times' only when 2+ ROWS of the import files share the name
+            # (cards merged into one row or left out no longer count); id lists show 3 ids + 'N more'
+            *[f"Check, same name: {g['name']} is on {plural(len(g['cards']), 'card')} {ids3(g['cards'])}"
+              + (f" ({plural(len(g['cards']), 'row')} in this export)" if g["with"] == "export" else f" and already in MC Trade (profile {', '.join(g.get('profiles') or [])})")
+              + ". MC Trade may merge people with the same name: check they are different, or merge them." for g in same_names([c for c, _ in rows] + [c for c, _ in upd], contacts_from=sel)],
+            (f"Check, to review: {cnt_[mx.REVIEW]} {_s(cnt_[mx.REVIEW], 'card')} ({ids3([k for k, v in res['decisions'].items() if v[0] == mx.REVIEW])}) "
+             "are in neither file: a person must decide (the CSV says why)." if cnt_[mx.REVIEW] else
+             ("Nothing held back for review." if cinfo["real"] else "Nothing held back for review (only test contacts loaded).") + (f" {nflag} exported {_s(nflag, 'card')} {'has' if nflag == 1 else 'have'} a warning (see the Check column in the CSV)." if nflag else "")),
+            (f"{', '.join('#' + str(i) for i in _smp)} match test contacts. Included anyway." if _smp else ""),
+            (f"Check, maybe already in MC Trade: {ids3(res['possible'])} (counted above)." if res["possible"] else ""),
+            *(["Check, marked different but identical: " + x for x in res["conflicts"]] if len(res["conflicts"]) <= 3 else
+              [f"Check, marked different but identical: {len(res['conflicts'])} cards, each exported once (the CSV says which)."]),
+            *[f"Check website: #{i} has {w} ({why}). Compare it with the photo." for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))],
+            # round 21 (mctrade-admin r20 M3): ONE cross-batch line (count + the first few), the full list is in the companion CSV
+            (f"Check, also in another batch: {plural(len(xb_ids), 'card')} ({ids3(list(xb_ids))}) may match people approved in another batch." if xb_ids else ""),
+            "Extra details (reviewer, batch, notes, second emails/phones) are in the CSV, not in the import file."])
+        _seen = set(); readme = "\n".join(x for x in readme.split("\n") if not x.strip() or not (x in _seen or _seen.add(x)))   # round 24: each warning once
         comp = {"extra.csv": ("\ufeff" + e.getvalue()).encode(), "readme.txt": readme.encode()}
         if upd: comp["updates.xlsx"] = _book(upd)
         # round 9 (mctrade-r6): what each update row would overwrite in MC Trade, old value next to new
@@ -2286,9 +2868,14 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                 "decisions": {str(k): v[0] for k, v in res["decisions"].items()}, "counts": mx.counts(res["decisions"]),
                 "_view": {"headers": [h for h in hdr], "rows": [mx.cells(hdr, r_) for _, r_ in rows], "updates": [mx.cells(hdr, r_) for _, r_ in upd], "update_diff": _udiff,
                           "left": [[c["id"], why_] for c, why_ in left], "source_text": f"Columns: {source}. MC Trade contacts: {cinfo['source']}.",
-                          "warnings": [f"#{i}: approved although approved card(s) {', '.join('#' + str(o) for o in os_)} in another batch look like the same person" for i, os_ in xb_ids.items()] + [f"#{i}: check the website {w} ({why})" for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))]}}
+                          "warnings": [f"#{i}: approved although approved cards {', '.join('#' + str(o) for o in os_)} in another batch look like the same person" for i, os_ in xb_ids.items()] + [f"#{i}: check the website {w} ({why})" for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))]}}
         return body_x, MT["xlsx"], fn, comp, summ
     raise HTTPException(404)
+
+def readme_totals(cnt):
+    from . import mctrade_export as mx
+    return (f"Totals: {cnt[mx.NEW]} new · {cnt[mx.UPDATE]} {_s(cnt[mx.UPDATE], 'update')} · {cnt[mx.REVIEW]} to review · "
+            f"{cnt[mx.LEFT]} left out.")
 
 def comp_name(fn, suf):
     """Companion file name. The UPDATES file never says '-new-' (it holds updates of EXISTING profiles, not new ones)."""
@@ -2353,11 +2940,11 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards. Reviewers export approved cards."}, 403)
     if preview and not batch and request.state.user.get("role") != "admin":   # skeptic R6-1: no all-batches contact dump for reviewers
-        return JSONResponse({"error": "A reviewer previews one batch at a time: choose it under “Which batch (event)?”. Only an admin can preview all batches."}, 403)
+        return JSONResponse({"error": "Choose one batch under “Batch” to preview. Only admins can preview all batches."}, 403)
     sel, metas, probs = _export_set(status, batch)
     if probs and not preview:   # a preview changes nothing, so look-alikes don't block it
         msg = ("Some cards in this batch look like the same person. Resolve them in the review screen before exporting." if batch else
-               "With “All batches”, look-alikes from anyone's batch block the export. Choose your batch in “Which batch (event)?”, "
+               "With “All batches”, look-alikes from anyone's batch block the export. Choose your batch under “Batch”, "
                "or ask an admin to resolve the cards listed.")
         return JSONResponse({"error": msg, "duplicates": probs}, 409)
     if not sel: return JSONResponse({"error": "No cards to export."}, 404)
@@ -2368,8 +2955,8 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
         if not all(seen_.values()):   # round 17 (manager r16 M-1, skeptic L1): the sign-off versions are REQUIRED for a real export
             miss = [k for k, v in seen_.items() if not v]
             auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + "): sent without the sign-off versions (" + ", ".join("seen_" + k for k in miss) + "); nothing was exported" + _cl)
-            return JSONResponse({"error": "This export didn't say which sign-off it was made from (seen_template, seen_contacts, seen_cards from /api/export/check). Nothing was exported: export from the Export page.",
-                                 "need": "version_required", "missing": ["seen_" + k for k in miss], "now": export_versions(sel)}, 428)
+            return JSONResponse({"error": "Nothing was exported: the sign-off check is missing. Export from the Export page.",
+                                 "need": "version_required", "missing": ["seen_" + k for k in miss]}, 428)   # round 21 (skeptic r20 L1): no versions in a 428
         if True:
             now_ = export_versions(sel); drift = [k for k, v in seen_.items() if v and v != now_[k]]
             if drift:
@@ -2388,14 +2975,14 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
     view = res[4].pop("_view", None) if len(res) > 4 else None
     summ_h = {"X-Summary": json.dumps(res[4])} if len(res) > 4 else {}
     if preview and view is not None and request.query_params.get("view") == "1":   # on-screen preview (no file)
-        auth.alog(user["username"], f"viewed the PREVIEW of the MC Trade files on screen ({len(sel)} card(s)" + (f", batch {blabel or batch}" if batch else ", all batches") + "): " + ", ".join(f"#{c['id']}" for c in sel[:500]))
+        auth.alog(user["username"], f"viewed the PREVIEW of the MC Trade files on screen ({len(sel)} {_s(len(sel), 'card')}" + (f", batch {blabel or batch}" if batch else ", all batches") + "): " + ", ".join(f"#{c['id']}" for c in sel[:500]))
         return view | res[4] | {"versions": export_versions(sel)}
     if preview:
         fn = "PREVIEW-" + fn
         if request.query_params.get("companion") and request.query_params["companion"] not in extras:   # mctrade-r5 F1
             return JSONResponse({"error": "There is no such file in this export (for example no update rows, so no UPDATES file)."}, 404)
         nm_ = request.query_params.get("companion") or "main file"
-        auth.alog(user["username"], f"downloaded the PREVIEW {kind} ({nm_}) of {len(sel)} card(s), {FILTERS.get(status, status)}"
+        auth.alog(user["username"], f"downloaded the PREVIEW {kind} ({nm_}) of {len(sel)} {_s(len(sel), 'card')}, {FILTERS.get(status, status)}"
                   + (f", batch {blabel or batch}" if batch else ", all batches") + ": " + ", ".join(f"#{c['id']}" for c in sel[:500]) + ("…" if len(sel) > 500 else ""))
         hdrs = {"Content-Disposition": f'attachment; filename="{fn}"', "X-Card-Count": str(len(sel)), "X-Preview": "1", "X-Companions": ",".join(extras)} | summ_h
         if request.query_params.get("companion"):
@@ -2461,12 +3048,12 @@ def export_history(request: Request):
 def export_again(eid: int, request: Request):
     r = db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone()
     if not r or not r["stored"] or not os.path.isfile(os.path.join(EXP, r["stored"])):
-        return JSONResponse({"error": "No such export file (it may have been removed by the retention policy). Export again instead."}, 404)
+        return JSONResponse({"error": "That file is no longer stored. Export again."}, 404)
     u = request.state.user
     if u["role"] != "admin" and r["username"] != u["username"]:
         return JSONResponse({"error": "Only the person who made this export (or an admin) can download it again."}, 403)
     ids = json.loads(r["card_ids"] or "[]")
-    auth.alog(request.state.user["username"], f"re-downloaded export #{eid} ({r['filename']}; {len(ids)} card(s): " + ", ".join(f"#{i}" for i in ids[:500]) + (" …" if len(ids) > 500 else "") + ")")
+    auth.alog(request.state.user["username"], f"re-downloaded export #{eid} ({r['filename']}; {len(ids)} {_s(len(ids), 'card')}: " + ", ".join(f"#{i}" for i in ids[:500]) + (" …" if len(ids) > 500 else "") + ")")
     for i in ids: log(i, request.state.user["initials"], "redownloaded", detail={"export_id": eid, "file": r["filename"]})
     return FileResponse(os.path.join(EXP, r["stored"]), media_type=MT.get(r["kind"]), filename=r["filename"])
 
@@ -2523,17 +3110,26 @@ def recover():
         if time.time() - os.path.getmtime(p) > 86400: os.remove(p)
     for fn in sorted(os.listdir(INBOX), key=lambda x: os.path.getmtime(os.path.join(INBOX, x))):
         if not fn.endswith(".json"): continue
-        jid = fn[:-5]; bp = os.path.join(INBOX, jid + ".bin")
+        jid = fn[:-5]
         try:
             with open(os.path.join(INBOX, fn)) as fh: args = json.load(fh)
+            bp = os.path.join(INBOX, jid + (".pdf" if args.get("kind") == "pdf" else ".bin"))
             if not os.path.isfile(bp): raise FileNotFoundError(bp)
         except Exception:
-            for x in (fn, jid + ".bin"):
-                try: os.remove(os.path.join(INBOX, x))
-                except FileNotFoundError: pass
+            _inbox_clear(jid); continue
+        if os.path.exists(os.path.join(INBOX, jid + ".reading")):
+            # round 20 (skeptic C1): the server died while reading this file. Re-queueing it could crash it again (a
+            # crash loop), so it is set aside as failed with a calm message instead.
+            j = {"id": jid, "kind": args.get("kind"), "state": "error", "file": args.get("fname"), "batch": args.get("batch") or "",
+                 "error": CALM_POISON, "finished": time.time()}
+            _done_record(jid, j); _inbox_clear(jid); print("set aside a file that was being read when the server stopped:", jid)
             continue
+        if args.get("kind") == "pdf":
+            with JLOCK: JOBS[jid] = {"id": jid, "kind": "pdf", "state": "queued", "file": args["fname"], "batch": args["batch"] or "",
+                                     "created": time.time(), "who": args.get("who"), "pages": args.get("pages"), "page": 0, "children": [], "recovered": True}
+            SPLIT_POOL.submit(_split_pdf, jid); n += 1; continue
         with JLOCK: JOBS[jid] = {"id": jid, "state": "queued", "file": args["fname"], "batch": args["batch"] or "", "sha": args["sha"],
-                                 "created": time.time(), "ahead": n, "recovered": True}
+                                 "created": time.time(), "ahead": n, "recovered": True, "who": args.get("who")}   # round 20 (M1): keep the owner
         POOL.submit(_run, jid, None, **args); n += 1
     try:
         for r in db().execute("SELECT card_id FROM card_meta WHERE ai_status IN ('queued','checking')").fetchall():
@@ -2607,6 +3203,10 @@ def _audit_text(action, frm, to, d):
         elif action == "undo": t = f"undid: {d.get('undid', '')}"
         else: t = NAMES.get(action, action.replace("_", " "))
         return t + " [personal details removed on request]"
+    if action == "hard_check_override":   # round 23: field, value and reason in plain words
+        return f"confirmed {LABEL.get(d.get('field'), d.get('field') or 'a value')} “{_fmtv(d.get('value'))[:120]}” as correct" + (f" (reason: {d['reason']})" if d.get("reason") else " (no reason recorded)")
+    if action == "cross_batch_confirmed":
+        return "approved although " + (("#" + ", #".join(str(i) for i in d["cards"])) if d.get("cards") else "a card in another batch") + " may be the same person"
     if action == "deleted_on_request": return f"card deleted on request (photo and details; {d.get('export_copies', 0)} stored export file(s)); its history is kept without personal data"
     if action == "redownloaded": return f"re-downloaded in export #{d.get('export_id')} ({d.get('file')})"
     if action == "decision":
@@ -2626,6 +3226,7 @@ def _audit_text(action, frm, to, d):
         return "marked as a different person from " + ", ".join(f"#{i}" for i in ids) + " (keep both)" if ids else "marked as a different person (keep both)"
     if action == "back_to_pending": return f"moved back to pending ({d.get('why')}): " + "; ".join(d.get("problems") or [])
     if action == "archived": return "archived"
+    if action == "upload_cancelled": return "stopped an upload: " + (f"{d['kept']} kept, " if d.get("kept") is not None else "") + f"{d.get('not_scanned', 0)} not scanned" + (f" (batch “{d.get('batch')}”)" if d.get("batch") else "")
     if action == "undo": return f"undid: {d.get('undid')}"
     if action == "ai_checked":
         ch = d.get("changed") or {}
@@ -2659,12 +3260,12 @@ def audit(q: str = "", limit: int = 500, fmt: str = "json"):
         # round 17 (manager r16 L-1): refused rows are filed under what was refused, not 'account'
         kind = (("export" if ev.startswith("refused export") else "template" if "of the MC Trade template" in ev else "contacts" if "of the MC Trade contacts" in ev else "settings")
                 if ev.startswith("refused") else "settings" if ev.startswith("settings") else "export" if ev.startswith(("re-downloaded", "downloaded the", "dry run", "ran the MC Trade dry-run", "viewed the PREVIEW")) else
-                "card" if ev.startswith(("deleted card", "Clear all test data")) else "account")
+                "card" if ev.startswith(("deleted card", "Clear all test data", "confirmed as correct on card")) else "account")
         ids_ = list(dict.fromkeys(int(x) for x in re.findall(r"#(\d+)", ev))) if kind in ("export", "card") or ev.startswith("refused export") else []   # round 11: each card once (manager-r10)
         rows.append({"ts": r["ts"], "who": r["username"], "what": ev + (f" (from {r['ip']})" if r["ip"] else ""), "card": ids_[0] if ids_ else None, "cards": ids_, "kind": kind})
     for r in db().execute("SELECT * FROM exports ORDER BY id DESC LIMIT ?", (limit,)):
         _ids = json.loads(r["card_ids"] or "[]")
-        rows.append({"ts": r["ts"], "who": r["initials"], "what": f"export {r['kind']} · {r['count']} card(s) · {FILTERS.get(r['filter'], r['filter'])} · {r['filename']}" + (": " + ", ".join(f"#{i}" for i in _ids[:500]) if _ids else ""), "card": _ids[0] if _ids else None, "cards": _ids, "kind": "export"})
+        rows.append({"ts": r["ts"], "who": r["initials"], "what": f"export {r['kind']} · {r['count']} {_s(r['count'], 'card')} · {FILTERS.get(r['filter'], r['filter'])} · {r['filename']}" + (": " + ", ".join(f"#{i}" for i in _ids[:500]) if _ids else ""), "card": _ids[0] if _ids else None, "cards": _ids, "kind": "export"})
     for r in db().execute("SELECT * FROM actions WHERE undone IS NOT NULL ORDER BY id DESC LIMIT ?", (limit,)):
         rows.append({"ts": r["undone"], "who": r["username"], "what": f"undo: {r['label']}", "card": None, "kind": "undo"})
     rows.sort(key=lambda x: -x["ts"])
@@ -2710,7 +3311,7 @@ def stale_admin(thing, expected, current, prefix, user=None, action=""):
     # round 17 (manager r16 L-2): the refused row says WHAT was tried (upload / revert / remove, and the file name)
     if user: auth.alog(user, f"refused (stale admin page): {action or 'change'} of the {thing} " + (f"made from version {_safe_fname(expected)}, current version is {current}" if expected else f"sent without a version (current version {current})") + ": nothing was changed")
     if not expected:
-        return JSONResponse({"error": f"This request didn't say which version of the {thing} it was made from (expected_version). Nothing was changed: reload Admin → Settings and try again.",
+        return JSONResponse({"error": f"Nothing was changed: the page is out of date. Reload Admin → Settings and try again.",
                              "need": "version_required", "thing": thing, "version": current, "last_change": lc}, 428)
     # round 17 (manager r16 L-3): a version this server never issued is not "changed by X after you opened this page"
     known = expected == "none" or bool(re.fullmatch(r"[0-9a-f]{12}", expected or "")) and db().execute(
@@ -2856,7 +3457,7 @@ async def upload_contacts(request: Request, image: UploadFile = File(...)):
     os.chmod(_cp, 0o600)
     crm_source.write_loader(request.state.user)   # round 11 (mctrade-r7 C1): who loaded it, and when, is shown with the source
     auth.alog(u, f"settings: uploaded the MC Trade contacts export ({_safe_fname(image.filename)}, {len(rows)} people with a Profile ID); "
-                 "exports and the dry run now use it" + (f"; {skipped} row(s) with the scanner's SAMPLE emails skipped" if skipped else "") + f"; contacts version {contacts_version()}")
+                 "exports and the dry run now use it" + (f"; {skipped} {_s(skipped, 'row')} with the scanner's SAMPLE emails skipped" if skipped else "") + f"; contacts version {contacts_version()}")
     return {"ok": True, "skipped_sample_rows": skipped} | contacts_info()
 
 @router.post("/api/admin/mctrade-contacts/remove")
@@ -2916,8 +3517,8 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
         if ub:
             open(os.path.join(tmp, "updates.xlsx"), "wb").write(ub)
             with contextlib.redirect_stdout(io.StringIO()): nu_ = len(dr.read_export(os.path.join(tmp, "updates.xlsx")))
-        parts_ = [f"new-profiles file: {n_} row(s)" + (" (no new profiles in this export)" if not n_ else "")]
-        if nu_ is not None: parts_.append(f"UPDATES file: {nu_} row(s)")
+        parts_ = [f"new-profiles file: {n_} {_s(n_, 'row')}" + (" (no new profiles in this export)" if not n_ else "")]
+        if nu_ is not None: parts_.append(f"UPDATES file: {nu_} {_s(nu_, 'row')}")
         filecheck = "The import files read back cleanly (" + "; ".join(parts_) + ")."
     except (Exception, SystemExit) as e: filecheck = f"The import file could not be read back: {_html.escape(str(e)[:200])}"
     finally: shutil.rmtree(tmp, ignore_errors=True)
@@ -2935,12 +3536,12 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
              + ("" if cinfo["real"] else " <b>SAMPLE DATA: this is a rehearsal; no Profile IDs are assigned.</b>")
              + f"<br><b>Cards checked:</b> {len(sel)}" + (f" · batch “{_html.escape(blabel)}”" if blabel else "")
              + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · NEEDS REVIEW {cnt['review']} · LEFT OUT {cnt['left']}</b>"
-             + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new row(s), {summ['update_rows']} update row(s))"
+             + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {_s(summ['new_rows'], 'row')}, {summ['update_rows']} update {_s(summ['update_rows'], 'row')})"
              + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are NEEDS REVIEW, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
              + f"<br>{filecheck}</div>"
              "<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>Card</th><th>Name</th><th>Company</th><th>Decision</th><th>Why</th></tr>"
              + trs + "</table></body></html>")
-    auth.alog(user["username"], f"dry run: ran the MC Trade dry-run check on {len(sel)} card(s), " + (f"batch “{blabel or batch}”" if batch else "all batches")
+    auth.alog(user["username"], f"dry run: ran the MC Trade dry-run check on {len(sel)} {_s(len(sel), 'card')}, " + (f"batch “{blabel or batch}”" if batch else "all batches")
               + f", filter {FILTERS.get(status, status)}; data source: {'REAL ' + cinfo['file'] if cinfo['real'] else 'SAMPLE data'}; result: "
               + f"UPDATE {cnt['update']}, CREATE {cnt['new']}, NEEDS REVIEW {cnt['review']}, LEFT OUT {cnt['left']}"
               + f"; not in either file {len(left)} (NEEDS REVIEW + LEFT OUT)" + (": " + ", ".join(f"#{i}" for i in sorted(left)[:500]) if left else "")

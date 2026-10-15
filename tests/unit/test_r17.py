@@ -38,7 +38,7 @@ def test_in_batch_rejected_twin_not_hidden_by_many_other_batch_lookalikes(env):
     for x, y in ((a, t), (t, a)):
         h = _hint(_row(rc, b, x)); assert any(f"#{y}" in s and "this batch" in s for s in h), h
         assert any(f"#{y}" in s for s in _hint(rc.get(f"/api/cards/{x}").json()))
-        assert all("more" in s for s in h if "another batch" in s)   # 12 other-batch ids: first 10 + '…and 2 more'
+        assert all("more" in s or "other cards" in s for s in h if "another batch" in s)   # r22: a decided card shows a count (part-timer r21)
     assert rc.post(f"/api/cards/{a}", json={"status": "pending", "confirm_redecide": True}).status_code == 200
     h = _hint(_row(rc, b, a)); assert any(f"#{t} (rejected, this batch): a hint only" in s for s in h), h
 
@@ -92,6 +92,6 @@ def test_check_website_only_exported_rows(env):
     f = store.get(a)["fields"]; f["website"] = "www.evil-phish.com"; store.update(a, fields=f)
     bad = _approved(ui, store, b, first_name="Fix", last_name="First", company="X", emails=["fix@"], website="www.secure-login17.com")
     rd = adm.get(f"/api/export/xlsx?preview=1&companion=readme.txt&status=approved_new&batch={b}").text
-    lines = [l for l in rd.splitlines() if "CHECK WEBSITE" in l]
-    assert any(f"card #{a} " in l for l in lines), lines
-    assert not any(f"#{bad} " in l for l in lines) and not any(f"card #{m} " in l for l in lines), lines
+    lines = [l for l in rd.splitlines() if "Check website" in l]
+    assert any(f"#{a} " in l for l in lines), lines
+    assert not any(f"#{bad} " in l for l in lines) and not any(f"#{m} " in l for l in lines), lines

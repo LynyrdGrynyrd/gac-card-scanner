@@ -21,6 +21,11 @@ The GAC Card Scanner pilot uses the open-source components below. Each one keeps
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | github.com/pyca/cryptography |
 | **RapidFuzz** (added in iteration 10, duplicate matching) | 3.14.6 | MIT | github.com/rapidfuzz/RapidFuzz |
 | **gender-guesser** (first-name lexicon for name ordering, app/parser.py; declared in requirements since the audit merge) | 0.4.0 | **GPL-3.0** | github.com/lead-ratings/gender-guesser |
+| **pillow-heif** (round 18: HEIC/HEIF photo input, app/formats.py) | 1.8.1 | **GPL-2.0** as shipped (binary wheel bundles the **x265** encoder, GPL-2.0); Python bindings BSD-3-Clause | github.com/bigcat88/pillow_heif |
+| ↳ **libheif** (bundled in the pillow-heif wheel) | 1.23.6 | **LGPL-3.0** | github.com/strukturag/libheif |
+| ↳ **libde265** (bundled in the pillow-heif wheel) | 1.1.3 | **LGPL-3.0** | github.com/strukturag/libde265 |
+| ↳ **x265** (bundled in the pillow-heif wheel) | 4.3 | **GPL-2.0** | github.com/Multicorewareinc/x265 |
+| **pypdfium2** (round 18: PDF input, app/formats.py) | 5.14.0 | Apache-2.0 / BSD-3-Clause; bundles PDFium (BSD-3-Clause / Apache-2.0) and its deps (FreeType, ICU, libjpeg-turbo, OpenJPEG, libpng, zlib, lcms: permissive) | github.com/pypdfium2-team/pypdfium2 |
 
 ## System components (installed separately, not bundled in the zip)
 | Component | License | Notes |

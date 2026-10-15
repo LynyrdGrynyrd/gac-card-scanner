@@ -106,7 +106,7 @@ def test_no_real_crm_never_assigns_profile_ids(env, monkeypatch):
     r = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1"); assert "updates.xlsx" not in r.headers["X-Companions"]
     s = json.loads(r.headers["X-Summary"]); assert s["possible"] == [cid] and s["new_rows"] == 0 and not s["crm_real"]
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&companion=readme.txt").text
-    assert "SAMPLE DATA" in rd and "POSSIBLE EXISTING MEMBER" in rd
+    assert "Test data" in rd and "maybe already in MC Trade" in rd
     v = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&view=1").json(); assert v["rows"] == [] and v["left"][0][0] == cid
 
 def test_contacts_upload_used_by_export_and_dryrun(env):
@@ -241,6 +241,6 @@ def test_preview_readme_says_preview_and_ocr_lookalike_hint(env):
     cid = mk(ui, st, first_name="Pre", last_name="View", emails=["pre.r7pv@viewzz.io"]); ui.set_meta(cid, batch="r7pv", batch_label="R7PV")
     r = _ap(rev, cid); assert r.status_code == 200, r.text
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7pv&preview=1&companion=readme.txt").text
-    assert rd.startswith("*** PREVIEW ONLY") and "UNVERIFIED" in rd and "Every column of GAC" not in rd
+    assert rd.startswith("*** PREVIEW ONLY") and "not checked against MC Trade" in rd and "Every column of GAC" not in rd
     assert any(s["code"] == "ocr_lookalike" for s in plausibility.check({"company": "Rnbber City Robotics"}))
     ck = rev.get("/api/export/check?status=approved&batch=r7pv").json(); assert "pending_count" in ck and ck["cards"][0]["id"] == cid

@@ -145,7 +145,7 @@ def same_disk():
 def start():
     if same_disk():
         print("!! Backups are on the SAME disk as the data (" + backup_dir() + "). Set GAC_BACKUP_DIR to another disk "
-              "(USB drive, network share) so a disk failure can't take both. See HELP-GUIDE 2.5.", flush=True)
+              "(USB drive, network share) so a disk failure can't take both. See the Admin & MC Trade Guide, section 2.5.", flush=True)
     threading.Thread(target=_loop, daemon=True, name="nightly-backup").start()
 
 if __name__ == "__main__":

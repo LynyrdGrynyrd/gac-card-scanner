@@ -15,3 +15,5 @@ cryptography>=42
 rapidfuzz>=3.0
 qrcode>=7.4              # phone mode pairing QR code (app/phone.py)
 gender-guesser>=0.4.0   # GPL-3.0: first-name lexicon used by app/parser.py (see THIRD-PARTY-NOTICES.md)
+pillow-heif>=0.18     # round 18: HEIC/HEIF input. BSD-3 bindings; binary wheel bundles LGPL-3 libheif/libde265 + GPL-2 x265 (THIRD-PARTY-NOTICES.md)
+pypdfium2>=4.30       # round 18: PDF input (PDFium; Apache-2.0/BSD-3). No JavaScript/forms are run.

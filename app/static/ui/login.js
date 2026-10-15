@@ -19,7 +19,11 @@ const nextUrl=()=>{let n=new URLSearchParams(location.search).get('next')||'';
     const d=document.createElement('div');d.className='btns';
     const go=document.createElement('a');go.className='btn primary';go.href=nextUrl();go.textContent='Continue as '+s.user.display;
     const sw=document.createElement('button');sw.type='button';sw.className='btn';sw.textContent='Sign out and sign in as someone else';
-    sw.onclick=async()=>{await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':(document.cookie.match(/(?:^|; )gac_csrf=([^;]*)/)||[])[1]||''}});location.reload()};
+    // round 23 (coordinator r22): this button did nothing (stale CSRF cookie -> 403, then a reload showed the same page)
+    sw.onclick=async()=>{sw.disabled=true;let ok=false;try{const r=await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':(document.cookie.match(/(?:^|; )gac_csrf=([^;]*)/)||[])[1]||''}});ok=r.ok}catch(e){}
+      try{sessionStorage.clear()}catch(e){}
+      if(!ok){sw.disabled=false;$('#lead').textContent='Could not sign out. Reload the page and try again.';return}
+      location.replace('/login'+location.search+location.hash)};
     d.append(go,' ',sw);$('#f').after(d);go.focus();return}
   if(s.needs_setup){
     $('#h').textContent='First-time setup';$('#lead').textContent='Create the first administrator account. Admins can add the other reviewers.';

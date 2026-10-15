@@ -90,7 +90,7 @@ UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BODY = 26 * 1024 * 1024   # one photo (25 MB) + form overhead; checked before the body is read
 
 CSRF_COOKIE = "gac_csrf"; CSRF_HEADER = "x-csrf-token"
-CSRF_EXEMPT = {"/api/auth/login", "/api/auth/setup"}       # no session yet; protected by Origin/Referer + password
+CSRF_EXEMPT = {"/api/auth/login", "/api/auth/setup", "/api/auth/logout"}   # no session yet (logout: round 23, the login page may hold a stale CSRF cookie); protected by Origin/Referer
 def csrf_for(tok):
     """Per-session CSRF token (double-submit): readable cookie, echoed back by the page in X-CSRF-Token."""
     return hashlib.sha256(b"gac-csrf:" + tok.encode()).hexdigest()[:40]
@@ -118,10 +118,10 @@ async def middleware(request: Request, call_next):
         if _cross_origin(request):
             return JSONResponse({"error": "Cross-site request refused."}, 403, headers=SEC_HEADERS)
         if _no_origin(request) and not (p == "/api/scan" and _client(request) in LOOPBACK):
-            return JSONResponse({"error": "Request refused: no Origin or Referer header."}, 403, headers=SEC_HEADERS)
+            return JSONResponse({"error": "Request refused. Reload the page and try again."}, 403, headers=SEC_HEADERS)
         tok = request.cookies.get(COOKIE)
         if tok and p not in CSRF_EXEMPT and not hmac.compare_digest(request.headers.get(CSRF_HEADER, ""), csrf_for(tok)):
-            return JSONResponse({"error": "This page is out of date (security token missing). Reload the page and try again.", "need": "reload"}, 403, headers=SEC_HEADERS)
+            return JSONResponse({"error": "This page is out of date. Reload it and try again.", "need": "reload"}, 403, headers=SEC_HEADERS)
     try: clen = int(request.headers.get("content-length") or 0)
     except ValueError: clen = 0
     if clen > MAX_BODY: return JSONResponse({"error": "Upload is too large (limit 25 MB per photo)."}, 413, headers=SEC_HEADERS)
@@ -145,7 +145,7 @@ async def _route(request: Request, call_next):
     u = current_user(request)
     if not u:
         if p.startswith("/api/") or request.method != "GET":
-            return JSONResponse({"error": "Please sign in.", "need": "login"}, 401)
+            return JSONResponse({"error": "Sign in to continue.", "need": "login"}, 401)
         return RedirectResponse("/setup" if user_count() == 0 else "/login?next=" + __import__("urllib.parse").parse.quote(p, safe="/"), 303)
     request.state.user = u
     if (p.startswith("/api/admin/") or p.startswith("/sync/")) and u["role"] != "admin":
@@ -211,7 +211,7 @@ def state(request: Request):
 def setup(request: Request, body: dict = Body(...)):
     if user_count() > 0: return JSONResponse({"error": "Setup was already done. Please sign in."}, 409)
     if _client(request) not in LOOPBACK and os.getenv("GAC_ALLOW_REMOTE_SETUP") != "1":
-        return JSONResponse({"error": "First-time setup must be done on the computer running the scanner (http://localhost:8765)."}, 403)
+        return JSONResponse({"error": "Do first-time setup on the computer that runs the scanner."}, 403)
     try: uid = create_user(body.get("username", ""), body.get("display", ""), body.get("password", ""), "admin", body.get("initials"))
     except ValueError as e: return JSONResponse({"error": str(e)}, 422)
     alog(body.get("username"), "setup_admin_created", _client(request))
@@ -315,7 +315,7 @@ def save_settings(request: Request, body: dict = Body(...)):
     unseen = [k for k in DEFAULTS if k in body and (seen is None or k not in seen)]
     if unseen:
         alog(request.state.user["username"], "refused (stale admin page): settings save without the values the page showed (" + ", ".join(SETTING_NAMES.get(k, k) for k in unseen[:12]) + "): nothing was saved", _client(request))
-        return JSONResponse({"error": "This save didn't say which values it was made from (_seen). Nothing was saved: reload Admin → Settings and try again.",
+        return JSONResponse({"error": "Nothing was saved: the page is out of date. Reload Admin → Settings and try again.",
                              "need": "version_required", "thing": "settings", "keys": unseen}, 428)
     if seen is not None:
         clash = [k for k in DEFAULTS if k in body and k in seen and str(body[k]).strip() != str(seen[k]) and before[k] != str(seen[k])]
@@ -330,9 +330,9 @@ def save_settings(request: Request, body: dict = Body(...)):
     for k in DEFAULTS:
         if k in body:
             v = str(body[k]).strip()
-            if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Days must be a whole number 1–3650 (0 would delete photos of cards nobody has reviewed yet)."}, 422)
+            if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Enter whole days from 1 to 3650."}, 422)
             if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
-            if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Phone format must be gac or e164."}, 422)
+            if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Choose a phone format from the list."}, 422)
             if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
             set_setting(k, v)
     if get_setting("phone_mode_allowed") != "1":

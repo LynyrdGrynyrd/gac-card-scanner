@@ -126,7 +126,7 @@ def test_website_warning_on_merged_row(env):
     w = ui.website_warnings([store.get(a), store.get(ok)], ui.all_metas())
     assert [x[0] for x in w] == [a] and "merge" in w[0][2] and "phishing" in w[0][2]
     rd = env["adm"].get("/api/export/xlsx?preview=1&companion=readme.txt&status=approved_new&batch=r16-web").text
-    assert "CHECK WEBSITE" in rd and "www.evil-phish.com" in rd and "330-555-0170 x4271" in rd
+    assert "Check website" in rd and "www.evil-phish.com" in rd and "330-555-0170 x4271" in rd
 
 def test_ai_kept_warning_clears_after_manual_fix(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]

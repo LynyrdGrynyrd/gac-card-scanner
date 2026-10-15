@@ -202,8 +202,10 @@ def test_phone_lan_prefers_private():
     assert order[:2] == ["192.168.1.20", "10.0.0.5"] and phone._rank("127.0.0.1") == 99 and phone._rank("169.254.1.1") == 99
 
 def test_help_pdf_inline(env):
-    r = env["rev"].get("/static/ui/GAC-Card-Scanner-Help-Guide.pdf")
-    assert r.status_code == 200 and r.headers["content-disposition"].startswith("inline")
+    for n in ("Reviewer", "Admin", "Help"):
+        r = env["rev"].get(f"/static/ui/GAC-Card-Scanner-{n}-Guide.pdf")
+        assert r.status_code == 200 and r.headers["content-disposition"].startswith("inline") and r.content[:4] == b"%PDF"
+    assert env["rev"].get("/static/ui/GAC-Card-Scanner-Nope-Guide.pdf").status_code == 404
 
 def test_audit_card_cap_raised(env):
     ui, st, adm = env["ui"], env["store"], env["adm"]

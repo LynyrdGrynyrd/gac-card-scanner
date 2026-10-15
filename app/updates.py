@@ -66,4 +66,7 @@ def update_status():
     on = auth.get_setting("update_check_enabled") == "1"; cur = current_version()
     avail = on and STATE.get("latest") and newer(STATE["latest"], cur)
     return {"enabled": on, "current": cur, "latest": STATE.get("latest") if on else None, "update_available": bool(avail),
-            "url": STATE.get("url") if avail else None, "name": STATE.get("name") if avail else None}
+            "url": STATE.get("url") if avail else None, "name": STATE.get("name") if avail else None,
+            # round 20 (e): the top-of-page banner is OFF in the local pilot (GAC_UPDATE_BANNER=1 turns it on, admins only);
+            # Admin > Settings still shows the version status
+            "show_banner": os.getenv("GAC_UPDATE_BANNER", "0") == "1"}

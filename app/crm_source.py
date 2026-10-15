@@ -133,7 +133,7 @@ def info():
     p = uploaded_path(); r = real(); ld = loader() if r is not None else ""
     return {"real": r is not None, "file": os.path.basename(p) if p else "", "people": len(r) if r is not None else 0, "loaded": ld,
             "source": (f"GAC's MC Trade contacts export ({os.path.basename(p)}, {len(r)} people{', ' + ld if ld else ''})" if r is not None
-                       else "SAMPLE data (5 fake test contacts): no real MC Trade contacts export uploaded, so NO Profile IDs are assigned")}
+                       else "Test data (5 fake contacts): no real MC Trade contacts file, so no Profile IDs")}
 
 # ---------------------------------------------------------------- upload safety (template + contacts)
 MAX_UPLOAD = 5 * 1024 * 1024

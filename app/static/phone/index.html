@@ -19,7 +19,9 @@
     <figure class="side" id="sideBack"><img id="pBack" alt=""><figcaption>Back <small>(optional)</small></figcaption>
       <button class="btn" id="bBack" type="button">📷 Back</button></figure>
   </div>
+  <p class="small"><button class="btn small" id="bFile" type="button">📄 Choose a saved file</button> <small>Photo or PDF</small></p>
   <input id="fFront" type="file" accept="image/*" capture="environment" hidden>
+  <input id="fFile" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,.pdf,application/pdf" hidden>
   <input id="fBack" type="file" accept="image/*" capture="environment" hidden>
   <button class="btn primary big" id="send" type="button" disabled>Send card to computer</button>
   <p id="msg" role="status" aria-live="polite"></p>

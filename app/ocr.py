@@ -217,6 +217,9 @@ def hybrid_ocr(data: bytes, crop=False):
         img, found = crop_card(img)
         if not found: return None
     T = int(os.getenv("OCR_TARGET", "1200"))
+    mp = float(os.getenv("OCR_MAX_MP", "4")) * 1e6   # round 20: text detection memory grows with pixels (11 MP used >1.6 GB; 4 MP keeps the server under ~1.2 GB, same accuracy on 12 MP phone-size photos)
+    if img.width * img.height > mp:
+        s = (mp / (img.width * img.height)) ** 0.5; img = img.resize((int(img.width*s), int(img.height*s)), Image.LANCZOS)
     if max(img.size) < T:
         s = T / max(img.size); img = img.resize((int(img.width*s), int(img.height*s)), Image.LANCZOS)
     return _finish(img, arrange(hybrid_segments(img), img, reocr=False), "ppocr+tesseract")

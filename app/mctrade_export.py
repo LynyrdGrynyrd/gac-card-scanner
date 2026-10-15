@@ -43,8 +43,8 @@ def _read_headers():
         while row and row[-1] in (None, ""): row.pop()          # trailing empty cells are not columns
         return ["" if h is None else str(h) for h in row], "GAC template file"
     try:
-        with open(COLMAP) as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "default column set (UNVERIFIED headers)"
-    except Exception: return FALLBACK, "default column set (UNVERIFIED headers)"
+        with open(COLMAP) as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "the scanner's default column names (not checked against MC Trade)"
+    except Exception: return FALLBACK, "the scanner's default column names (not checked against MC Trade)"
 
 def canonical(h):
     """Template header -> our column name, tolerant of case/spaces ('Profile ID', 'IndEmail ')."""
@@ -176,7 +176,11 @@ def same_person(a, b):
     if ea and eb: return False          # two Ann Lees at one company with different personal emails: different people (R3-12)
     return bool(_org(a.get("company"))) and _org(a.get("company")) == _org(b.get("company"))
 def identical(a, b):
-    """Same name + same personal email + same phone + same company: one person, whatever a 'different people' click said."""
+    """Same name + same personal email + same phone + same company: one person, whatever a 'different people' click said.
+    Round 21 (mctrade-admin r20 H1): the same full name AND the same personal email or phone is one person too, even when the
+    company is spelled differently ('Coffee Co.' vs 'Coffee Company'): one row, never two."""
+    na, nb = _nm(f"{a.get('first_name','')} {a.get('last_name','')}"), _nm(f"{b.get('first_name','')} {b.get('last_name','')}")
+    if na and na == nb and " " in na and (personal_emails(a) & personal_emails(b) or _phones(a) & _phones(b)): return True
     return _identity(a, b)
 def person_key(f):   # kept for callers/tests: name + org (never email alone)
     return f"{_nm(f.get('first_name','') + ' ' + f.get('last_name',''))}|{_org(f.get('company'))}"
@@ -249,7 +253,7 @@ def classify(c, action, hard, crm_real, updates_on, look):
     return NEW, "", None
 
 def build(cards, affcode, style, hard_errors, kept=lambda a, b: False, crm_profile=lambda c: None, action=lambda c: "",
-          crm_exact=lambda c: None, crm_real=True, crm_hint=lambda c: None, crm_look=None, updates_on=True):
+          crm_exact=lambda c: None, crm_real=True, crm_hint=lambda c: None, crm_look=None, updates_on=True, confirmed=lambda f: ()):
     """-> dict(headers, source, rows[(card,row)], updates[(card,row)], left[(card,reason)], merged{card_id: [ids]}, unknown_cols,
     conflicts[str], review[card ids], possible[card ids], decisions{card_id: (category, reason)}).
     Round 8: every card is first put in ONE category by classify() (shared with the dry run and the sign-off); then people
@@ -261,6 +265,10 @@ def build(cards, affcode, style, hard_errors, kept=lambda a, b: False, crm_profi
             ex = crm_exact(c); ex = ex if isinstance(ex, list) else ([ex] if ex else [])
             return {"email": ex, "strong": ex, "name": [], "sure": crm_profile(c), "email_differs": False}
     cards = sorted(cards, key=lambda c: -(c.get("decided") or c.get("created") or 0))
+    def unconf(c, r):   # round 23 (mctrade-admin r22 H1): a value only 'confirmed as correct' on THIS card never rides into another card's row
+        cf = set(confirmed(c["fields"]) or ())
+        if not cf: return r
+        return row({k: (("" if isinstance(v, str) else []) if k in cf else v) for k, v in c["fields"].items()}, affcode, style)
     groups, ugroups = [], {}
     pending_new = []
     for c in cards:
@@ -274,7 +282,7 @@ def build(cards, affcode, style, hard_errors, kept=lambda a, b: False, crm_profi
         if cat == UPDATE:
             r["ProfileID"] = pid; r["MemberSince"] = ""; dec[c["id"]] = (UPDATE, why)
             if pid in ugroups:
-                merged.setdefault(ugroups[pid][0]["id"], []).append(c["id"]); t = _merge_into(ugroups[pid], c, r, f"same MC Trade profile {pid} as")
+                merged.setdefault(ugroups[pid][0]["id"], []).append(c["id"]); t = _merge_into(ugroups[pid], c, unconf(c, r), f"same MC Trade profile {pid} as")
                 out.append((c, t)); dec[c["id"]] = (LEFT, t)
             else: ugroups[pid] = [c, [c], r]
             continue
@@ -299,7 +307,7 @@ def build(cards, affcode, style, hard_errors, kept=lambda a, b: False, crm_profi
             review.append(c["id"])
         merged.setdefault(g[0]["id"], []).append(c["id"])
         t = (("CONFLICT (check): marked 'different people' but identical email+phone+company; " if ka else "")
-             + _merge_into(g, c, r, "same person as"))
+             + _merge_into(g, c, unconf(c, r), "same person as"))
         out.append((c, t)); dec[c["id"]] = (REVIEW if ka else LEFT, t)
     rows = [(g[0], g[2]) for g in groups]; upd = [(g[0], g[2]) for g in ugroups.values()]
     names = {canonical(h) for h in hdr if h}

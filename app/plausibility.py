@@ -100,7 +100,12 @@ def website_check(f):
     bad = [x for x in SUSPICIOUS_WEB if x in host] + [x for x in SUSPICIOUS_HOSTS if host == x or host.endswith("." + x)]
     if bad: out.append(_sug("website_suspicious", "website", f"Website “{w}” looks suspicious ({', '.join(bad)}): confirm it is really printed on the card before approving"))
     core = host.rsplit(".", 1)[0].split(".")[-1]
+    from .consistency import FREE, reg, lost_dot
+    # round 22 (datamanager r21): free-mail addresses say nothing about the website; subdomains (mail./shop.) are the same
+    # site; a lost dot is a hard check of its own (no second line)
     doms = [e.split("@", 1)[1].lower() for e in f.get("emails") or [] if "@" in e]
+    doms = [d for d in doms if d not in FREE]
+    if any(reg(d) == reg(host) or lost_dot(d, host) for d in doms): doms = []
     comp = re.sub(r"[^a-z0-9]", "", (f.get("company") or "").lower())
     if doms and not any(d == host or d.endswith("." + host) or host.endswith("." + d) for d in doms):
         words = [x for x in re.findall(r"[a-z0-9]{3,}", (f.get("company") or "").lower()) if x not in ("inc", "llc", "the", "and", "company", "corp", "group")]
@@ -110,6 +115,7 @@ def website_check(f):
 
 def _sug(code, field, text, suggestion=None): return {"code": code, "field": field, "text": text, "suggestion": suggestion}
 
+_RARE2 = set("cd cf cg cj cp cv cw cx db dc dk dp dt dx fc fd fg fh fk fm fn fp fv fw fx gc gd gf gk gp gq gv gx hc hd hf hg hk hp hv hx hz jb jc jd jf jg jh jk jl jm jn jp jq jr js jt jv jw jx jz kc kd kf kg kp kq kv kx kz mk mq mx mz pq pv px pz qa qb qc qd qe qf qg qh qi qj qk ql qm qn qo qp qr qs qt qv qw qx qy qz vb vc vd vf vg vh vj vk vm vn vp vq vt vw vx vz wq wx wz xd xj xk xr xz zb zc zd zf zg zj zk zm zn zp zq zr zs zt zv zw zx".split())
 def check(f):
     out = []; emails = [e.strip() for e in (f.get("emails") or []) if e]
     fn, ln = _a(f.get("first_name")), _a(f.get("last_name")); web = _dom(f.get("website"))
@@ -181,7 +187,7 @@ def check(f):
     # name
     for k in ("first_name", "last_name"):
         v = f.get(k) or ""
-        if re.search(r"[\d@/]|www|\.com", v, re.I): out.append(_sug("name_sanity", k, f"{k.replace('_', ' ').title()} “{v}” contains digits or web text"))
+        if re.search(r"[\d@/]|www|\.com", v, re.I): out.append(_sug("name_sanity", k, f"{k.replace('_', ' ').title()} “{v}” has a digit or a web address in it"))
         elif v and v.lower().strip(".,") in (TITLE_WORDS | COMPANY_WORDS if k == "first_name" else TITLE_WORDS - {"sales", "agent", "partner"}): out.append(_sug("name_sanity", "name", f"“{v}” looks like a title/company word, not a name"))
     if fn and fn == ln: out.append(_sug("name_sanity", "name", "First and last name are identical"))
     if f.get("first_name") and ln and len(ln) == 1: out.append(_sug("name_sanity", "name", f"Last name “{f.get('last_name')}” is a single letter"))
@@ -225,8 +231,19 @@ def check(f):
             both = [x for x in dict.fromkeys([fx, alt]) if x != w_]
             out.append(_sug("company_digits", "company", f"Company word “{w_}” mixes digits and letters (0/O, 1/I/l, 5/S): check it against the photo"
                             + (f" (it may read “{both[0]}”" + (f" or “{both[1]}”" if len(both) > 1 else "") + ")" if both else ""), c.replace(w_, fx) if fx != w_ else None)); break
+    # round 21 (newcomer/datamanager r20): gibberish company words ("Higneniscdaie CoffeeCa")
+    for w_ in re.findall(r"[A-Za-z]+", c):
+        rare = sum(1 for i in range(len(w_) - 1) if w_[i:i + 2].lower() in _RARE2)
+        if re.search(r"[a-z]{3,}[A-Z][a-z]?$", w_) or (len(w_) >= 10 and rare >= 1) or rare >= 2 or re.search(r"[bcdfghjklmnpqrstvwxz]{5,}", w_.lower()):
+            out.append(_sug("company_gibberish", "company", f"Company word “{w_}” doesn't look like a real word: check it against the photo")); break
     if not any(x["field"] == "website" and x["code"] == "email_web" for x in out): out += website_check(f)
     seen, uniq = set(), []   # round 11 (reviewer r10): each hint once
+    web_ = [x for x in out if x["field"] == "website"]   # round 20 (coordinator r19): ONE website line, not 2-3 repeats
+    if len(web_) > 1:
+        keep_ = dict(next((x for x in web_ if x.get("suggestion")), web_[0]))
+        keep_["codes"] = [x["code"] for x in web_]
+        keep_["text"] = f"Website “{f.get('website')}” looks misread: check it against the photo"
+        out = [x for x in out if x["field"] != "website"] + [keep_]
     for x in out:
         key = (x["field"], x["text"])
         if key not in seen: seen.add(key); uniq.append(x)

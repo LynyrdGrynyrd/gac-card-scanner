@@ -6,6 +6,7 @@ const csrf = () => (document.cookie.match(/(?:^|; )gac_phone_csrf=([^;]+)/) || [
 const shots = {front: null, back: null}; let sent = [], target = "front", stream = null, expires = 0;
 function msg(t, err) { $("#msg").textContent = t; $("#msg").className = err ? "err" : ""; }
 async function shrink(file, max = 2400) {         // smaller upload, faster on Wi-Fi; the computer reads up to this size anyway
+  if (/\.pdf$/i.test(file.name || "") || file.type === "application/pdf") return file;   // round 18: PDFs go as they are
   try {
     const bm = await createImageBitmap(file, {imageOrientation: "from-image"}); const s = Math.min(1, max / Math.max(bm.width, bm.height));
     if (s === 1 && file.size < 4e6) return file;
@@ -28,6 +29,9 @@ function pick(side) {
 }
 $("#bFront").onclick = () => pick("front"); $("#bBack").onclick = () => pick("back");
 $("#fFront").onchange = async e => { if (e.target.files[0]) setShot("front", await shrink(e.target.files[0])); e.target.value = ""; };
+$("#bFile").onclick = () => $("#fFile").click();   // round 18: saved photo / HEIC / PDF (no camera)
+$("#fFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  setShot("front", await shrink(f)); if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") msg(`PDF “${f.name}” chosen. Each card in it becomes a card. Tap Send.`); };
 $("#fBack").onchange = async e => { if (e.target.files[0]) setShot("back", await shrink(e.target.files[0])); e.target.value = ""; };
 
 /* ---- live preview with a light "card in frame" detector (secure context only) ---- */
@@ -73,18 +77,24 @@ $("#send").onclick = async () => {
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) { location.href = "/m"; return; }
     if (!r.ok) throw new Error(j.error || `Upload failed (${r.status}).`);
-    sent.unshift({id: j.job, state: "queued", n: j.uploads, back: !!shots.back}); setShot("front", null); setShot("back", null); target = "front";
-    msg(`Card ${j.uploads} sent${j.ahead ? ` (${j.ahead} ahead in the queue)` : ""}. Ready for the next card.`); render(); poll();
+    const ids = j.jobs && j.jobs.length ? j.jobs : [j.job];   // round 18: a PDF or a sheet of cards is several cards
+    ids.forEach((id, k) => sent.unshift({id, state: "queued", n: ids.length > 1 ? `${j.uploads}.${k + 1}` : j.uploads, back: ids.length === 1 && !!shots.back}));
+    setShot("front", null); setShot("back", null); target = "front";
+    msg(ids.length > 1 ? `Upload ${j.uploads} sent: ${ids.length} cards found. Ready for the next one.` : `Card ${j.uploads} sent${j.ahead ? ` (${j.ahead} ahead in the queue)` : ""}. Ready for the next card.`); render(); poll();
   } catch (e) { msg(e.message, true); $("#send").disabled = false; }
 };
-const WORDS = {queued: "waiting", reading: "reading…", done: "✓ in review queue", error: "⚠ not added"};
+const WORDS = {queued: "waiting", reading: "reading…", done: "✓ in review queue", error: "⚠ not added", splitting: "reading PDF…", split: "✓ PDF read", cancelled: "stopped"};
 function render() { $("#count").textContent = sent.length; $("#list").innerHTML = sent.map(s => `<li><span>Card ${s.n}${s.back ? " (front + back)" : ""}</span><span>${WORDS[s.state] || s.state}</span></li>`).join(""); }
 let pT = null;
 async function poll() {
   clearTimeout(pT);
   try { const r = await fetch("/m/api/jobs", {credentials: "same-origin"}); if (r.status === 401) return; const j = await r.json();
-    for (const x of j.jobs) { const s = sent.find(y => y.id === x.id); if (s) s.state = x.state; } render();
-    if (sent.some(s => s.state === "queued" || s.state === "reading")) pT = setTimeout(poll, 3000);
+    for (const x of j.jobs) { const s = sent.find(y => y.id === x.id); if (s) s.state = x.state; }
+    // round 20: a PDF's cards appear one line each as its pages are read (the PDF line goes once it is read)
+    for (const x of j.jobs) if (x.parent && !sent.some(y => y.id === x.id)) { const p = sent.find(y => y.id === x.parent); if (p) { p.kids = (p.kids || 0) + 1; sent.splice(sent.indexOf(p), 0, {id: x.id, state: x.state, n: `${p.n}.${p.kids}`}); } }
+    for (let i = sent.length - 1; i >= 0; i--) if (sent[i].state === "split") sent.splice(i, 1);
+    render();
+    if (sent.some(s => s.state === "queued" || s.state === "reading" || s.state === "splitting")) pT = setTimeout(poll, 3000);
   } catch { pT = setTimeout(poll, 5000); }
 }
 async function state() {

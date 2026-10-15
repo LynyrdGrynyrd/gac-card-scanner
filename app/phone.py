@@ -144,7 +144,7 @@ def _qr_svg(url):
 
 @router.post("/api/phone/start")
 def phone_start(request: Request, body: dict = Body(default={})):
-    if not allowed(): return JSONResponse({"error": "Scanning with a phone is turned off by an admin (Admin → Settings)."}, 403)
+    if not allowed(): return JSONResponse({"error": "Phone scanning is off. An admin can turn it on in Admin → Settings."}, 403)
     u = request.state.user
     from . import ui
     label = str(body.get("batch_label") or "").strip()[:60]
@@ -160,7 +160,7 @@ def phone_start(request: Request, body: dict = Body(default={})):
     try: host = start_server()
     except Exception as e:
         with _LOCK: TOKENS.pop(tok, None)
-        return JSONResponse({"error": f"Could not open the phone connection on port {PORT} ({type(e).__name__}). Is another program using it?"}, 500)
+        return JSONResponse({"error": "Couldn't start phone scanning. Restart the scanner or ask IT."}, 500)
     url = f"http://{host}:{PORT}/m?t={tok}"
     auth.alog(u["username"], f"phone mode: pairing QR shown (LAN {host}:{PORT}, {TTL // 60} min)", auth._client(request))
     v = TOKENS[tok]
@@ -279,6 +279,9 @@ async def p_upload(request: Request, image: UploadFile = File(...), back: Upload
     if bdata is not None and (not bdata or len(bdata) > ui.MAX_BYTES): return JSONResponse({"error": "Back photo is empty or larger than 25 MB."}, 422)
     if bdata:   # same shared image checks as the desktop "Add back of card" (merge R7)
         from starlette.concurrency import run_in_threadpool
+        from . import formats
+        try: bdata = await run_in_threadpool(formats.normalize_photo, bdata)
+        except formats.FormatError as e: return JSONResponse({"error": "Back photo: " + str(e)}, 422)
         problem = await run_in_threadpool(ui._check_image, bdata)
         if problem: return JSONResponse({"error": "Back photo: " + problem}, 422)
     if batch_label.strip() and ui.clean_batch_label(batch_label.strip()[:60]) != v["batch_label"]:
@@ -286,8 +289,10 @@ async def p_upload(request: Request, image: UploadFile = File(...), back: Upload
     r = await ui.enqueue_upload(data, image.filename or "phone.jpg", batch=v["batch"], batch_label=v["batch_label"] or "Phone scans",
                                 who=v["initials"], back=bdata)
     if isinstance(r, Response): return r
-    with _LOCK: v["uploads"] += 1; v["jobs"].append(r["job"])
-    return {"ok": True, "job": r["job"], "ahead": r.get("ahead", 0), "uploads": v["uploads"]}
+    ids = [j["job"] for j in r.get("jobs", [])  if j.get("job")] or [r["job"]]   # round 18: a PDF / multi-card sheet is several cards
+    with _LOCK: v["uploads"] += 1; v["jobs"].extend(ids)
+    return {"ok": True, "job": r["job"], "jobs": ids, "cards": len(ids), "ahead": r.get("ahead", 0), "uploads": v["uploads"],
+            **({"pdf": True, "pages": r.get("pages")} if r.get("pdf") else {})}
 
 @phone_app.get("/m/api/jobs")
 def p_jobs(request: Request):
@@ -295,5 +300,10 @@ def p_jobs(request: Request):
     tok, v = _session(request)
     if not v: return JSONResponse({"error": "expired", "need": "pair"}, 401)
     from . import ui
-    with ui.JLOCK: js = [{"id": j["id"], "state": j["state"], "file": j.get("file")} for j in ui.JOBS.values() if j["id"] in set(v["jobs"])]
+    with ui.JLOCK:
+        want = set(v["jobs"])
+        for j in ui.JOBS.values():   # round 20: a PDF is one background job that adds its cards as it reads each page
+            if j["id"] in want and j.get("kind") == "pdf": want |= {c["job"] for c in j.get("children") or [] if c.get("job")}
+        par = {c["job"]: j["id"] for j in ui.JOBS.values() if j.get("kind") == "pdf" for c in j.get("children") or [] if c.get("job")}
+        js = [{"id": j["id"], "state": j["state"], "file": j.get("file"), **({"parent": par[j["id"]]} if j["id"] in par else {})} for j in ui.JOBS.values() if j["id"] in want]
     return {"jobs": js}
