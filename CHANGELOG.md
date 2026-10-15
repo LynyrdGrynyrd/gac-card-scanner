@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased: audit fixes, part 2 (reliability, accuracy, speed, release)
+From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
+
+### Reading cards
+- **"John Smith, CEO"** keeps CEO as the title; **"Smith, John"** is read as John Smith; names with **van / de / la** and compound surnames ("van der Meer", "de la Cruz") stay whole.
+- **"P 330… / F 330…"** on one line: the second number is the fax, not a second work phone.
+- A **"3rd Floor" / "Suite" line** between the street and the city stays in the address.
+- **Two people on one card** ("John & Jane Smith") are flagged for review instead of producing a confident wrong name.
+- Email addresses with a label glued on ("tom@hillco.com.tel") are cleaned up; newer web endings (.tech, .legal, .law …) are recognised.
+- **QR codes:** escaped commas, folded lines and the address parts of a vCard are read correctly.
+- The **AI double-check** now looks at the cropped card (sharper text), its suggestions for phone types are no longer lost, and the warnings shown after it describe the AI's values.
+
+### Speed
+- **The review list is much faster with a real MC Trade contacts file:** about 2 seconds instead of 16-19 seconds for a 200-card batch against 10,000 contacts. The results are the same.
+- "All batches" in the review queue loads 200 cards at a time ("Load more").
+- The upload list stays fast with hundreds of photos (small thumbnails, only changed rows redrawn).
+
+### Reliability
+- **Undo** always undoes the right change, even when two people save at the same moment.
+- **Backups:** a failed backup is retried after 10 minutes (it used to wait for the next night) and shown in Admin → Settings, with the date of the last good backup.
+- **Restoring an older backup no longer brings back cards deleted on request**; they are deleted again when the scanner starts.
+- Uploading a new MC Trade template or contacts file keeps the old one until the new one is fully saved.
+- After a crash, an upload whose card had already been saved is shown as done (it used to be blamed on the file).
+- PDF and photo reading has a memory limit on Windows and Mac too (it was Linux-only).
+- Signing in: wrong passwords typed on another computer no longer lock you out. Sessions end 7 days after sign-in at the latest.
+- Two people can no longer get the same initials (a later account gets a number, e.g. AB2); this kept their batches and uploads apart.
+
+### Scan, review and export pages
+- **Session expired while uploading:** the photos wait instead of failing. Sign in again in a new tab and they continue. Failed photos get a **Retry** button.
+- **Desktop app:** the export message lists what was actually saved, and which files were cancelled in the Save dialog.
+- Desktop folder pick includes PDFs, skips files over 25 MB and stops at 500 files / 300 MB.
+- The "Export it" button and the "reload the page" link work again (they were blocked by the security policy).
+- Screen readers are no longer flooded by the AI progress line; the Undo toast stays while you're in it.
+- Phone: the camera turns off when the page is hidden; "Use camera app (sharper photo)" is always offered; the phone page always loads its newest code.
+
+### Security
+- vCard exports can't be broken by a line break hidden in a phone, email or website (a phone with a line break can't be approved).
+- Public demo: no phone pairing, no cancelling other visitors' uploads, and the card cap counts uploads still being read; a wipe also clears uploads in progress.
+- The local AI helper requires a key (and keeps fewer copies of what it read).
+
+### Install and release
+- CI tests on Windows, macOS and Linux, lints, checks dependencies for known vulnerabilities, and fails when recognition accuracy drops.
+- The dependency lock file pins every package; Docker and the start scripts use it.
+- Releases: read-only permissions except for publishing, the tag must match `VERSION`, notes come from this changelog, signing runs when certificates are configured, and the Windows upgrade removes old program files.
+
 ## Unreleased: audit fixes, part 1 (data safety)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P0 items).
 

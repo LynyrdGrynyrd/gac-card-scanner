@@ -219,7 +219,7 @@ def asset_version():
     """Round 9 (reviewer r9): short fingerprint of the page code (ui.js, ui.css, login.js). Asset URLs carry it, so a new
     version is never served from an old cache, and the API sends it so an open tab can reload itself."""
     import hashlib
-    fs = [os.path.join(STATIC, "ui", n) for n in ("ui.js", "ui.css", "login.js")]
+    fs = [os.path.join(STATIC, "ui", n) for n in ("ui.js", "ui.css", "login.js", "desktop.js")]   # audit 2026-10: desktop.js too
     key = tuple(os.path.getmtime(f) if os.path.isfile(f) else 0 for f in fs)
     if _AV.get("key") != key:
         h = hashlib.sha1()
@@ -231,7 +231,7 @@ def versioned_html(path):
     import re as _re
     from fastapi.responses import HTMLResponse
     html = open(path, encoding="utf-8").read(); v = asset_version()
-    html = _re.sub(r'(/static/ui/(?:ui\.js|ui\.css|login\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
+    html = _re.sub(r'(/static/ui/(?:ui\.js|ui\.css|login\.js|desktop\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 @router.get("/setup")
