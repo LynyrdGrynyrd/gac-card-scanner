@@ -243,7 +243,7 @@ def test_restore_script(tmp_path):
     if not os.path.exists(exe): exe = sys.executable   # CI / checkouts without a .venv
     out = subprocess.run([exe, "-c", py], cwd=root, env=env_, capture_output=True, text=True); assert out.returncode == 0, out.stderr
     bk = out.stdout.strip().splitlines()[-1]; assert bk.endswith(".tgz")
-    sqlite3.connect(db).execute("DELETE FROM cards").connection.commit()
+    con = sqlite3.connect(db); con.execute("DELETE FROM cards"); con.commit(); con.close()   # closed: Windows can't move an open file
     out = subprocess.run(["sh", os.path.join(root, "scripts", "restore_backup.sh"), bk], cwd=root, env=env_ | {"GAC_DB": str(db)}, capture_output=True, text=True)
     assert out.returncode == 0 and "restored" in out.stdout, out.stdout + out.stderr
     assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1
