@@ -3,28 +3,69 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+# Read-only by default; only the job that publishes the GitHub Release gets contents: write, and only the provenance job
+# gets the OIDC token + attestations permission.
 permissions:
-  contents: write
+  contents: read
 env:
   PYTHON_VERSION: "3.12"
+  # build tools, pinned (bump deliberately; Dependabot does not see these)
+  PYINSTALLER_VERSION: "6.22.3"
+  PYINSTALLER_HOOKS_VERSION: "2026.8"
+  PYWEBVIEW_VERSION: "6.2.1"
+  CHOCO_TESSERACT_VERSION: "5.5.3.20260724"
+  # Microsoft Edge WebView2 Evergreen bootstrapper, pinned by content. go.microsoft.com/fwlink/p/?LinkId=2124703 always
+  # serves the newest one (Microsoft replaces it often), so the build downloads this exact file and checks its SHA-256 and
+  # its Microsoft Authenticode signature. If Microsoft removes it, take the new file from the fwlink, check its signature,
+  # and update both lines (sha256sum MicrosoftEdgeWebview2Setup.exe).
+  WEBVIEW2_URL: "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/9712cd13-5db8-48a4-8252-116d1e072184/MicrosoftEdgeWebview2Setup.exe"
+  WEBVIEW2_SHA256: "baa78c71c5615533a1ee0c4d2ca2ea3fd24dae01965f9033ac530a61b5aa93a0"
 jobs:
-  windows:
-    runs-on: windows-latest
+  check:
+    # Fail early (before 3 builds) when a tag doesn't match VERSION. Manual runs (workflow_dispatch) build 0.0.0-dev.N.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "${{ env.PYTHON_VERSION }}", cache: pip }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          want="$(tr -d ' \r\n' < VERSION)"; got="${GITHUB_REF_NAME#v}"
+          if [ "$got" != "$want" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION ($want). Update VERSION and CHANGELOG.md in the tagged commit, then re-tag."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches VERSION $want"
+
+  windows:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      # signing runs only when the secrets exist (docs/SIGNING.md); otherwise the installer stays unsigned
+      HAS_WIN_PFX: ${{ secrets.WIN_CERT_PFX_BASE64 != '' && secrets.WIN_CERT_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
       - name: Version
         shell: bash
         run: |
           V="${GITHUB_REF_NAME#v}"; [[ "$GITHUB_REF_TYPE" == tag ]] || V="0.0.0-dev.${GITHUB_RUN_NUMBER}"
-          echo "GAC_VERSION=$V" >> $GITHUB_ENV; echo "$V" > VERSION; git rev-parse --short HEAD > COMMIT   # footer "version X (commit)", not "(unknown)"
+          echo "GAC_VERSION=$V" >> "$GITHUB_ENV"; echo "$V" > VERSION; git rev-parse --short HEAD > COMMIT   # footer "version X (commit)", not "(unknown)"
       - name: Python deps
-        run: pip install -r requirements.lock.txt pyinstaller pywebview
+        run: pip install -r requirements.lock.txt "pyinstaller==${{ env.PYINSTALLER_VERSION }}" "pyinstaller-hooks-contrib==${{ env.PYINSTALLER_HOOKS_VERSION }}" "pywebview==${{ env.PYWEBVIEW_VERSION }}"
       - name: Tesseract (UB-Mannheim build via Chocolatey) -> packaging/build/tesseract
         shell: pwsh
         run: |
-          choco install tesseract -y --no-progress
+          choco install tesseract --version "$env:CHOCO_TESSERACT_VERSION" -y --no-progress
           $src = "C:\Program Files\Tesseract-OCR"
           if (!(Test-Path "$src\tesseract.exe")) { throw "tesseract not installed" }
           $dst = "packaging\build\tesseract"; New-Item -ItemType Directory -Force $dst | Out-Null
@@ -35,11 +76,25 @@ jobs:
           & "$dst\tesseract.exe" --version
       - name: PyInstaller
         run: pyinstaller packaging/gac.spec --noconfirm
+      - name: Sign the app executable (PFX)
+        if: env.HAS_WIN_PFX == 'true'
+        shell: pwsh
+        env:
+          WIN_CERT_PFX_BASE64: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: ./packaging/windows/sign.ps1 -Files "dist\GAC Card Scanner\GAC Card Scanner.exe"
       - name: Smoke test (bundle)
         run: python packaging/smoke_test.py "dist/GAC Card Scanner/GAC Card Scanner.exe"
-      - name: WebView2 bootstrapper
+      - name: WebView2 bootstrapper (pinned, SHA-256 + signature checked)
         shell: pwsh
-        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile packaging\windows\MicrosoftEdgeWebview2Setup.exe
+        run: |
+          $out = "packaging\windows\MicrosoftEdgeWebview2Setup.exe"
+          Invoke-WebRequest $env:WEBVIEW2_URL -OutFile $out
+          $h = (Get-FileHash $out -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:WEBVIEW2_SHA256) { throw "WebView2 bootstrapper SHA-256 mismatch: got $h, expected $env:WEBVIEW2_SHA256 (see the comment at WEBVIEW2_URL in release.yml)" }
+          $sig = Get-AuthenticodeSignature $out
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw "WebView2 bootstrapper signature: $($sig.Status) $($sig.SignerCertificate.Subject)" }
+          Write-Host "WebView2 bootstrapper OK: $h, signed by $($sig.SignerCertificate.Subject)"
       - name: Inno Setup installer
         shell: pwsh
         run: |
@@ -47,6 +102,13 @@ jobs:
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source; if (!$iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
           & $iscc "/DMyAppVersion=$env:GAC_VERSION" packaging\windows\installer.iss
           if ($LASTEXITCODE) { throw "iscc failed" }
+      - name: Sign the installer (PFX)
+        if: env.HAS_WIN_PFX == 'true'
+        shell: pwsh
+        env:
+          WIN_CERT_PFX_BASE64: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: ./packaging/windows/sign.ps1 -Files (Get-ChildItem dist\GAC-Card-Scanner-Setup-*.exe).FullName
       - name: Installer smoke test (silent install, run, uninstall)
         shell: pwsh
         run: |
@@ -55,12 +117,14 @@ jobs:
           python packaging/smoke_test.py "$env:RUNNER_TEMP\gacinst\GAC Card Scanner.exe"
           if ($LASTEXITCODE) { throw "installed app smoke test failed" }
           Start-Process "$env:RUNNER_TEMP\gacinst\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows
+          name: installer-windows
           path: dist/GAC-Card-Scanner-Setup-*.exe
+          if-no-files-found: error
 
   macos:
+    needs: check
     strategy:
       fail-fast: false
       matrix:
@@ -68,53 +132,133 @@ jobs:
           - { runner: macos-14, arch: arm64 }
           - { runner: macos-15-intel, arch: x86_64 }
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      # Developer ID signing runs only when the secrets exist (docs/SIGNING.md); otherwise the app stays ad-hoc signed.
+      # Notarization additionally needs APPLE_API_KEY_BASE64 / APPLE_API_KEY_ID / APPLE_API_ISSUER.
+      HAS_MAC_SIGNING: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_SIGN_IDENTITY != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Version
         run: |
           V="${GITHUB_REF_NAME#v}"; [[ "$GITHUB_REF_TYPE" == tag ]] || V="0.0.0-dev.${GITHUB_RUN_NUMBER}"
-          echo "GAC_VERSION=$V" >> $GITHUB_ENV; echo "$V" > VERSION; git rev-parse --short HEAD > COMMIT   # footer "version X (commit)", not "(unknown)"
+          echo "GAC_VERSION=$V" >> "$GITHUB_ENV"; echo "$V" > VERSION; git rev-parse --short HEAD > COMMIT   # footer "version X (commit)", not "(unknown)"
       - name: Python deps
         run: |
-          cp requirements.lock.txt /tmp/req.txt
+          cp requirements.lock.txt "$RUNNER_TEMP/req.txt"
           # onnxruntime stopped shipping Intel-mac wheels after 1.23
-          if [ "${{ matrix.arch }}" = x86_64 ]; then sed -i '' 's/^onnxruntime==.*/onnxruntime==1.23.2/' /tmp/req.txt; fi
-          pip install -r /tmp/req.txt pyinstaller pywebview
+          if [ "${{ matrix.arch }}" = x86_64 ]; then sed -i '' 's/^onnxruntime==.*/onnxruntime==1.23.2/' "$RUNNER_TEMP/req.txt"; fi
+          pip install -r "$RUNNER_TEMP/req.txt" "pyinstaller==$PYINSTALLER_VERSION" "pyinstaller-hooks-contrib==$PYINSTALLER_HOOKS_VERSION" "pywebview==$PYWEBVIEW_VERSION"
       - name: Tesseract (Homebrew, dylibs relocated) -> packaging/build/tesseract
         run: bash packaging/macos/bundle_tesseract.sh
       - name: PyInstaller
         run: pyinstaller packaging/gac.spec --noconfirm
-      - name: Ad-hoc sign
+      - name: Ad-hoc sign (replaced by Developer ID below when the secrets exist)
         run: codesign --force --deep --sign - "dist/GAC Card Scanner.app"
+      - name: Developer ID sign the app
+        if: env.HAS_MAC_SIGNING == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: bash packaging/macos/sign_notarize.sh --sign-only "dist/GAC Card Scanner.app"
+      - name: Minimum macOS version of the main executable (information)
+        run: otool -l "dist/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner" | grep -A3 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX" | grep -E "minos|version" || true
       - name: Smoke test (bundle)
         run: python packaging/smoke_test.py "dist/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner"
       - name: DMG
         run: bash packaging/macos/make_dmg.sh "dist/GAC Card Scanner.app" "dist/GAC-Card-Scanner-${GAC_VERSION}-macos-${{ matrix.arch }}.dmg"
+      - name: Sign + notarize + staple the DMG
+        if: env.HAS_MAC_SIGNING == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bash packaging/macos/sign_notarize.sh "dist/GAC Card Scanner.app" "dist/GAC-Card-Scanner-${GAC_VERSION}-macos-${{ matrix.arch }}.dmg"
       - name: DMG smoke test (mount, run from the image)
         run: |
           DMG=$(ls dist/*.dmg); MNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}')
           python packaging/smoke_test.py "$MNT/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner"; rc=$?
           hdiutil detach "$MNT"; exit $rc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: macos-${{ matrix.arch }}
+          name: installer-macos-${{ matrix.arch }}
           path: dist/*.dmg
+          if-no-files-found: error
 
-  release:
+  provenance:
+    # SLSA build provenance for every installer (verify: gh attestation verify <file> --repo LynyrdGrynyrd/gac-card-scanner).
     needs: [windows, macos]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/download-artifact@v4
-        with: { path: out, merge-multiple: true }
-      - run: ls -la out && (cd out && sha256sum * > SHA256SUMS.txt) && cat out/SHA256SUMS.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          path: out
+          merge-multiple: true
+      - name: Attest build provenance
+        # attestations need a public repo (or GitHub Enterprise Cloud for a private one); never block a release on it
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "out/*"
+
+  release:
+    needs: [windows, macos, provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          path: out
+          merge-multiple: true
+      - run: ls -la out && (cd out && sha256sum -- * > SHA256SUMS.txt) && cat out/SHA256SUMS.txt
+      - name: Release notes (CHANGELOG.md section for this version + install steps)
+        run: |
+          python3 - <<'PY'
+          import os, re
+          v = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          install = ("Desktop installers. Windows: run GAC-Card-Scanner-Setup-*.exe (SmartScreen: More info > Run anyway). "
+                     "macOS: open the .dmg for your Mac (Apple silicon = arm64, Intel = x86_64), drag to Applications, then "
+                     "right-click > Open the first time. See the README for details. SHA256SUMS.txt lists the file checksums.")
+          try: text = open("CHANGELOG.md", encoding="utf-8").read()
+          except OSError: text = ""
+          m = re.search(r"^## v?" + re.escape(v) + r"\b[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+          section = m.group(1).strip() if m else ""
+          if not section: print(f"::warning::No '## v{v}' section in CHANGELOG.md: using the standard notes only")
+          open(os.path.join(os.environ["RUNNER_TEMP"], "notes.md"), "w", encoding="utf-8").write((section + "\n\n---\n" if section else "") + install + "\n")
+          PY
+          cat "$RUNNER_TEMP/notes.md"
       - name: GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --title "GAC Card Scanner $GITHUB_REF_NAME" \
-            --notes "Desktop installers. Windows: run GAC-Card-Scanner-Setup-*.exe (SmartScreen: More info > Run anyway). macOS: open the .dmg for your Mac (Apple silicon = arm64, Intel = x86_64), drag to Applications, then right-click > Open the first time. See the README for details."
-      - uses: actions/upload-artifact@v4
+            --notes-file "$RUNNER_TEMP/notes.md"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: "!startsWith(github.ref, 'refs/tags/v')"
-        with: { name: all-installers, path: out }
+        with:
+          name: all-installers
+          path: out
