@@ -36,14 +36,16 @@ LOW = 0.6   # the review screen's "needs attention" threshold (bench/eval_bench.
 def default_out(data_dir):
     """The app's correction-examples folder for this data folder (app/ui.py CORR), so retention covers the copies."""
     if os.environ.get("CORRECTIONS_DIR"): return os.environ["CORRECTIONS_DIR"]
-    if os.path.abspath(data_dir) == os.path.join(ROOT, "data"): return os.path.join(ROOT, "bench", "corrections")
+    if os.path.normcase(os.path.abspath(data_dir)) == os.path.normcase(os.path.join(ROOT, "data")): return os.path.join(ROOT, "bench", "corrections")
     return os.path.join(data_dir, "corrections")
 
 
 def inside_repo_unignored(path):
     """True when path is inside this git checkout and git would track files there (real cards must never be committed)."""
     p = os.path.abspath(path)
-    if os.path.commonpath([p, ROOT]) != ROOT: return False
+    try:
+        if os.path.normcase(os.path.commonpath([p, ROOT])) != os.path.normcase(ROOT): return False
+    except ValueError: return False   # Windows: another drive than the checkout
     probe = os.path.join(os.path.relpath(p, ROOT), "probe.jpg")
     try: r = subprocess.run(["git", "-C", ROOT, "check-ignore", "-q", probe], capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError): return True   # can't ask git: assume tracked
@@ -176,7 +178,7 @@ def main(argv=None):
     os.replace(gp + ".tmp", gp)
     with open(os.path.join(out, "field_report.json"), "w", encoding="utf-8") as fh: json.dump({"made": time.time(), "cards": len(recs), "fields": stats}, fh, indent=1)
     print(f"\nWrote {len(recs)} card(s) to {out}\nScore the current code on them:  python bench/eval_bench.py \"{gp}\" \"{out}\" --show")
-    if os.path.abspath(out) != os.path.abspath(default_out(a.data_dir)):
+    if os.path.normcase(out) != os.path.normcase(os.path.abspath(default_out(a.data_dir))):
         print("NOTE: this folder is outside the app's retention and delete-on-request: delete it yourself when you are done.")
     return 0
 
