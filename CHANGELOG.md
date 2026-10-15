@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased: audit fixes, part 3 (structure)
+From the code audit in `docs/AUDIT-2026-10-15.md` (P2 items). Mostly invisible to users; it makes the code easier and safer to change.
+
+- **A save is all-or-nothing.** If something fails half-way through saving a card (an approve with a merge, a bulk action, an AI accept), nothing of it is kept, instead of half of it.
+- **`/api/scan`** (scripts on the scanner computer) records cards like the Scan page does, so the duplicate-photo check sees them.
+- Starting the app in a script or test no longer starts the AI helper or wipes the public demo; that happens only when the scanner is actually served.
+- **Code layout:**
+  - `app/ui.py` (3,700 lines) is split into `pages`, `privacy`, `exporting`, `audit_log` and `admin_files`. `ui.<name>` still works.
+  - `ui.js` (1,500 lines) is split into ES modules under `app/static/ui/{core,ui,views}`, with no build step.
+  - Dead code removed; `tests/unit/README.md` maps features to test files.
+
 ## Unreleased: audit fixes, part 2 (reliability, accuracy, speed, release)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
 
