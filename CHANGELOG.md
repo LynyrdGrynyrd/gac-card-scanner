@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased: accuracy on real cards
+- **`bench/extract_eval_set.py`** turns the pilot's approved cards into a labelled test set for `bench/eval_bench.py` and prints, per field, how often reviewers had to fix what the scan read and whether the confidence score warned about it. It reads the database only, keeps cards approved unchanged (otherwise the set holds only failures), tags bulk-approved cards as weaker labels, and writes to the same folder as "Keep corrected cards as test examples", so photo retention and delete-on-request also clean its copies.
+
 ## Unreleased: audit fixes, part 3 (structure)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P2 items). Mostly invisible to users; it makes the code easier and safer to change.
 

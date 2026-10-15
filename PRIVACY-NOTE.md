@@ -26,7 +26,7 @@ Each person should use their own login and their own browser (or browser profile
 | "Undo" copies of card details | Cleared after **2 days** |
 | Typed contact details | Kept, because they become part of the Chamber's contact records. Old batches can be archived (hidden), or a card can be **deleted permanently** |
 | Audit log and sign-in records | Kept for accountability. After a removal request the card's audit rows stay (who, what action, when, card number) but the personal details in them are removed |
-| Test examples (`bench/corrections`) | **Off by default.** If an admin turns on "Keep corrected cards as test examples", a copy of the photo and approved details of each card a person corrected is saved there to measure accuracy. Those photos follow the card-photo period (30 days), and are deleted with the card on a removal request |
+| Test examples (`bench/corrections`) | **Off by default.** If an admin turns on "Keep corrected cards as test examples", a copy of the photo and approved details of each card a person corrected is saved there to measure accuracy. Those photos follow the card-photo period (30 days), and are deleted with the card on a removal request. A developer can also fill this folder from already-approved cards with `bench/extract_eval_set.py` (run by hand on the scanner computer); the same period and removal rules apply |
 
 ## Exports
 Exported spreadsheets go to the staff member's **Downloads** folder. Treat them like any member list: don't email them outside the Chamber, and **delete them once they are imported into MC Trade**. Rows that were "approved anyway" are marked so they can be checked first.

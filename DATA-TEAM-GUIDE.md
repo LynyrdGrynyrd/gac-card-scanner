@@ -97,7 +97,7 @@ Also available: **Spreadsheet (CSV)**, with reviewer columns, and **Contacts (vC
 - **Admin → Privacy & retention:** card photos are deleted automatically after **30 days** by default (you can change this). Stored export copies follow their own setting. The typed contact details stay. **Delete old photos now** runs the cleanup immediately; it also runs every hour.
 - **Archive** a batch (admins: Review queue → choose the batch → *Archive this batch*) to hide test or finished batches. Archived cards are hidden, not deleted; *Show archived cards* brings them back. Admins also have **Clear all test data…**.
 - **Admin → Audit log:** every sign-in, failed sign-in, decision, edit, merge, export, re-download, undo, setting change (only what changed, e.g. "AI double-check: on → off"), photo deletion and permanent deletion, with who and when. Re-downloads and deletions carry the card numbers, so searching `#17` finds them. After a removal request the card's rows stay, with the personal details removed. Search it, or **Download as CSV**.
-- **Keep corrected cards as test examples** is **off** by default; turning it on keeps a copy of corrected card photos in bench/corrections (see the Privacy note).
+- **Keep corrected cards as test examples** is **off** by default; turning it on keeps a copy of corrected card photos in bench/corrections (see the Privacy note). To measure accuracy on cards approved before it was on, a developer can run `bench/extract_eval_set.py` on the scanner computer (README → *Accuracy on your own cards*); its copies follow the same deletion rules.
 
 ![Audit log](app/static/ui/help-img/26_admin_audit.webp)
 
