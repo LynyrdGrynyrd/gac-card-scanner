@@ -7,7 +7,10 @@ from test_app import mk
 
 
 def _approved(ui, store, batch):
-    cid = mk(ui, store, first_name="Exp", last_name=uuid.uuid4().hex[:6].capitalize(), emails=[f"{uuid.uuid4().hex[:8]}@acme.com"])
+    # letters only: a surname of digits ("317317") is dropped by the look-alike check's name normalising, so two such cards
+    # both read as "Exp" and the export was refused as a duplicate (flaky, ~2% per pair)
+    last = uuid.uuid4().hex[:8].translate(str.maketrans("0123456789", "ghijklmnop")).capitalize()
+    cid = mk(ui, store, first_name="Exp", last_name=last, emails=[f"{uuid.uuid4().hex[:8]}@acme.com"])
     ui.set_meta(cid, batch=batch, batch_label=batch); store.update(cid, status="approved", reviewer="AA"); return cid
 
 
