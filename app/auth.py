@@ -1,6 +1,6 @@
 """Local logins for the pilot: named reviewers, PBKDF2-hashed passwords, admin role, cookie sessions.
 No external identity provider; everything lives in the same SQLite DB (tables users, sessions, settings, auth_log)."""
-import os, re, time, hmac, hashlib, secrets, json, threading
+import os, re, time, hmac, hashlib, secrets, threading
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from . import store, demo

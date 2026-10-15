@@ -4,7 +4,7 @@ A REAL list exists only when an admin uploaded GAC's MC Trade contacts export (A
 data/mctrade_contacts.<ext>, or MCTRADE_CRM_EXPORT points at one. Without it the scanner falls back to SAMPLE data
 (data/existing_contacts.csv, 5 fake rows from the test fixtures): it may show 'possible existing member' hints, labelled
 SAMPLE, but it NEVER assigns a Profile ID from it (mctrade-r4 R4-2: sample IDs would overwrite real profiles)."""
-import os, csv, io, zipfile, importlib.util, contextlib, sys, threading
+import os, csv, io, zipfile, importlib.util, contextlib, threading
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 from . import paths

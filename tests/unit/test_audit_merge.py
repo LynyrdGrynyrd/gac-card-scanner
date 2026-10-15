@@ -37,7 +37,8 @@ def test_scan_semaphore_caps_concurrency(env, monkeypatch):
 def test_api_scan_uses_limiter():
     import inspect
     from app import main
-    assert "scan_limited" in inspect.getsource(main._ingest)
+    from app import ui
+    assert "_ui.ingest(" in inspect.getsource(main._ingest) and "scan_limited(" in inspect.getsource(ui.ingest)   # audit 2026-10 P2: one ingest path
 
 def test_name_lexicon_present_and_declared():
     from app import parser

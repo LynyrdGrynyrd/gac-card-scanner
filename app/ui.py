@@ -2,11 +2,11 @@
 so every path goes through the same checks). /api/scan contract untouched.
 UI state (batches, hashes, archive, audit history, duplicate decisions, undo snapshots, exports, field sources)
 lives in extra tables in the same SQLite DB so store.py stays unchanged."""
-import asyncio, copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, sqlite3, html as _html
+import asyncio, copy, io, os, re, json, time, uuid, hashlib, datetime, threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import HTMLResponse, FileResponse, Response, RedirectResponse, JSONResponse
-from . import store, export, mctrade_sync, auth, crm_source
+from fastapi.responses import Response, JSONResponse
+from . import store, mctrade_sync, auth, crm_source
 
 router = APIRouter()
 
@@ -176,7 +176,6 @@ def email_syntax(e):
     tld = labels[-1]
     if not (tld.isalpha() and len(tld) >= 2) and not tld.lower().startswith("xn--"): return "the domain ending (.com, .org …) is not valid"
     return None
-ANY_EMAIL = re.compile(r"^\w(?:[\w.%+'-]*[\w%'-])?@\w(?:[\w.-]*\w)?$")   # kept for old callers; hard_errors uses email_syntax
 ZW = re.compile("[\u200b-\u200f\u2060-\u2064\ufeff\u202a-\u202e\u00ad]")
 def clean_note(n):
     """Round 10 (skeptic R9-3): invisible characters are removed from the note, and a note that a spreadsheet could run as
@@ -276,7 +275,6 @@ def garbled_errors(f):
             if m: err[k] = f"Address “{v[:100]}” has “{m.group(0)}” in it: a misread. Check the photo and fix it."
     if "company" not in err and f.get("company"):   # round 22 (newcomer r21): a gibberish company ('Higneniscdaie CoffeeCa') blocks
         try:
-            from . import plausibility as _pl
             if company_gibberish(f.get("company")):   # round 23 (r22 reviewer/newcomer/datamanager): 'CoffeeCo.' is run-together, not gibberish
                 err["company"] = f"Company “{f.get('company')}” looks misread. Check the photo."
         except Exception: pass
@@ -298,7 +296,6 @@ def garbled_errors(f):
         err["website"] = f"Website “{w}” looks misread. Check the photo and fix it, or clear it."
     elif w:
         d = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; d = d[4:] if d.startswith("www.") else d
-        from difflib import SequenceMatcher as _SMg
         for e in ems:
             ed = str(e).lower().rsplit("@", 1)[-1].strip()
             if ed == d or ed.endswith("." + d) or d.endswith("." + ed): continue
@@ -867,7 +864,7 @@ QR_KEYS = ("first_name", "last_name", "title", "company", "department", "emails"
 class _Cancelled(Exception): pass
 def ingest(data, engine, ext, jid=None, meta_kw=None):
     """Image -> card using the shared pipeline (QR/vCard decode + OCR + parser). Returns (card_id, field_sources)."""
-    from . import pipeline, qr
+    from . import qr
     name = uuid.uuid4().hex + ext
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
     r = scan_limited(data, None if engine in (None, "", "auto", "standard", "tesseract") else engine, use_vlm=False, **({"key": jid} if jid else {}))
@@ -1439,7 +1436,7 @@ def ai_check_now(cid: CardId, request: Request):
 
 @router.post("/api/cards/{cid}/ai-decide")
 def ai_decide(cid: CardId, request: Request, body: dict = Body(...)):
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _ai_decide(cid, request, body)
         finally: _seal()
 def _ai_decide(cid, request, body):
@@ -1539,7 +1536,7 @@ def confirm_correct(cid: CardId, request: Request, body: dict = Body(...)):
     says 'This is correct' for one field: that exact saved value is accepted from then on, and the audit says who did it."""
     # Round 22 (skeptic r21 M1/M2, mctrade-admin r21 M1/M2): body {field, value, version}; archived cards and stale versions
     # are refused; the exact value the reviewer saw must still be the saved one; admin-only for email/website/address.
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         c = store.get(cid)
         if not c: return JSONResponse({"error": "Card not found."}, 404)
         if meta(cid).get("archived"): return _archived_409(cid)
@@ -1721,7 +1718,7 @@ def _archived_409(cid):
 def update(cid: CardId, request: Request, body: dict = Body(...)):
     """body: card_id, version (required), fields?, status?, note?, override_reason?, confirm_redecide?, dup_resolution?,
        merge_into?, crm_action?, confirm_cross_batch?. The reviewer is always the signed-in user."""
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _update(cid, request, body, internal=False)
         finally: _seal()
 
@@ -1757,9 +1754,6 @@ def _update(cid, request, body, internal=False):
     if not internal:
         vp = _version_problem(c, body.get("version"), cid)
         if vp is not None: return vp
-        _ver_seen = body.get("version")   # round 15 (reviewer r14): remember what we checked; never succeed if it drifted
-    else:
-        _ver_seen = None
     ka = body.get("keep_apart")   # skeptic R9-5: keep_apart:true used to crash (500)
     if ka not in (None, False, "", "all") and not (isinstance(ka, list) and all(str(x).isdigit() for x in ka)):
         return JSONResponse({"error": "keep_apart must be \"all\" or a list of card numbers.", "need": "fix"}, 422)
@@ -1914,11 +1908,7 @@ def _update(cid, request, body, internal=False):
     if st and st != c["status"]:
         log(cid, rv, "decision", c["status"], st, {"override": body.get("override_reason")} if body.get("override_reason") else None)
     if not internal: _ai_settle(cid, saved=True)
-    out = card(cid)
-    # round 15 (reviewer r14): a stale version must never report success (even if WRITE_LOCK raced)
-    if not internal and _ver_seen is not None and body.get("version") != _ver_seen:
-        return JSONResponse({"error": f"Card #{cid} changed since you opened it. Nothing was saved. Reload it, check, and save again.",
-                             "need": "stale", "version": card_version(store.get(cid) or c)}, 409)
+    out = card(cid)   # (audit 2026-10 P2: a never-firing "stale after save" check was removed; the check under WRITE_LOCK above is the real one)
     if not st and changes: out["save_problems"] = validate(f) | hard_errors(f)   # saved, but tell the person what still blocks approval
     if moved: out["notice"] = "This approved card now has problems, so it was moved back to pending: " + "; ".join(validate(f).values())
     return out
@@ -2169,7 +2159,7 @@ def attach_back(cid, data, ext, initials, confirm_other_person=False, user=None)
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
     # audit 2026-10: a replaced back photo is no longer deleted here (Undo restores the old one and needs the file); it is
     # unreferenced from now on, so the retention clean-up removes it with its thumbnails as an orphan
-    with WRITE_LOCK: return _attach_back_write(cid, c, r, name, initials, user)
+    with WRITE_LOCK, store.tx(): return _attach_back_write(cid, c, r, name, initials, user)
 
 from . import parser as _P
 SITE_TLDS = _P.KNOWN_TLDS | set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
@@ -2244,7 +2234,7 @@ def _other_person(f, b):
 def bulk(request: Request, body: dict = Body(...)):
     for k_ in ("confirm_cross_batch", "confirm_redecide"):   # round 11 (skeptic R10-2): only a real true confirms ("no" is not yes)
         if k_ in body: body[k_] = body[k_] is True
-    with WRITE_LOCK:
+    with WRITE_LOCK, store.tx():
         try: return _bulk(request, body)
         finally: _seal()
 def _bulk(request, body):
@@ -2331,7 +2321,7 @@ def archive(request: Request, body: dict = Body(...)):
         ids = [c["id"] for c in store.all_(None)]
     elif b == "__none__": ids = [r[0] for r in db().execute("SELECT c.id FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL")]
     else: ids = [r[0] for r in db().execute("SELECT card_id FROM card_meta WHERE batch=?", (b,))]
-    with WRITE_LOCK:   # audit 2026-10 P1: like every other card change (snapshot, write, seal as one step)
+    with WRITE_LOCK, store.tx():   # audit 2026-10 P1: like every other card change (snapshot, write, seal as one step)
         ids = [i for i in ids if not meta(i).get("archived")]
         try:
             if ids: snapshot(ids, user, f"Archive {len(ids)} {_s(len(ids), 'card')}")
@@ -2490,26 +2480,26 @@ def start_workers():
 # ---------------------------------------------------------------- audit 2026-10 P2: modules split out of this file
 # They are imported last (they use this module's names as U.<name> at call time) and their names are re-exported here,
 # so `from app import ui; ui.<name>` keeps working everywhere.
-from . import pages as _pages  # noqa: E402
+from . import pages as _pages  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .pages import (  # noqa: E402,F401
     PLACEHOLDER, THUMBS, THUMB_SIZES, _thumb, app_alias, drop_thumbs, legacy_card, legacy_card_post, legacy_csv,
     legacy_home, legacy_queue, legacy_scan, legacy_sync, legacy_vcf, legacy_xlsx, privacy, remove_photo,
     strip_admin, ui)
-from . import privacy as _privacy  # noqa: E402
+from . import privacy as _privacy  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .privacy import (  # noqa: E402,F401
     JOB_KEEP_S, TOMBSTONES, _add_tombstone, _hard_delete, _redact, _retention_loop, _tombstones, _unmerge, _vals,
     apply_tombstones, hard_delete, prune_memory, purge, purge_preview, run_purge)
-from . import exporting as _exporting  # noqa: E402
+from . import exporting as _exporting  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .exporting import (  # noqa: E402,F401
     ADMIN_ONLY_FILTERS, AUDIT, COMPANION, EXPORT_BUSY, FILTERS, HANDLE, MORE, MT, NUMBERISH, PLAINNUM,
     REVIEWER_FILTERS, SUSPECT_WEB, XCOLS, _EXL, _bname, _do_export_real, _export_claim, _export_release,
     _export_set, _filter_refused, _fname, _note, _slug, _stale_export, _wdom, _when, build_export, comp_name,
     crm_look, do_export, exact_email_profile, export_again, export_check, export_companion, export_history,
     export_versions, ids3, plural, readme_totals, safe_cell, same_names, strict_profile_id, website_warnings)
-from . import audit_log as _audit_log  # noqa: E402
+from . import audit_log as _audit_log  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .audit_log import (  # noqa: E402,F401
     NAMES, _audit_text, _fmtv, audit)
-from . import admin_files as _admin_files  # noqa: E402
+from . import admin_files as _admin_files  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .admin_files import (  # noqa: E402,F401
     TPL_BAKS, _check_contacts, _check_template, _last_admin_change, _refused, _rotate_bak, _safe_fname,
     contacts_info, contacts_version, export_dryrun, file_version, mctrade_source, remove_contacts, revert_template,

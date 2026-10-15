@@ -83,15 +83,3 @@ def to_mctrade_profile(f):
             "OrgName": f["company"], "IndEmail": (f["emails"] or [""])[0], "IndPhone": ph.get("work",""),
             "IndCellPhone": ph.get("mobile",""), "IndFax": ph.get("fax",""), "WebAddress": f["website"],
             "Address": f["address"], "AffCode1": "CardScan-Pilot"}
-
-def plan(card):
-    m = match(card["fields"])
-    top = m[0] if m else None
-    if top and top["score"] >= 0.6:
-        action = {"op": "UPDATE (would PATCH/PUT profile)", "method": "PUT", "path": f"<tenant>/api/v1/profiles/{top['profile_id']}  [UNVERIFIED]"}
-    elif top:
-        action = {"op": "REVIEW: possible duplicate, no auto-write", "method": None, "path": None}
-    else:
-        action = {"op": "CREATE (would POST new individual profile)", "method": "POST", "path": "<tenant>/api/v1/profiles  [UNVERIFIED]"}
-    return {"dry_run": True, "card_id": card["id"], "status": card["status"], "eligible": card["status"] == "approved",
-            "matches": m[:3], "action": action, "payload": to_mctrade_profile(card["fields"])}
