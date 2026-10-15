@@ -50,7 +50,7 @@
       const files = Array.isArray(r) ? r : (r && r.files) || [];
       // audit 2026-10: the pick is read into memory, so the launcher caps it; say what was left out
       const left = [r && r.skipped_big ? `${r.skipped_big} file${r.skipped_big === 1 ? "" : "s"} over ${r.max_file_mb || 25} MB skipped.` : "",
-                    r && r.capped ? `Only the first ${files.length} files (up to ${r.max_mb || 300} MB) were added: pick a smaller folder, or fewer photos, for the rest.` : ""].filter(Boolean).join(" ");
+                    r && r.capped ? `Only the first ${files.length} file${files.length === 1 ? "" : "s"} (up to ${r.max_mb || 300} MB) ${files.length === 1 ? "was" : "were"} added: pick a smaller folder, or fewer photos, for the rest.` : ""].filter(Boolean).join(" ");
       if (!files.length) { if (left) say(left, 9000); return; }
       const list = files.map(f => new File([unb64(f.b64)], f.name, {type: f.type}));
       if (typeof enqueue === "function") { await enqueue(list); if (left) say(left, 9000); }
