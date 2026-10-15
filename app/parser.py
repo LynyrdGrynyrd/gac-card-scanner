@@ -26,6 +26,7 @@ NEW_TLDS = ("tech legal law pro dev me tv cc xyz online site store shop club liv
             "farm garden auto cars repair plumbing tools supply equipment industries engineering fitness salon spa beauty coach expert email "
             "news blog press name mobi city ventures holdings enterprises international inc llc ltd eu fi pl pt ru gr tr il ae za sg my ph "
             "cz hu ro lu cl ar pe").split()
+KNOWN_TLDS = set(TLD[3:-1].split("|")) | set(NEW_TLDS)   # one list for ui.SITE_TLDS to share
 NEW_TLD = r"(?:" + "|".join(sorted(NEW_TLDS, key=len, reverse=True)) + ")"
 URL = re.compile(rf"\b(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:{TLD}|{NEW_TLD})(?:\.[a-z]{{2}})?(?:/[^\s]*)?(?![\w@])", re.I)
 SOCIAL = re.compile(r"(?:linkedin\.com/(?:in|company)/[\w-]+|(?:twitter|x)\.com/\w+|instagram\.com/[\w.]+|facebook\.com/[\w.]+|myspace\.com/[\w.]+|(?:twitter|instagram|ig|x)\s*:\s*@\w+|(?<![\w.])@[A-Za-z_]\w{2,}(?![\w.]*\.[a-z]))", re.I)
@@ -282,7 +283,7 @@ def parse(text: str, meta=None) -> dict:
         if any(len(x) == 1 for x in (w[0], w[-1])): continue
         s_ = 0.0
         emailhit = any(len(x) >= 3 and x.lower().strip(".") in lc for lc in locals_ for x in (w[0], w[-1]))
-        if not emailhit and not all(x[0].isupper() or p_ for x, p_ in zip(w, prt)): continue
+        if not emailhit and not all(x[0].isupper() or p_ for x, p_ in zip(w, prt, strict=True)): continue
         if emailhit: s_ += 3
         if _first_name(w[0].strip(".")): s_ += 2.5
         elif _first_name(w[-1]): s_ += 0.5

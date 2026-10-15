@@ -68,6 +68,10 @@ def test_website_new_gtlds():
     assert _p("Ann Law", "Attorney", "annlaw.legal")["website"] == "annlaw.legal"
 
 
+def test_known_tlds_cover_classic_and_new():
+    assert {"com", "co", "uk", "tech", "legal", "law"} <= P.KNOWN_TLDS
+
+
 def test_website_not_from_plain_words():
     f = _p("Mary Jones", "Sales Manager", "Acme Widgets Inc", "mjones@acmewidgets.com", "Dr. No.Kidding")
     assert f["website"] == ""
