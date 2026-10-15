@@ -48,7 +48,8 @@ def _prep(data: bytes, max_side: int, crop: bool):
     if crop:   # send only the card (perspective crop already used by the OCR pass) instead of the whole photo
         try:
             from . import ocr
-            img, _ = ocr.crop_card(img)
+            c, found = ocr.crop_card(img)
+            if found and 1.25 <= max(c.size) / min(c.size) <= 2.2: img = c   # audit 2026-10: only a card-shaped crop (not a logo box)
         except Exception: pass
     img.thumbnail((max_side, max_side)); return img
 
@@ -79,7 +80,7 @@ def _prompt_for(keys, ocr_text, hints=""):
 
 def extract(data: bytes, ocr_text: str = "", max_side=None, timeout=int(os.getenv("VLM_TIMEOUT", "240")), keys=None, hints=""):
     LAST.clear()
-    img = _prep(data, max_side or MAX_SIDE, os.getenv("VLM_CROP", "0") == "1")
+    img = _prep(data, max_side or MAX_SIDE, os.getenv("VLM_CROP", "1") == "1")   # audit 2026-10: card crop by default (VLM_CROP=0: whole photo)
     b = io.BytesIO(); img.save(b, "JPEG", quality=90)
     prompt = _prompt_for(keys, ocr_text, hints); schema = SCHEMA if keys is None else _schema(keys)
     body = {"messages": [{"role": "user", "content": [
