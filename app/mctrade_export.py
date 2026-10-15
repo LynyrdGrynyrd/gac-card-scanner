@@ -36,10 +36,12 @@ def _read_headers():
     if os.path.isfile(TEMPLATE_XLSX):
         from openpyxl import load_workbook
         wb = load_workbook(TEMPLATE_XLSX, read_only=True); ws = wb.worksheets[0]
-        for w in wb.worksheets:   # an instructions sheet may come first: use the sheet whose header row has IndEmail/AffCode1
-            first = [_hnorm(x) for x in next(w.iter_rows(min_row=1, max_row=1, values_only=True), ()) or ()]
-            if "indemail" in first or "affcode1" in first: ws = w; break
-        row = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        try:
+            for w in wb.worksheets:   # an instructions sheet may come first: use the sheet whose header row has IndEmail/AffCode1
+                first = [_hnorm(x) for x in next(w.iter_rows(min_row=1, max_row=1, values_only=True), ()) or ()]
+                if "indemail" in first or "affcode1" in first: ws = w; break
+            row = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        finally: wb.close()   # audit 2026-10: a read-only workbook keeps its file open; Windows then can't replace the template
         while row and row[-1] in (None, ""): row.pop()          # trailing empty cells are not columns
         return ["" if h is None else str(h) for h in row], "GAC template file"
     try:

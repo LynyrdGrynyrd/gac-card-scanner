@@ -100,7 +100,7 @@ def test_remove_contacts_deletes_no_bak(env):
     adm = env["adm"]; d = crm_source.DATA
     open(os.path.join(d, "mctrade_contacts.csv.bak"), "w").write("old leftover")
     r = adm.post("/api/admin/mctrade-contacts", files={"image": ("real.csv", open(FAKE_REAL, "rb"))}); assert r.status_code == 200, r.text
-    p = os.path.join(d, "mctrade_contacts.csv"); assert os.path.isfile(p) and (os.stat(p).st_mode & 0o777) == 0o600
+    p = os.path.join(d, "mctrade_contacts.csv"); assert os.path.isfile(p) and (os.name == "nt" or (os.stat(p).st_mode & 0o777) == 0o600)   # (no POSIX modes on Windows)
     assert not os.path.exists(p + ".bak")                                         # the leftover was wiped by the upload
     r = adm.post("/api/admin/mctrade-contacts", files={"image": ("real2.csv", open(FAKE_REAL, "rb"))}); assert r.status_code == 200
     assert not os.path.exists(p + ".bak")                                         # replacing keeps no copy

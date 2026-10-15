@@ -57,7 +57,8 @@ def _call(args, data, key=None, mem_mb=None, timeout=None):
         def watch():
             t0 = time.time()
             while p.poll() is None:
-                if _rss_mb(p.pid) > mem_mb or time.time() - t0 > timeout:
+                # audit 2026-10: the hard backstop is enforced here too; macOS ignores RLIMIT_AS and Windows has no RLIMIT
+                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)) or time.time() - t0 > timeout:
                     killed.append(1)
                     try: p.kill()
                     except Exception: pass

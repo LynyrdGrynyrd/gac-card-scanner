@@ -166,6 +166,7 @@ def test_scan_screen_and_update_banner(env):
     assert env["rev"].get("/api/update").json()["show_banner"] is False
 
 # ---------------------------------------------------------------- (b) supervised restart
+@pytest.mark.skipif(os.name == "nt", reason="scripts/serve.sh is the POSIX (Linux/macOS server) launcher; Windows uses start.bat")
 def test_serve_sh_restarts_a_dead_server(tmp_path):
     fake = tmp_path / "py"; cnt = tmp_path / "n"
     fake.write_text(f"#!/bin/bash\necho run >> {cnt}\nexit 1\n"); fake.chmod(0o755)

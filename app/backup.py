@@ -109,7 +109,12 @@ def restore(path, data=None, db=None):
         finally: os.close(fd)
     aside = data + ".before-restore-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     keep_contacts = [f for f in (os.listdir(data) if os.path.isdir(data) else []) if f.startswith("mctrade_contacts.")]
-    if os.path.isdir(data): shutil.move(data, aside)
+    if os.path.isdir(data):   # audit 2026-10 (Windows CI): a virus scanner briefly holding a just-written file -> retry
+        for k in range(6):
+            try: os.rename(data, aside); break
+            except PermissionError:
+                if k == 5: raise RuntimeError("the data folder is in use (is the scanner, or a program with a file from it open, still running?)")
+                time.sleep(0.5 * (k + 1))
     os.makedirs(data)
     with tarfile.open(path, "r:gz") as t:
         for m in t.getmembers():

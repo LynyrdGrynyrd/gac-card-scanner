@@ -90,6 +90,7 @@ def read_export(path):
         wb = load_workbook(path, read_only=True, data_only=True)
         ws = wb["Individuals"] if "Individuals" in wb.sheetnames else wb.worksheets[-1]
         it = ws.iter_rows(values_only=True); hdr = [str(h or "").strip() for h in next(it)]
+        it = iter(list(it)); wb.close()   # read it all, then let go of the file (Windows keeps open files locked)
         new_layout = "IndWorkPhone" in hdr or "IndAddress1" in hdr       # scanner round 4+: template columns only
         old_layout = "IndPhone" in hdr or "Address" in hdr               # scanner round 1-3
         if not (new_layout or old_layout) or "IndLastName" not in hdr:
@@ -161,8 +162,10 @@ ALIASES = {  # canonical -> header names we accept (real Profile Selector / Quer
 def read_crm(path):
     if path.lower().endswith(".xlsx"):
         wb = load_workbook(path, read_only=True, data_only=True); ws = wb.worksheets[-1]
-        it = ws.iter_rows(values_only=True); hdr = [str(h or "") for h in next(it)]
-        raw = [{h: ("" if x is None else str(x)) for h, x in zip(hdr, v)} for v in it if any(v)]
+        try:
+            it = ws.iter_rows(values_only=True); hdr = [str(h or "") for h in next(it)]
+            raw = [{h: ("" if x is None else str(x)) for h, x in zip(hdr, v)} for v in it if any(v)]
+        finally: wb.close()   # a read-only workbook keeps the file open (Windows: the scanner can't replace/remove it)
     else:
         with open(path, newline="", encoding="utf-8-sig") as fh: raw = list(csv.DictReader(fh)); hdr = list(raw[0].keys()) if raw else []
     pick = {k: next((h for h in hdr if h.strip().lower() in [a.lower() for a in al]), None) for k, al in ALIASES.items()}
@@ -264,7 +267,8 @@ def template_header(cmap, template):
     with --template we copy GAC's real header row verbatim; without it we use column_map.json (partly UNVERIFIED)."""
     if template:
         wb = load_workbook(template, read_only=True); ws = wb.worksheets[0]
-        hdr = [("" if h is None else str(h)).strip() for h in next(ws.iter_rows(max_row=1, values_only=True))]
+        try: hdr = [("" if h is None else str(h)).strip() for h in next(ws.iter_rows(max_row=1, values_only=True))]
+        finally: wb.close()
         while hdr and not hdr[-1]: hdr.pop()
         return hdr, ws.title
     return [c["header"] for c in cmap["template_columns"]], "Sheet1"
