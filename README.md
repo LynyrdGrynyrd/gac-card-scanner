@@ -107,6 +107,18 @@ Business cards carry personal data. In a real install everything stays on the co
 ```
 Synthetic cards are far easier than real ones; budget for human review on every card.
 
+### Accuracy on your own cards
+Every approved card is a labelled example: what a reviewer approved is the right answer. `bench/extract_eval_set.py` reads the
+scanner's database (read-only) and turns approved cards whose photo is still kept into a test set for `bench/eval_bench.py`,
+including cards approved unchanged, and prints how often reviewers had to fix each field:
+```bash
+.venv/bin/python bench/extract_eval_set.py --data-dir "<data folder>" --dry-run   # the per-field report only
+.venv/bin/python bench/extract_eval_set.py --data-dir "<data folder>"             # + photos and gt.json in <data folder>/corrections
+.venv/bin/python bench/eval_bench.py "<data folder>/corrections/gt.json" "<data folder>/corrections" --show
+```
+The copies are real people's cards: they go to the same folder as "Keep corrected cards as test examples", so photo retention
+and delete-on-request clean them too. Never commit them (the script refuses a folder git would track).
+
 ## Developer reference
 ### Endpoints
 > Since the /ui release, `/`, `/queue`, `/card/{id}` and `/export.*` redirect to `/ui` and require sign-in. See HANDOFF.md.
