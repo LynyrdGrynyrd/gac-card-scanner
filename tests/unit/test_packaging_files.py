@@ -19,10 +19,11 @@ def lock_pins():
     return pins
 
 
-def test_lock_is_a_full_pin_set_without_the_headless_opencv():
+def test_lock_is_a_full_pin_set_with_one_opencv():
+    # rapidocr 3.x depends on the headless OpenCV; opencv-python next to it would overwrite the same cv2/ folder
     pins = lock_pins()
-    assert "opencv-python" in pins and "opencv-python-headless" not in pins
-    assert "opencv-python-headless" not in read("requirements.txt").split("#")[0]
+    assert "opencv-python-headless" in pins and "opencv-python" not in pins
+    assert not any(re.match(r"opencv-python\s*[<>=!~;]", l.strip()) for l in read("requirements.txt").splitlines())
     # every direct requirement is pinned ...
     for line in read("requirements.txt").splitlines():
         name = re.split(r"[<>=!~;\s#]", line.strip(), maxsplit=1)[0]

@@ -16,7 +16,7 @@ if os.path.isfile(os.path.join(ROOT, "COMMIT")):   # written by the release work
 tess = os.path.join(ROOT, "packaging", "build", "tesseract")
 if os.path.isdir(tess): datas.append((tess, "tesseract"))
 else: print("WARNING: packaging/build/tesseract missing: the bundle will rely on a system Tesseract")
-for pkg in ("gender_guesser", "rapidocr_onnxruntime", "phonenumbers", "zxingcpp", "webview"):
+for pkg in ("gender_guesser", "rapidocr", "phonenumbers", "zxingcpp", "webview"):   # rapidocr: config yaml + the bundled PP-OCRv6 models
     try: datas += collect_data_files(pkg)
     except Exception as e: print("skip data", pkg, e)
 binaries = []
@@ -28,7 +28,9 @@ _extra_hidden = []
 for pkg in ("pypdfium2", "pypdfium2_raw", "pillow_heif"):
     try: d_, b_, h_ = collect_all(pkg); datas += d_; binaries += b_; _extra_hidden += h_
     except Exception as e: print("skip collect_all", pkg, e)
-hidden = (collect_submodules("app") + collect_submodules("uvicorn") + collect_submodules("rapidocr_onnxruntime")
+# rapidocr: only the ONNX Runtime engine (the paddle / torch / openvino / tensorrt / mnn back-ends need packages we don't ship)
+_rocr = collect_submodules("rapidocr", filter=lambda n: not any(f".inference_engine.{x}" in n for x in ("paddle", "pytorch", "openvino", "tensorrt", "mnn")))
+hidden = (collect_submodules("app") + collect_submodules("uvicorn") + _rocr
           + collect_submodules("webview") + collect_submodules("qrcode") + ["multipart", "python_multipart", "openpyxl", "cryptography"] + _extra_hidden)
 a = Analysis([os.path.join(ROOT, "packaging", "launcher.py")], pathex=[ROOT], binaries=binaries, datas=datas,
              hiddenimports=hidden, excludes=["tkinter", "matplotlib", "pytest", "IPython"], noarchive=False)
