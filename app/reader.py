@@ -42,9 +42,13 @@ def _call(args, data, key=None):
         src = os.path.join(td, "in.bin")
         with open(src, "wb") as fh: fh.write(data)
         out = os.path.join(td, "out"); os.mkdir(out)
-        argv = [sys.executable, "-m", "app.reader", args[0], src, *[str(a) for a in args[1:]]] + ([out] if args[0] not in ("count", "ocr") else [])
-        env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
-        p = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=_limiter(MEM_MB), env=env, text=True)
+        rest = [args[0], src, *[str(a) for a in args[1:]]] + ([out] if args[0] not in ("count", "ocr") else [])
+        # v0.3: in the desktop app (PyInstaller) there is no 'python -m': the app's own exe runs the reader (launcher --gac-reader)
+        argv = [sys.executable, "--gac-reader", *rest] if getattr(sys, "frozen", False) else [sys.executable, "-m", "app.reader", *rest]
+        res_f = os.path.join(td, "result.json")   # the answer comes back in a file (a windowed exe may have no stdout)
+        env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", GAC_READER_OUT=res_f)
+        kw = {"preexec_fn": _limiter(MEM_MB)} if os.name == "posix" else {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        p = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, env=env, text=True, **kw)
         if key: RUNNING[key] = p
         import threading, time
         killed = []
@@ -65,7 +69,10 @@ def _call(args, data, key=None):
         if p.returncode != 0:
             if p.returncode == -9 and key and key in CANCELLED: raise ReaderError("Cancelled.")
             raise ReaderError(CALM)
-        try: r = json.loads(so.strip().splitlines()[-1])
+        try:
+            if os.path.exists(res_f):
+                with open(res_f, encoding="utf-8") as fh: r = json.load(fh)
+            else: r = json.loads(so.strip().splitlines()[-1])
         except Exception: raise ReaderError(CALM)
         if r.get("error"): raise ReaderError(r["error"])
         if "ocr" in r: return r["ocr"]
@@ -150,5 +157,15 @@ def _main(argv):
     return {"error": "unknown mode"}
 
 
+def cli(argv):
+    """Entry point of the reader child (python -m app.reader …, or the desktop exe with --gac-reader …)."""
+    res = json.dumps(_main(argv), default=str)
+    if os.environ.get("GAC_READER_OUT"):
+        with open(os.environ["GAC_READER_OUT"], "w", encoding="utf-8") as fh: fh.write(res)
+    if sys.stdout is not None:
+        try: print(res, flush=True)
+        except Exception: pass
+
+
 if __name__ == "__main__":
-    print(json.dumps(_main(sys.argv[1:]), default=str), flush=True)
+    cli(sys.argv[1:])

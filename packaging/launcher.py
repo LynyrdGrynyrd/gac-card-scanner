@@ -166,5 +166,7 @@ def _open_folder(p):
     else: subprocess.Popen(["xdg-open", p])
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--gac-reader":   # v0.3: the capped reader child (PDF/HEIC/OCR), see app/reader.py
+        from app import reader; reader.cli(sys.argv[2:]); sys.exit(0)
     import multiprocessing; multiprocessing.freeze_support()
     sys.exit(main())
