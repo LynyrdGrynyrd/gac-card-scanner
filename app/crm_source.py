@@ -112,7 +112,7 @@ def real():
 
 def sample_rows():
     if not os.path.isfile(SAMPLE): return []   # round 10: a fresh install without the sample file still works
-    with open(SAMPLE) as fh: return list(csv.DictReader(fh))
+    with open(SAMPLE, encoding="utf-8", newline="") as fh: return list(csv.DictReader(fh))
 
 def rows_for_hints():
     """-> (rows, is_sample). The review box may hint from SAMPLE data (labelled so); IDs never come from it."""
@@ -126,7 +126,7 @@ def write_loader(user):
         json.dump({"by": f"{user.get('display') or user.get('username')} ({user.get('username')})", "at": time.time()}, fh)
 def loader():
     import json, time
-    try: d = json.load(open(loader_path()))
+    try: d = json.load(open(loader_path(), encoding="utf-8"))
     except Exception: return ""
     return f"loaded by {d.get('by')} at {time.strftime('%b %d %H:%M', time.localtime(d.get('at') or 0))}"
 def info():

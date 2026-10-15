@@ -26,7 +26,7 @@ def _norm(s): return re.sub(r"[^a-z0-9]", "", fold(s).lower())
 @lru_cache(maxsize=65536)
 def _nname(s): return " ".join(re.sub(r"[^a-z ]", "", fold(s).lower()).split())
 def load_existing(path=SAMPLE):
-    with open(path) as fh: return list(csv.DictReader(fh))
+    with open(path, encoding="utf-8", newline="") as fh: return list(csv.DictReader(fh))
 
 def match(fields, existing=None, near_names=False):
     existing = existing if existing is not None else load_existing()

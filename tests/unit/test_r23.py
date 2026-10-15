@@ -103,7 +103,7 @@ def test_reader_hard_backstop(monkeypatch):
     except reader.ReaderError as e: assert str(e) == reader.CALM
 
 def test_readme_plain_labels():
-    src = open(os.path.join(os.path.dirname(U.__file__), "ui.py")).read()
+    src = open(os.path.join(os.path.dirname(U.__file__), "ui.py"), encoding="utf-8").read()
     a = src.index("readme = \"\\n\".join(["); b = src.index("comp = {\"extra.csv\"", a); rd = src[a:b]
     for jargon in ("NeedsAttention", "CROSS-BATCH", "CONFLICT", "WhyLeftOut", "UNVERIFIED", "CONFIRMED BY"): assert jargon not in rd, jargon
 

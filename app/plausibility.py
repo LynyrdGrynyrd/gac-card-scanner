@@ -37,7 +37,7 @@ LOOKALIKE = {"rnbber": "rubber", "rubbcr": "rubber", "mian": "main", "akrn": "ak
              # round 11 (reviewer r10): more common-word look-alikes (OCR letter swaps rn/m, l/i, c/e, 0/o, dropped letters)
              "akran": "akron", "akorn": "akron", "akrom": "akron", "arkon": "akron", "cantn": "canton", "cantom": "canton",
              "clevland": "cleveland", "clevelnd": "cleveland", "colurnbus": "columbus", "colmbus": "columbus", "ohi0": "ohio",
-             "manger": "manager", "rnanager": "manager", "dlrector": "director", "drector": "director", "presdent": "president",
+             "manger": "manager", "rnanager": "manager", "drector": "director", "presdent": "president",
              "presidnet": "president", "coordlnator": "coordinator", "specialst": "specialist", "assistnt": "assistant",
              "consultnt": "consultant", "ofice": "office", "offlce": "office", "rnarketing": "marketing", "markting": "marketing",
              "salse": "sales", "servces": "services", "solutlons": "solutions", "solutons": "solutions", "technolgy": "technology",

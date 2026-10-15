@@ -43,7 +43,7 @@ def _read_headers():
         while row and row[-1] in (None, ""): row.pop()          # trailing empty cells are not columns
         return ["" if h is None else str(h) for h in row], "GAC template file"
     try:
-        with open(COLMAP) as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "the scanner's default column names (not checked against MC Trade)"
+        with open(COLMAP, encoding="utf-8") as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "the scanner's default column names (not checked against MC Trade)"
     except Exception: return FALLBACK, "the scanner's default column names (not checked against MC Trade)"
 
 def canonical(h):

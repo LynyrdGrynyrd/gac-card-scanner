@@ -82,7 +82,7 @@ def _startup_checks():
     GAC_STRICT_DEPS=1 turns the warning into a startup failure."""
     from . import parser
     if parser.NAME_LEXICON_ERROR:
-        msg = "WARNING: gender_guesser missing (" + parser.NAME_LEXICON_ERROR + "). Run: pip install -r requirements.txt"
+        msg = "WARNING: gender_guesser missing (" + parser.NAME_LEXICON_ERROR + "). Run: pip install -r requirements.lock.txt"
         print("\n" + "!" * 78 + "\n" + msg + "\n" + "!" * 78 + "\n", flush=True)
         if os.environ.get("GAC_STRICT_DEPS") == "1": raise RuntimeError(msg)
 def _ai_banner():
