@@ -98,6 +98,7 @@ def content_problems(f):
         if TAG.search(dec) or (dec != v and re.search(r"[<>]", dec)): out[k] = f"{nm} contains HTML code ({v[:30]})"
         elif k not in ("social", "note") and (looks_formula(v) or looks_formula(dec)): out[k] = f"{nm} looks like a spreadsheet formula ({v[:30]})"
         elif INVISIBLE.search(v) and k != "note": out[k] = f"{nm} contains invisible characters (zero-width / text-direction); retype it"
+        elif k not in ("note", "address", "other_address") and re.search(r"[\r\n]", v): out[k] = f"{nm} contains a line break; put it on one line"   # audit 2026-10
     return out
 
 def phone(n, style="gac"):

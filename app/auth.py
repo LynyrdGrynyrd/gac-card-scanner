@@ -8,6 +8,7 @@ from . import store, demo
 router = APIRouter()
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000
+SESSION_MAX_HOURS = float(os.environ.get("GAC_SESSION_MAX_HOURS", str(7 * 24)))   # absolute limit, sliding expiry or not
 PUBLIC_PREFIX = ("/static/", "/api/auth/")
 PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo"}
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -19,6 +20,7 @@ def _init_auth(c):
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS auth_log(id INTEGER PRIMARY KEY, ts REAL, username TEXT, event TEXT, ip TEXT)")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id)")
+    _dedupe_initials(c)
 def db():
     c = store.db(); store.once("auth", _init_auth)
     return c
@@ -44,6 +46,22 @@ def pw_problem(pw):
     if len(pw or "") < 10: return "Password must be at least 10 characters."
     return None
 
+def _unique_initials(ini, taken):
+    k = 2
+    while f"{ini[:6 - len(str(k))]}{k}" in taken: k += 1
+    return f"{ini[:6 - len(str(k))]}{k}"
+def _dedupe_initials(c):
+    """Audit 2026-10 F11: older versions allowed two people with the same initials (Alex Brown and Amy Baker = AB), which
+    mixed up whose batches and uploads were whose. The later account gets a number (AB2). Earlier history rows keep the
+    shared initials (they can't be told apart afterwards)."""
+    seen = set()
+    for uid, un, ini in c.execute("SELECT id, username, UPPER(initials) FROM users ORDER BY id").fetchall():
+        if ini in seen:
+            new = _unique_initials(ini, seen | {r[0].upper() for r in c.execute("SELECT initials FROM users")})
+            c.execute("UPDATE users SET initials=? WHERE id=?", (new, uid))
+            c.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), un, f"initials changed from {ini} to {new}: another person already used {ini}", None))
+            ini = new
+        seen.add(ini)
 def _initials(display):
     return "".join(p[0] for p in display.split()[:3]).upper() or "?"
 
@@ -56,6 +74,12 @@ def create_user(username, display, password, role="reviewer", initials=None, mus
     ini = (initials or _initials(display or username)).upper()[:6]
     with db() as c:
         if c.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone(): raise ValueError("That username already exists.")
+        # audit 2026-10 P1 (F11): initials are how cards, batches and uploads are attributed ("mine", Cancel, history), so
+        # two people must never share them: chosen initials that are taken are refused, derived ones get a number
+        taken = {(r[0] or "").upper() for r in c.execute("SELECT initials FROM users")}
+        if ini in taken:
+            if initials: raise ValueError(f"The initials {ini} are already used by another person. Choose different initials.")
+            ini = _unique_initials(ini, taken)
         return c.execute("INSERT INTO users(username,display,initials,role,pw,created,must_change) VALUES(?,?,?,?,?,?,?)",
                          (username, display or username, ini, role, hash_pw(password), time.time(), int(must_change))).lastrowid
 
@@ -69,11 +93,15 @@ def alog(username, event, ip=None):
 def current_user(request: Request):
     tok = request.cookies.get(COOKIE)
     if not tok: return None
-    c = db(); r = c.execute("SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.active=1",
-                            (hashlib.sha256(tok.encode()).hexdigest(), time.time())).fetchone()
+    now = time.time(); h = hashlib.sha256(tok.encode()).hexdigest()
+    c = db(); r = c.execute("SELECT u.*, s.expires AS _s_exp FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? "
+                            "AND s.created>? AND u.active=1", (h, now, now - SESSION_MAX_HOURS * 3600)).fetchone()
     if not r: return None
-    with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (time.time() + SESSION_HOURS * 3600, hashlib.sha256(tok.encode()).hexdigest()))
-    return dict(r)
+    # audit 2026-10 P1: the sliding expiry is written at most every 5 minutes (it was a database write on EVERY request,
+    # polling included), and a session ends SESSION_MAX_HOURS after sign-in however active it is
+    if r["_s_exp"] < now + SESSION_HOURS * 3600 - 300:
+        with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (now + SESSION_HOURS * 3600, h))
+    d = dict(r); d.pop("_s_exp", None); return d
 
 def _client(request): return request.client.host if request.client else ""
 def trusted_host(request):
@@ -160,7 +188,8 @@ async def _route(request: Request, call_next):
     # machine API kept open on loopback only (benchmarks / scripts on the same computer)
     if p == "/api/scan" and _loopback_trusted(request):
         return await call_next(request)
-    u = current_user(request)
+    from starlette.concurrency import run_in_threadpool
+    u = await run_in_threadpool(current_user, request)   # audit 2026-10 P1: database work off the event loop
     if not u:
         if p.startswith("/api/") or request.method != "GET":
             return JSONResponse({"error": "Sign in to continue.", "need": "login"}, 401)
@@ -172,7 +201,13 @@ async def _route(request: Request, call_next):
     resp.headers["X-GAC-User"] = str(u["id"])   # lets the page notice when another tab signed this browser in as someone else
     return resp
 
-_fails = {}
+_fails = {}   # (username, client address) -> times of recent wrong passwords
+_DUMMY_PW = f"pbkdf2_sha256${ITER}${'00' * 16}${'00' * 32}"   # never matches; costs the same PBKDF2 work as a real check
+def _clear_fails(un):
+    for k in [k for k in list(_fails) if k[0] == un]: _fails.pop(k, None)
+def prune_fails(now=None):
+    now = now or time.time()
+    for k in [k for k, ts in list(_fails.items()) if not ts or max(ts) < now - 300]: _fails.pop(k, None)
 @router.get("/login")
 def login_page():
     if user_count() == 0: return RedirectResponse("/setup", 303)
@@ -240,14 +275,18 @@ def setup(request: Request, body: dict = Body(...)):
 @router.post("/api/auth/login")
 def login(request: Request, body: dict = Body(...)):
     un = (body.get("username") or "").strip().lower(); ip = _client(request)
-    f = _fails.get(un, [])
-    f = [t for t in f if t > time.time() - 300]
-    if len(f) >= 5: return JSONResponse({"error": "Too many wrong passwords. Wait 5 minutes or ask an admin to reset it."}, 429)
+    # audit 2026-10 P1: wrong passwords are counted per (username, address) and per address. Someone else on the network
+    # can no longer lock a colleague (or the admin) out by guessing at their username from another computer.
+    now = time.time()
+    f = [t for t in _fails.get((un, ip), []) if t > now - 300]
+    per_ip = sum(1 for (u_, ip_), ts in list(_fails.items()) if ip_ == ip for t in ts if t > now - 300)
+    if len(f) >= 5 or per_ip >= 20: return JSONResponse({"error": "Too many wrong passwords. Wait 5 minutes or ask an admin to reset it."}, 429)
     r = db().execute("SELECT * FROM users WHERE username=?", (un,)).fetchone()
-    if not r or not r["active"] or not check_pw(body.get("password") or "", r["pw"]):
-        f.append(time.time()); _fails[un] = f; alog(un, "login_failed", ip)
+    ok = check_pw(body.get("password") or "", r["pw"] if r else _DUMMY_PW)   # same work for unknown names (no timing hint)
+    if not r or not r["active"] or not ok:
+        f.append(now); _fails[(un, ip)] = f; alog(un, "login_failed", ip)
         return JSONResponse({"error": "Wrong username or password."}, 401)
-    _fails.pop(un, None); alog(un, "login", ip)
+    _clear_fails(un); alog(un, "login", ip)
     return _set_cookie(JSONResponse({"ok": True, "user": pub(dict(r))}), request, _start_session(request, r["id"]))
 
 @router.post("/api/auth/logout")
@@ -296,7 +335,7 @@ def edit_user(uid: int, request: Request, body: dict = Body(...)):
         if "password" in body:
             c.execute("UPDATE users SET pw=?, must_change=1 WHERE id=?", (hash_pw(body["password"]), uid))
             c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
-            _fails.pop(r["username"], None)   # a reset by an admin also lifts the wrong-password lock
+            _clear_fails(r["username"])   # a reset by an admin also lifts the wrong-password lock
         if "active" in body:
             c.execute("UPDATE users SET active=? WHERE id=?", (int(bool(body["active"])), uid))
             if not body["active"]: c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
@@ -319,7 +358,7 @@ def get_settings(): return {k: get_setting(k) for k in DEFAULTS}
 def backup_status():
     """Round 11 (manager-r10 L-r10-1): the same-disk backup warning is shown in Admin > Settings, not only in the server log."""
     from . import backup as _b
-    return {"dir": _b.backup_dir(), "same_disk": _b.same_disk(), "enabled": os.getenv("GAC_BACKUP", "1") != "0"}
+    return _b.status() | {"same_disk": _b.same_disk(), "enabled": os.getenv("GAC_BACKUP", "1") != "0"}
 
 SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
                  "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples", "mctrade_updates_enabled": "Allow 'update existing MC Trade contact'",

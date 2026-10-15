@@ -108,24 +108,32 @@ def _bad(ip):
 def _blocked(ip): return len([x for x in _BAD.get(ip, []) if time.time() - x < 60]) > BAD_PER_MIN
 
 # ---------------------------------------------------------------- LAN server lifecycle
+_SRV_LOCK = threading.Lock()
 def start_server():
-    if _SRV["server"] and _SRV["thread"] and _SRV["thread"].is_alive(): return _SRV["host"]
-    import uvicorn
-    host = lan_ip()
-    srv = uvicorn.Server(uvicorn.Config(phone_app, host=host, port=PORT, log_level="warning", access_log=False, lifespan="off"))
-    srv.install_signal_handlers = lambda: None
-    th = threading.Thread(target=srv.run, daemon=True, name="phone-lan"); th.start()
-    for _ in range(50):
-        if srv.started: break
-        time.sleep(0.05)
-    _SRV.update(server=srv, thread=th, host=host)
-    threading.Thread(target=_reaper, daemon=True).start()
-    return host
+    """Audit 2026-10 P1: one start at a time (two concurrent starts could orphan a listener nobody stops), and a listener
+    that didn't come up (port taken, address gone) is an error, not a QR code pointing at nothing."""
+    with _SRV_LOCK:
+        if _SRV["server"] and _SRV["thread"] and _SRV["thread"].is_alive(): return _SRV["host"]
+        import uvicorn
+        host = lan_ip()
+        srv = uvicorn.Server(uvicorn.Config(phone_app, host=host, port=PORT, log_level="warning", access_log=False, lifespan="off"))
+        srv.install_signal_handlers = lambda: None
+        th = threading.Thread(target=srv.run, daemon=True, name="phone-lan"); th.start()
+        for _ in range(100):
+            if srv.started or not th.is_alive(): break
+            time.sleep(0.05)
+        if not srv.started:
+            srv.should_exit = True
+            raise RuntimeError(f"phone listener did not start on {host}:{PORT}")
+        _SRV.update(server=srv, thread=th, host=host)
+        threading.Thread(target=_reaper, daemon=True).start()
+        return host
 
 def stop_server():
-    srv = _SRV.get("server")
-    if srv: srv.should_exit = True
-    _SRV.update(server=None, thread=None, host=None)
+    with _SRV_LOCK:
+        srv = _SRV.get("server")
+        if srv: srv.should_exit = True
+        _SRV.update(server=None, thread=None, host=None)
 
 def running(): return bool(_SRV["server"] and _SRV["thread"] and _SRV["thread"].is_alive())
 

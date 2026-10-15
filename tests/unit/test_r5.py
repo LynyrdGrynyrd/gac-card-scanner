@@ -151,9 +151,9 @@ def test_back_of_other_person_asks(env, monkeypatch):
 def test_reset_password_lifts_lock_and_retention_min(env):
     adm = env["adm"]; from app import auth
     uid = [u for u in adm.get("/api/admin/users").json() if u["username"] == "rev2"][0]["id"]
-    import time; auth._fails["rev2"] = [time.time()] * 6
+    import time; auth._fails[("rev2", "testclient")] = [time.time()] * 6   # audit 2026-10: counted per (username, address)
     assert adm.post(f"/api/admin/users/{uid}", json={"password": "New-pass-98765x"}).status_code == 200
-    assert "rev2" not in auth._fails
+    assert not [k for k in auth._fails if k[0] == "rev2"]
     assert adm.post("/api/admin/settings", json={"image_retention_days": "0"}).status_code == 422
     assert adm.post("/api/batches/archive", json={"batch": "__all__", "confirm": "clear"}).status_code == 422
 

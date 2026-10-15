@@ -4,7 +4,7 @@ that disagree lower it and get a plain-language flag the reviewer sees. Never ch
   - email domain  vs company name       (company words in the domain -> company more trustworthy)
   - email local part vs person's name   (jane.doe@ vs "Jane Doe")
   - phone area code vs address state    (330 = Ohio vs "Akron, OH 44308")"""
-import re
+import re, functools
 from difflib import SequenceMatcher
 FREE = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "icloud.com", "me.com", "live.com", "msn.com",
         "comcast.net", "att.net", "sbcglobal.net", "protonmail.com", "ymail.com", "mail.com", "zoho.com"}
@@ -43,6 +43,7 @@ def address_state(addr):
         if re.search(r"\b" + re.escape(name) + r"\b", addr.lower()): return ab
     return None
 
+@functools.lru_cache(maxsize=8192)   # audit 2026-10 P1: pure lookup, ran for every phone of every card on every list request
 def phone_state(number):
     try:
         import phonenumbers

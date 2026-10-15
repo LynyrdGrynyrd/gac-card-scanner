@@ -1425,8 +1425,14 @@ async function loadAdmin() {
   if (adminTab === "settings") {
     const st = await call("/api/admin/settings"), pv = await call("/api/admin/retention/preview");
     ADMV.seen = st;   // round 15 (manager r14): optimistic locking: the values shown are sent back with every save
-    call("/api/admin/backup-status").then(b => { const w = $("#sBackupWarn"); w.hidden = !b.same_disk;
-      if (b.same_disk) w.innerHTML = `<b>Backups are on this computer only.</b> Ask IT to set a backup drive. <details class="more"><summary>More</summary>If this disk fails, the cards and backups are lost together. Backup folder: ${esc(b.dir)}. IT: see the admin guide, section 2.5.</details>`; }).catch(() => {});
+    call("/api/admin/backup-status").then(b => { const w = $("#sBackupWarn");
+      // audit 2026-10 P1: a failed or missing backup is shown here too, not only in the server console
+      const old_ = b.enabled && (!b.last_at || Date.now() / 1000 - b.last_at > 50 * 3600), when_ = t => new Date(t * 1000).toLocaleString();
+      const msgs = [];
+      if (b.last_error) msgs.push(`<b>The last backup failed</b> (${esc(when_(b.last_error_at))}): ${esc(b.last_error)}. The scanner tries again every 10 minutes.`);
+      else if (old_) msgs.push(b.last_at ? `<b>No backup since ${esc(when_(b.last_at))}.</b> Backups run at night while the scanner is open.` : `<b>No backup yet.</b> The first one is made within a few minutes, then every night.`);
+      if (b.same_disk) msgs.push(`<b>Backups are on this computer only.</b> Ask IT to set a backup drive. <details class="more"><summary>More</summary>If this disk fails, the cards and backups are lost together. Backup folder: ${esc(b.dir)}. IT: see the admin guide, section 2.5.</details>`);
+      w.hidden = !msgs.length; w.innerHTML = msgs.join("<br>"); }).catch(() => {});
     $("#sOn").checked = st.retention_enabled === "1"; $("#sAI").checked = st.ai_check_enabled === "1"; $("#sUpd").checked = st.mctrade_updates_enabled === "1"; $("#sCorr").checked = st.corrections_enabled === "1"; $("#sAff").value = st.mctrade_affcode || ""; $("#sPh").value = st.phone_format || "gac"; $("#sPhone").checked = st.phone_mode_allowed === "1"; $("#sUpdChk").checked = st.update_check_enabled === "1";
     call("/api/admin/mctrade-template").then(t => { ADMV.tpl = t.version; return t; }).then(t => $("#sTpl").innerHTML = (t.present ? `<span class="chip ok">GAC template</span> ${t.columns.filter(Boolean).length} columns${t.unknown.length ? " · left blank: " + esc(t.unknown.join(", ")) : ""}` : `<span class="chip low">Default columns</span> Upload GAC's template before the first real import.`) + ` <span title="Version ${esc(t.version)}">` + (t.last_change ? `· changed by ${esc(t.last_change.by)}, ${esc(t.last_change.at)}` : "") + "</span>").catch(() => {});
     $("#sTplFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; const fd = new FormData(); fd.append("image", f); fd.append("expected_version", ADMV.tpl || "");
