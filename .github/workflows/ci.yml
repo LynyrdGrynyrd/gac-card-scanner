@@ -5,15 +5,105 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  PYTHON_VERSION: "3.12"
+  # Windows Tesseract (UB-Mannheim build via Chocolatey); same version as the release workflow bundles
+  CHOCO_TESSERACT_VERSION: "5.5.3.20260724"
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    # The product ships for Windows and macOS, and a Windows-only crash once reached a release: test on all three.
+    name: Unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip }
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
-      - run: pip install -r requirements.lock.txt pytest httpx
-      - run: python -m pytest -q tests/unit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - name: Tesseract (Ubuntu, apt)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Tesseract (Windows, Chocolatey)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install tesseract --version "$env:CHOCO_TESSERACT_VERSION" -y --no-progress
+          if (!(Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe")) { throw "tesseract not installed" }
+          "C:\Program Files\Tesseract-OCR" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Tesseract (macOS, Homebrew)
+        if: runner.os == 'macOS'
+        run: brew install tesseract
+      - name: Tesseract version
+        run: tesseract --version
+      - name: Python deps (fully pinned lock)
+        run: pip install -r requirements.lock.txt pytest==9.1.1 httpx==0.28.1
+      - name: Unit tests
+        run: python -m pytest -q -p no:cacheprovider tests/unit
       - name: Launcher smoke test (headless, from source)
         run: python packaging/smoke_test.py packaging/launcher.py
+
+  lint:
+    # Strict-but-passing start: syntax errors, undefined names, mutable/called defaults. FastAPI's Body()/File()/Form()
+    # defaults are the framework idiom, not bugs. app/vlm.py:80 (os.getenv in a default) is a known exception (tracked).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff==0.17.0
+      - name: ruff
+        run: >-
+          ruff check --isolated --select E9,F63,F7,F82,B006,B008
+          --config "lint.flake8-bugbear.extend-immutable-calls=['fastapi.Body','fastapi.File','fastapi.Form']"
+          --config "lint.per-file-ignores={'app/vlm.py'=['B008']}"
+          app tests
+
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install pip-audit==2.10.1
+      - name: pip-audit (known vulnerabilities in the pinned dependencies)
+        # the lock pins every transitive package, so --no-deps audits exactly what gets installed
+        run: pip-audit -r requirements.lock.txt --no-deps --disable-pip --progress-spinner off
+
+  accuracy:
+    # Recognition accuracy gate on the synthetic sets (fails when accuracy drops below the floor).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.lock.txt
+      - name: OCR + parser on tests/cards (must stay 100 %)
+        run: python tests/eval.py --min-overall 100
+      - name: Full pipeline on synth2 (480 fields)
+        run: python bench/eval_bench.py tests/synth2_gt.json tests/synth2 --min-overall 96

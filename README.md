@@ -8,7 +8,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
-**Live demo:** DEMO_LINK_PLACEHOLDER (Hugging Face Space, synthetic cards only; see [Public demo](#public-demo))
+**Live demo:** a public demo on Hugging Face Spaces (synthetic cards only) is planned; its link will be added here when it is published. Until then you can run the same demo mode locally (see [Public demo](#public-demo)).
 
 | Scan a batch | Review a card |
 |---|---|
@@ -36,16 +36,12 @@ The app opens in its own window (no browser needed), runs only on your computer,
 3. Click through the installer (no administrator rights needed). It adds a Start-menu entry and, if you tick the box, a desktop shortcut. On older Windows 10 it also installs Microsoft's WebView2 component if missing.
 4. Open **GAC Card Scanner**. The first time, create the admin account.
 
-   ![Windows SmartScreen](docs/screenshots/install-windows-smartscreen.png) *(screenshot placeholder)*
-
 To uninstall: Settings → Apps → GAC Card Scanner → Uninstall. Your cards stay in `%LOCALAPPDATA%\GAC Card Scanner` (delete that folder to remove them too).
 
 ### macOS
 1. Double-click the `.dmg`, then drag **GAC Card Scanner** onto **Applications**.
 2. The first time only: in Applications, **right-click (Control-click) the app → Open → Open**. (The app isn't notarized by Apple yet.) If macOS only offers *Move to Trash*, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
 3. The scanner opens in its own window. The first time, create the admin account.
-
-   ![macOS Open dialog](docs/screenshots/install-macos-open.png) *(screenshot placeholder)*
 
 Your data lives in `~/Library/Application Support/GAC Card Scanner`. Requires macOS 14 (Sonoma) or newer.
 
@@ -61,7 +57,7 @@ In the app: **Admin → Settings → Download AI helper (3 GB)**. It downloads l
 ```bash
 sudo apt-get install -y tesseract-ocr        # macOS: brew install tesseract
 git clone <this repo> gac-card-scanner && cd gac-card-scanner
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # exact tested versions: requirements.lock.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt   # exact tested versions (Python 3.12/3.13); ranges: requirements.txt
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8765
 # open http://localhost:8765 and create the first admin (first-run setup only works from this computer)
 ```
@@ -79,7 +75,13 @@ docker compose up -d            # http://localhost:8765 (published on 127.0.0.1 
 # or
 docker build -t gac-card-scanner . && docker run -p 127.0.0.1:8765:8765 -e GAC_ALLOW_REMOTE_SETUP=1 -v gac-data:/srv/gac/data gac-card-scanner
 ```
-HTTPS: mount a certificate at `/srv/gac/certs/cert.pem` + `key.pem` (see HANDOFF.md). The demo image for Hugging Face is `Dockerfile.space` (below).
+HTTPS: mount a certificate at `/srv/gac/certs/cert.pem` + `key.pem` (see HANDOFF.md). The demo image for Hugging Face is `Dockerfile.space` (below; it builds from the repo root too: `docker build -f Dockerfile.space .`).
+
+### Backups and settings
+- **Nightly backups** (one `.tgz` per night, 7 kept): Docker writes them to the `gac-backups` volume (`/srv/gac/backups`, set by `GAC_BACKUP_DIR`; better, bind-mount a folder on another disk, see `docker-compose.yml`). The desktop app keeps them in a folder next to its data folder, named `<data folder> Backups` (for example `%LOCALAPPDATA%\GAC Card Scanner Backups` or `~/Library/Application Support/GAC Card Scanner Backups`), never inside the installed program. A source install uses `backups/` in the checkout unless `GAC_BACKUP_DIR` is set. Restore (source install, scanner stopped): `scripts/restore_backup.sh <file>`; the desktop app has no restore button yet.
+- **`GAC_ALLOWED_HOSTS`** (comma-separated host names): first-admin setup and the open `/api/scan` API trust only requests addressed to an IP address, `localhost` or this computer's name (protection against DNS rebinding). If you reach the scanner under another name (a reverse proxy, a fixed office name), list it here.
+- **`GAC_DB_BUSY_MS`** (default 30000): how long a database write waits for another writer before failing.
+- All environment variables: [HANDOFF.md](HANDOFF.md#run).
 
 ## Public demo
 `GAC_DEMO=1` turns the app into a shared public demo (used by the Hugging Face Space):
@@ -100,6 +102,7 @@ Business cards carry personal data. In a real install everything stays on the co
 ```bash
 .venv/bin/pip install pytest httpx
 .venv/bin/python -m pytest tests/unit          # unit + API tests, incl. tests/unit/test_demo.py (demo mode)
+.venv/bin/python tests/eval.py                 # synthetic accuracy (CI also runs bench/eval_bench.py on tests/synth2)
 .venv/bin/python tests/gen_cards.py && .venv/bin/python tests/gen_hard.py && .venv/bin/python tests/eval.py   # synthetic accuracy
 ```
 Synthetic cards are far easier than real ones; budget for human review on every card.
@@ -149,4 +152,4 @@ Built on open source; full list with licenses in [THIRD-PARTY-NOTICES.md](THIRD-
 [Tesseract OCR](https://github.com/tesseract-ocr/tesseract), [RapidOCR](https://github.com/RapidAI/RapidOCR) + [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) models, [ONNX Runtime](https://github.com/microsoft/onnxruntime), [OpenCV](https://github.com/opencv/opencv), [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp), [python-phonenumbers](https://github.com/daviddrysdale/python-phonenumbers) (Google libphonenumber), [gender-guesser](https://github.com/lead-ratings/gender-guesser), [RapidFuzz](https://github.com/rapidfuzz/RapidFuzz), [FastAPI](https://github.com/fastapi/fastapi), [Uvicorn](https://github.com/encode/uvicorn), [Pillow](https://github.com/python-pillow/Pillow), [openpyxl](https://foss.heptapod.net/openpyxl/openpyxl), [NumPy](https://github.com/numpy/numpy), [cryptography](https://github.com/pyca/cryptography), [llama.cpp](https://github.com/ggml-org/llama.cpp), [Qwen3-VL](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF) (Apache-2.0), [Lato](https://fonts.google.com/specimen/Lato) and other OFL fonts. Research notes: [RESEARCH.md](RESEARCH.md), [OSS-SURVEY.md](OSS-SURVEY.md).
 
 ## Building the installers
-`.github/workflows/release.yml` builds the Windows installer (PyInstaller onedir + bundled UB-Mannheim Tesseract + Inno Setup) and the macOS disk images (PyInstaller .app + Homebrew Tesseract with relocated dylibs, arm64 on macos-14 and x86_64 on macos-15-intel), smoke-tests each bundle (start headless, `/health`, scan `tests/cards/card1_left.jpg`), and attaches them to a GitHub Release when a `v*` tag is pushed. Entry point: `packaging/launcher.py` (pywebview window; `--headless` for CI). Run from source the same way: `pip install pywebview && python packaging/launcher.py`.
+`.github/workflows/release.yml` builds the Windows installer (PyInstaller onedir + bundled UB-Mannheim Tesseract + Inno Setup) and the macOS disk images (PyInstaller .app + Homebrew Tesseract with relocated dylibs, arm64 on macos-14 and x86_64 on macos-15-intel), smoke-tests each bundle (start headless, `/health`, scan `tests/cards/card1_left.jpg`), and attaches them to a GitHub Release when a `v*` tag is pushed. To release: update `VERSION` and add a `## vX.Y.Z` section to `CHANGELOG.md` (it becomes the release notes), commit, then tag `vX.Y.Z` (the workflow stops if the tag and `VERSION` differ). Installers are code-signed only when the signing secrets are configured (see [docs/SIGNING.md](docs/SIGNING.md)); every installer gets a build-provenance attestation (`gh attestation verify <file> --repo LynyrdGrynyrd/gac-card-scanner`) and is listed in `SHA256SUMS.txt`. Entry point: `packaging/launcher.py` (pywebview window; `--headless` for CI). Run from source the same way: `pip install pywebview && python packaging/launcher.py`.

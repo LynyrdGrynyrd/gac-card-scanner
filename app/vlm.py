@@ -34,6 +34,25 @@ company = the full organization name as printed in the text (e.g. "Acme Americas
 phones: take the type from the printed label even when it is in a separate column (Cell/C/M/Mobile -> mobile; F/Fax/fx -> fax); a postal code is not a phone."""
 STRICT = os.getenv("VLM_SCHEMA", "1") == "1"   # llama.cpp grammar-constrained decoding: output always matches SCHEMA
 
+def _api_key():
+    """Key for llama-server's "Authorization: Bearer" check, or "" (then no header is sent).
+    VLM_API_KEY if set; otherwise the per-start random key the desktop AI helper wrote (app/ai_helper.py KEY_FILE), but
+    only for a server on this computer. A llama-server started by hand without --api-key needs no key."""
+    k = os.getenv("VLM_API_KEY", "").strip()
+    if k: return k
+    from urllib.parse import urlsplit
+    if (urlsplit(URL).hostname or "") not in ("127.0.0.1", "localhost", "::1"): return ""
+    from . import paths
+    try:
+        with open(paths.data("ai-helper", "api-key"), encoding="utf-8") as f: return f.read().strip()
+    except OSError: return ""
+
+def _headers():
+    h = {"Content-Type": "application/json"}
+    k = _api_key()
+    if k: h["Authorization"] = "Bearer " + k
+    return h
+
 def available(timeout=1.5):
     try: return json.loads(urllib.request.urlopen(URL + "/health", timeout=timeout).read()).get("status") == "ok"
     except Exception: return False
@@ -88,7 +107,7 @@ def extract(data: bytes, ocr_text: str = "", max_side=None, timeout=int(os.geten
                 {"type": "text", "text": prompt}]}],
             "temperature": 0, "max_tokens": MAX_TOKENS, "cache_prompt": True, "response_format": ({"type": "json_schema", "json_schema": {"name": "card", "strict": True, "schema": schema}}
                                 if STRICT else {"type": "json_object"})}
-    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"})
+    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), _headers())
     resp = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     LAST.clear(); LAST.update(resp.get("timings") or {}); LAST["img"] = img.size
     out = resp["choices"][0]["message"]["content"]

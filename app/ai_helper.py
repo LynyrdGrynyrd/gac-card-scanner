@@ -5,7 +5,7 @@ Admin-only routes (the auth middleware guards /api/admin/*):
   POST /api/admin/ai-helper/download start the ~3 GB download in the background
   POST /api/admin/ai-helper/start | /stop
   POST /api/admin/ai-helper/remove   delete the downloaded files"""
-import hashlib, json, os, platform, shutil, subprocess, sys, tarfile, threading, time, urllib.request, zipfile
+import hashlib, json, os, platform, secrets, shutil, subprocess, sys, tarfile, threading, time, urllib.request, zipfile
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from . import paths
@@ -20,9 +20,17 @@ LLAMA = {  # (asset, sha256) pinned so the download is reproducible and verifiab
     ("Darwin", "arm64"): (f"llama-{LLAMA_BUILD}-bin-macos-arm64.tar.gz", "442b8592d697eb6d20c631e7a73fb6e650f5f61962a651a7b2972be28c747859"),
     ("Darwin", "x64"): (f"llama-{LLAMA_BUILD}-bin-macos-x64.tar.gz", "d5a45b997f63f5af1be4d7f509cad695d803e680bd4826bc765054c16f84dae9"),
 }
-_HF = "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/"
+# pinned repo revision (not "main"), so a later upload to the model repo can't change what gets downloaded; the files are
+# also sha256-checked. Dockerfile.space / space/start.sh use the same revision and hashes (keep them in step).
+HF_REVISION = "1cd86afb9a95c410a6038ab3b40d8b578c892266"
+_HF = f"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/{HF_REVISION}/"
 MODEL = ("Qwen3VL-4B-Instruct-Q4_K_M.gguf", "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", 2497281664)
 MMPROJ = ("mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf", "30ba2c7dd3127a4561b6cba9d13d0f711c91bdb38742e2f56d73c8cb596bd06d", 453974304)
+
+# llama-server is started with a random API key, new on every start, so other programs (or web pages) on this computer
+# can't use the model server. The key is in this file (owner-only); app/vlm.py sends it as "Authorization: Bearer <key>".
+# It is passed with --api-key-file, so it never shows in the process list.
+KEY_FILE = os.path.join(DIR, "api-key")
 
 _state = {"phase": "idle", "file": "", "done": 0, "total": 0, "error": ""}
 _proc = {"p": None}
@@ -100,11 +108,33 @@ def _download():
     except Exception as e:
         _state.update(phase="error", error=str(e)[:300])
 
+def _new_key():
+    """A fresh random API key in KEY_FILE (owner read/write only; replaced atomically)."""
+    os.makedirs(DIR, exist_ok=True)
+    key = secrets.token_urlsafe(32); tmp = KEY_FILE + ".tmp"
+    try: os.remove(tmp)
+    except OSError: pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f: f.write(key + "\n")
+    os.replace(tmp, KEY_FILE)
+    return key
+
+def _port_answers():
+    """Something already serves /health on our port: usually our own llama-server, left running after the app crashed.
+    It keeps the key it was started with, so the key file must not be replaced and a second copy can't bind the port."""
+    try: return urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=0.5).status == 200
+    except Exception: return False
+
 def start():
     with _lock:
         if running() or not installed(): return running()
+        if os.path.exists(KEY_FILE) and _port_answers(): return False
         sp = _server_path(); threads = str(max(2, min(8, (os.cpu_count() or 4) - 1)))
+        _new_key()
+        # -np 1: the app sends one AI check at a time. --cache-ram 0: otherwise llama.cpp keeps up to 8 GB of prompt cache in
+        # RAM (out-of-memory kills on 16 GB machines, see start-ai-checker.command). --no-slots: no /slots endpoint.
         cmd = [sp, "-m", os.path.join(DIR, MODEL[0]), "--mmproj", os.path.join(DIR, MMPROJ[0]), "-c", "4096", "-t", threads,
+               "-np", "1", "--cache-ram", "0", "--no-slots", "--api-key-file", KEY_FILE,
                "--host", "127.0.0.1", "--port", str(PORT), "--image-max-tokens", "768"]
         log = open(os.path.join(DIR, "llama-server.log"), "ab")
         kw = {"creationflags": 0x08000000} if os.name == "nt" else {}   # CREATE_NO_WINDOW
@@ -118,6 +148,9 @@ def stop():
             p.terminate()
             try: p.wait(10)
             except Exception: p.kill()
+        if p is not None:   # only the key of a server we started (and have now stopped)
+            try: os.remove(KEY_FILE)
+            except OSError: pass
 
 def status():
     s = dict(_state); s.update(installed=installed(), running=running(), port=PORT, supported=bool(llama_asset()),

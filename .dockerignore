@@ -1,18 +1,37 @@
+# Build context for BOTH images, built from the repo root:
+#   docker build .                        (Dockerfile: app, VERSION, mctrade-dryrun/, data/existing_contacts.csv)
+#   docker build -f Dockerfile.space .    (also tests/synth2 + tests/synth2_gt.json for the demo cards)
+.git
+.github
+.claude
 .venv
 **/__pycache__
-data/*.db
-data/uploads
-data/exports
-data/qa-backup-uploads
-data/server.log
+*.zip
+dist
+build
+packaging/build
+backups
+models
 certs
 shots
 qa
 bench
-tests
-*.zip
+audits
+docs
+# tests: only the demo's synthetic cards are needed (Dockerfile.space)
+tests/*
+!tests/synth2
+!tests/synth2_gt.json
+# runtime data (only data/existing_contacts.csv is copied)
+data/*.db
+data/*.db-*
+data/uploads
+data/exports
+data/qa-backup-uploads
+data/server.log
 data/inbox
 data/jobs_done
 data/*.qa-backup*
-audits
 data/thumbs
+data/ai-helper
+data/corrections

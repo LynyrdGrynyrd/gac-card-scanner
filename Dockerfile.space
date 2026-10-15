@@ -2,20 +2,33 @@
 # Public demo mode is forced on (GAC_DEMO=1): synthetic cards, shared login, preview-only exports, wiped every 6 h.
 # The optional AI double-check (Qwen3-VL-4B-Instruct GGUF, Apache-2.0) is downloaded from Hugging Face at START,
 # not baked in, so the image stays small; if the download or llama-server fails, the app runs rules-only (OCR + parser).
-FROM python:3.12-slim
+# Build: scripts/make_space.sh (makes the Space folder; this file becomes its Dockerfile), or from the repo root:
+#   docker build -f Dockerfile.space .
+# python:3.12-slim pinned by digest (Dependabot proposes updates); keep in step with Dockerfile
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng libglib2.0-0 libgomp1 libgl1 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-# llama.cpp CPU build (MIT), pinned; a failed download only disables the AI double-check
-ARG LLAMA_TAG=b11588
-RUN mkdir -p /opt/llama && (curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" \
-      | tar -xz -C /opt/llama --strip-components=1 && /opt/llama/llama-server --version || echo "llama.cpp download failed: demo will run rules-only")
+# llama.cpp CPU build (MIT), pinned to the same build as the desktop AI helper (app/ai_helper.py LLAMA_BUILD) and
+# sha256-checked. A failed download only disables the AI double-check; a checksum mismatch fails the build.
+ARG LLAMA_TAG=b11604
+ARG LLAMA_SHA256=841d492f98d08e2a832098ca23101bf3a36ac226f5919c00adb0f5c39bbbb655
+RUN mkdir -p /opt/llama && cd /tmp \
+    && if curl -fsSL -o llama.tgz "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz"; then \
+         echo "${LLAMA_SHA256}  llama.tgz" | sha256sum -c - || { echo "llama.cpp ${LLAMA_TAG}: sha256 mismatch"; exit 1; }; \
+         tar -xzf llama.tgz -C /opt/llama --strip-components=1 && /opt/llama/llama-server --version \
+           || { echo "llama.cpp did not run: demo will run rules-only"; rm -rf /opt/llama/*; }; \
+       else echo "llama.cpp download failed: demo will run rules-only"; fi \
+    && rm -f /tmp/llama.tgz
 # HF Spaces run the container as uid 1000
 RUN useradd -m -u 1000 user
 WORKDIR /home/user/app
-COPY --chown=user requirements.txt .
-RUN pip install -r requirements.txt
+COPY --chown=user requirements.lock.txt .
+RUN pip install -r requirements.lock.txt
 COPY --chown=user app ./app
+COPY --chown=user VERSION ./VERSION
+COPY --chown=user mctrade-dryrun ./mctrade-dryrun
+COPY --chown=user LICENSE THIRD-PARTY-NOTICES.md ./
 COPY --chown=user data/existing_contacts.csv ./data/existing_contacts.csv
 COPY --chown=user tests/synth2 ./tests/synth2
 COPY --chown=user tests/synth2_gt.json ./tests/synth2_gt.json

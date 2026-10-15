@@ -1,18 +1,48 @@
-cryptography==50.0.2
-fastapi==0.143.0
-gender-guesser==0.4.0
-numpy==2.5.4
-onnxruntime==1.31.0
-opencv-python-headless==5.0.0.93
-openpyxl==3.1.5
-phonenumbers==9.0.41
-pillow==12.3.0
-pytesseract==0.3.13
-python-multipart==0.0.32
-qrcode==8.2
-rapidfuzz==3.14.6
-rapidocr-onnxruntime==1.2.3
-uvicorn==0.54.0
-zxing-cpp==3.1.1
-pillow_heif==1.8.1
-pypdfium2==5.14.0
+# GAC Card Scanner: the tested, FULLY pinned dependency set (every transitive package). Used by CI, the release builds,
+# Docker, the Hugging Face Space and start.command / start.bat.   Install:  pip install -r requirements.lock.txt
+# Resolved for Python 3.12-3.13 on Linux, Windows and macOS (environment markers flag the platform-only packages) with:
+#   uv pip compile requirements.txt --universal --python-version 3.12 --no-header --annotation-style line -o requirements.lock.txt
+# Change requirements.txt (the ranges) and regenerate; don't hand-edit versions here (Dependabot PRs are fine).
+# opencv: only opencv-python is installed (rapidocr-onnxruntime requires it); opencv-python-headless is deliberately left out.
+# macOS Intel: onnxruntime stopped shipping x86_64 macOS wheels after 1.23, so the release workflow swaps in 1.23.2 there.
+annotated-doc==0.0.5      # via fastapi
+annotated-types==0.8.0    # via pydantic
+anyio==4.15.1             # via starlette
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'  # via cryptography
+click==8.5.0              # via uvicorn
+colorama==0.4.6 ; sys_platform == 'win32'  # via qrcode
+cryptography==50.0.2      # via -r requirements.txt
+et-xmlfile==2.0.0         # via openpyxl
+fastapi==0.143.0          # via -r requirements.txt
+flatbuffers==25.12.19     # via onnxruntime
+gender-guesser==0.4.0     # via -r requirements.txt
+h11==0.16.0               # via uvicorn
+idna==3.20                # via anyio
+numpy==2.5.4              # via onnxruntime, opencv-python, rapidocr-onnxruntime, shapely, -r requirements.txt
+onnxruntime==1.31.0       # via rapidocr-onnxruntime, -r requirements.txt
+opencv-python==5.0.0.93   # via rapidocr-onnxruntime, -r requirements.txt
+openpyxl==3.1.5           # via -r requirements.txt
+opentelemetry-api==1.45.1  # via fastapi
+packaging==26.3           # via onnxruntime, pytesseract
+phonenumbers==9.0.41      # via -r requirements.txt
+pillow-heif==1.8.1        # via -r requirements.txt
+pillow==12.3.0            # via pillow-heif, pytesseract, rapidocr-onnxruntime, -r requirements.txt
+protobuf==7.36.2          # via onnxruntime
+pyclipper==1.4.0          # via rapidocr-onnxruntime
+pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'  # via cffi
+pydantic-core==2.50.1     # via pydantic
+pydantic==2.14.1          # via fastapi
+pypdfium2==5.14.0         # via -r requirements.txt
+pytesseract==0.3.13       # via -r requirements.txt
+python-multipart==0.0.32  # via -r requirements.txt
+pyyaml==6.0.3             # via rapidocr-onnxruntime
+qrcode==8.2               # via -r requirements.txt
+rapidfuzz==3.14.6         # via -r requirements.txt
+rapidocr-onnxruntime==1.2.3  # via -r requirements.txt
+shapely==2.2.0            # via rapidocr-onnxruntime
+six==1.17.0               # via rapidocr-onnxruntime
+starlette==1.8.0          # via fastapi
+typing-extensions==4.16.0  # via anyio, fastapi, opentelemetry-api, pydantic, pydantic-core, starlette, typing-inspection
+typing-inspection==0.4.4  # via fastapi, pydantic
+uvicorn==0.54.0           # via -r requirements.txt
+zxing-cpp==3.1.1          # via -r requirements.txt

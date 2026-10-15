@@ -1,10 +1,19 @@
 # Code signing & notarization (prep)
 
-Status: **not signed yet.** Windows installers trigger SmartScreen ("More info → Run anyway"); macOS DMGs are ad-hoc
-signed and need right-click → Open. This page lists the options, what each costs, and ready-to-paste workflow steps.
-All steps are **conditional on secrets being present**, so the current unsigned release keeps working until someone
-sets them up. (The release workflow lives in the public repo `.github/workflows/release.yml`; it is owned by the
-packaging worker, so the snippets below are proposals to paste there, not edits.)
+Status: **not signed yet** (no certificates configured). Windows installers trigger SmartScreen ("More info → Run anyway");
+macOS DMGs are ad-hoc signed and need right-click → Open. This page lists the options and what each costs.
+
+**Already wired into `.github/workflows/release.yml`** (each step runs only when its secrets exist, so unsigned releases
+keep working until someone sets them up):
+- Windows, own certificate (PFX, e.g. an OV certificate): secrets `WIN_CERT_PFX_BASE64` + `WIN_CERT_PASSWORD` →
+  `packaging/windows/sign.ps1` signs `GAC Card Scanner.exe` after PyInstaller and the setup .exe after Inno Setup.
+- macOS: secrets `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` (+ `APPLE_API_KEY_BASE64`,
+  `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` for notarization) → `packaging/macos/sign_notarize.sh --sign-only` signs the .app
+  before the DMG is made, then a second call signs, notarizes and staples the DMG. Signing errors fail the build.
+- Every installer also gets a build-provenance attestation (`actions/attest-build-provenance`).
+
+SignPath Foundation and Azure Artifact Signing need their own GitHub actions; the snippets below are still proposals
+(pin any action you add to a commit SHA, like the others in the workflow).
 
 Helper scripts in this branch (copy to `gac-public/packaging/` with the snippets):
 - `packaging/macos/sign_notarize.sh` + `packaging/macos/entitlements.plist`: Developer ID sign (hardened runtime), notarize with `notarytool`, staple. No-op without secrets.
@@ -57,7 +66,7 @@ Steps:
 3. App Store Connect → Users and Access → Integrations → **App Store Connect API key** (role Developer) → download `AuthKey_XXXX.p8`, note Key ID + Issuer ID.
 4. Secrets: `MACOS_CERT_P12_BASE64` (`base64 -i cert.p12`), `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY` (e.g. `Developer ID Application: Greater Akron Chamber (TEAMID)`), `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`.
 
-## Proposed workflow snippets (for gac-public `.github/workflows/release.yml`)
+## Workflow snippets (SignPath / Azure: proposals; PFX and macOS: already in release.yml)
 
 Secrets can't be read in `if:` directly, so each job first exports a flag.
 
@@ -132,7 +141,7 @@ Replace "Ad-hoc sign" with (ad-hoc stays as fallback):
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-        run: bash packaging/macos/sign_notarize.sh "dist/GAC Card Scanner.app"     # no-op without secrets
+        run: bash packaging/macos/sign_notarize.sh --sign-only "dist/GAC Card Scanner.app"     # no-op without secrets
 ```
 and after "DMG":
 ```yaml
