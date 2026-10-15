@@ -215,6 +215,7 @@ function newBatch() {
   // round 8 (newcomer r8 N2): the batch name is kept exactly as typed (only spaces tidied, control characters and < > dropped);
   // nothing is appended. Your own batch with the same name from the last 12 h is reused; if someone else (or an older batch)
   // already uses the name, a visible " (2)" is added and you are told.
+  if (B) B.rows.forEach(dropThumb);   // audit 2026-10: the previous batch's rows are gone from the page
   const d = new Date(), id = "B" + d.toISOString().replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);   // round 13: unique even when two people start in the same second
   const name = $("#batchName").value.replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   const norm = x => (x || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -254,16 +255,33 @@ async function enqueue(files) {
   else if (renamed) { const old = B.label; newBatch(); toast(`Started a new batch “${B.label}” (the previous one was “${old}”).`, 6000); }
   if (!B) newBatch();
   $("#clearBatch").dataset.fresh = "0";
-  B.rows = B.rows.filter(r => r.state !== "cancel");   // round 21 (reviewer r20): no stale cancelled rows on the next upload
+  B.rows = B.rows.filter(r => r.state !== "cancel" || dropThumb(r));   // round 21 (reviewer r20): no stale cancelled rows on the next upload
   for (const f of files) {
     const row = {key: Math.random().toString(36).slice(2), file: f.webkitRelativePath || f.name, state: "wait"};
     if (/(^|\/)\./.test(row.file)) continue;              // hidden system files in folders
     if (!isImg(f)) { row.state = "rej"; row.msg = "Can't scan this file. Use JPG, PNG, HEIC or PDF."; }
     else if (!f.size) { row.state = "rej"; row.msg = "File is empty."; }
-    else { row.blob = f; row.thumb = isPdf(f) || /\.hei[cf]$/i.test(f.name) ? null : URL.createObjectURL(f); upq.push(row); }
+    else { row.blob = f; row.thumb = null; if (!isPdf(f) && !/\.hei[cf]$/i.test(f.name)) thq.push(row); upq.push(row); }
     ROWB.set(row, B); B.rows.push(row);
   }
-  B.stopped = false; saveB(); renderBatch(); pumpUploads();
+  B.stopped = false; saveB(); renderBatch(); pumpUploads(); pumpThumbs();
+}
+// audit 2026-10: upload thumbnails were full-resolution blob URLs that were never revoked (hundreds of decoded 12 MP photos
+// on a big batch). Now one ~96 px thumbnail per photo, made one at a time; its URL is revoked when the row goes.
+const thq = []; let thBusy = false;
+function dropThumb(r) { if (r && r.thumb && r.thumb.startsWith("blob:")) URL.revokeObjectURL(r.thumb); if (r) r.thumb = null; return false; }
+async function pumpThumbs() {
+  if (thBusy) return; thBusy = true;
+  try { while (thq.length) {
+    const r = thq.shift(), live = () => B && B.rows.includes(r) && r.blob; if (!live() || r.thumb) continue;
+    let u = null;
+    try { const bm = await createImageBitmap(r.blob, {resizeWidth: 96, resizeQuality: "low"}), c = document.createElement("canvas");
+      c.width = bm.width; c.height = bm.height; c.getContext("2d").drawImage(bm, 0, 0); if (bm.close) bm.close();
+      const tb = await new Promise(res => c.toBlob(res, "image/jpeg", 0.7)); if (tb) u = URL.createObjectURL(tb); } catch {}
+    if (!u) u = URL.createObjectURL(r.blob);   // no resize support (older browsers): the photo itself, as before
+    if (!live()) { URL.revokeObjectURL(u); continue; }
+    r.thumb = u; renderRow(r);
+  } } finally { thBusy = false; }
 }
 function pumpUploads() {
   if (AUTH_PAUSED) return;
@@ -324,7 +342,7 @@ function splitRow(row, j, bb = B) {
   const dir = row.file.includes("/") ? row.file.slice(0, row.file.lastIndexOf("/") + 1) : "";
   const rows = j.jobs.map(x => ({key: Math.random().toString(36).slice(2), file: dir + x.file, state: x.job ? "queued" : (x.status === 409 ? "dup" : "rej"),
     job: x.job, msg: x.job ? "" : x.error, dupOf: x.duplicate_of, src: row.file}));
-  bb.rows.splice(bb.rows.indexOf(row), 1, ...rows);
+  bb.rows.splice(bb.rows.indexOf(row), 1, ...rows); dropThumb(row);
   toast(`${row.file.split("/").pop()}: ${j.jobs.length} cards found` + (j.back_skipped ? ". Back photo not used (single cards only)." : "."), 6000);
 }
 let pollT = null;
@@ -335,8 +353,9 @@ async function poll() {
   if (!live.length) return;
   try {
     const j = await call("/api/jobs?ids=" + live.map(r => r.job).join(","));
+    const byJob = new Map(B.rows.filter(x => x.job).map(x => [x.job, x]));   // audit 2026-10: no O(n²) find on big batches
     for (const job of j.jobs) {
-      const r = B.rows.find(x => x.job === job.id); if (!r) continue;
+      const r = byJob.get(job.id); if (!r) continue;
       if (r.pdf) {
         addKids(r, job);
         if (job.state === "split") { B.rows.splice(B.rows.indexOf(r), 1); toast(`${r.file.split("/").pop()}: ${plural(r.kids || 0, "card")} found.` + (job.note ? " " + job.note : ""), 6000); }
@@ -345,7 +364,7 @@ async function poll() {
         else { r.state = job.state; r.page = job.page; }
         continue;
       }
-      if (job.state === "done") { r.state = "done"; r.card = {id: job.card.id, img: job.card.image, name: job.card.name || (job.card.company ? "(no name) – " + job.card.company : "(no name)"), att: job.card.attention.map(a => a.text), blocked: !!job.card.blocked}; }
+      if (job.state === "done") { delete r.blob; r.state = "done"; r.card = {id: job.card.id, img: job.card.image, name: job.card.name || (job.card.company ? "(no name) – " + job.card.company : "(no name)"), att: job.card.attention.map(a => a.text), blocked: !!job.card.blocked}; }
       else if (job.state === "error") { r.state = "err"; r.msg = job.error; }
       else if (job.state === "cancelled") r.state = "cancel";
       else { r.state = job.state; r.msg = job.waiting_memory ? (job.waiting_memory_msg || "Waiting for memory…") : ""; }   // round 22: calm memory-guard wait
@@ -377,16 +396,26 @@ function rowHTML(r) {
   const th = tsrc && r.state !== "rej" ? `<img alt="" src="${tsrc}">` : `<span class="thumbph" aria-hidden="true">${r.state === "rej" ? "✕" : "▢"}</span>`;
   return `${th}<div><div class="nm">${esc(r.file)}</div><div class="progress mini" aria-hidden="true"><div style="width:${pct}%"></div></div></div><span class="st ${cls}">${st}</span>`;
 }
-function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) li.innerHTML = rowHTML(r); }
+function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) { const h = rowHTML(r); if (li._h !== h) { li.innerHTML = h; li._h = h; } } }
 function renderBatch() {
   if (!B || !B.rows.length) { $("#batch").hidden = true; return; }
   $("#batch").hidden = false; $("#batchTitle").textContent = "Batch: " + B.label;
-  $("#batchList").innerHTML = B.rows.map(r => `<li data-k="${r.key}" class="${["rej", "dup", "err", "cancel"].includes(r.state) ? "rej" : ""}">${rowHTML(r)}</li>`).join("");
+  // audit 2026-10: the list was rebuilt on every 1.2 s poll (all images, focus lost); now only changed rows are touched
+  { const ul = $("#batchList"), old = new Map([...ul.children].map(li => [li.dataset.k, li])); let prev = null;
+    for (const r of B.rows) {
+      let li = old.get(r.key); old.delete(r.key);
+      if (!li) { li = document.createElement("li"); li.dataset.k = r.key; }
+      const h = rowHTML(r), c = ["rej", "dup", "err", "cancel"].includes(r.state) ? "rej" : "";
+      if (li._h !== h) { li.innerHTML = h; li._h = h; } if (li.className !== c) li.className = c;
+      const at = prev ? prev.nextSibling : ul.firstChild; if (at !== li) ul.insertBefore(li, at); prev = li;
+    }
+    old.forEach(li => li.remove()); }
   // round 20 (d): cancelled cards are not "finished"; they are counted on their own
   const cn = B.rows.filter(r => r.state === "cancel").length, n = B.rows.length - cn, fin = B.rows.filter(r => ["done", "rej", "dup", "err"].includes(r.state)).length;
   const ok = B.rows.filter(r => r.state === "done").length, bad = fin - ok, chk = B.rows.filter(r => r.state === "done" && r.card.att.length).length;
   const p = n ? Math.round(100 * fin / n) : 100; $("#batchBar div").style.width = p + "%"; $("#batchBar").setAttribute("aria-valuenow", p);
-  $("#batchSummary").textContent = B.stopMsg ? B.stopMsg.replace(/\.$/, "") : (B.stopped && fin === n ? `Stopped. ${ok} kept, ${cn} not scanned` : `${fin} of ${n} finished · ${ok} added`) + (chk && !B.stopped ? ` (${chk} to check)` : "") + (bad ? ` · ${bad} not added` : "") + (cn && !(B.stopped && fin === n) ? ` · ${cn} not scanned` : "");
+  const sum_ = B.stopMsg ? B.stopMsg.replace(/\.$/, "") : (B.stopped && fin === n ? `Stopped. ${ok} kept, ${cn} not scanned` : `${fin} of ${n} finished · ${ok} added`) + (chk && !B.stopped ? ` (${chk} to check)` : "") + (bad ? ` · ${bad} not added` : "") + (cn && !(B.stopped && fin === n) ? ` · ${cn} not scanned` : "");
+  if ($("#batchSummary").textContent !== sum_) $("#batchSummary").textContent = sum_;   // audit 2026-10: a live region: only real changes
   const left = n - fin;
   const qa = left ? (B.ahead || 0) : 0;   // round 14: other people's cards waiting ahead in the shared reading line count too
   const etaS = (left + qa) * (B.avg || 0), etaTxt = etaS < 60 ? "less than a minute left" : `about ${Math.round(etaS / 60)} min left`;   // round 15 (part-timer r14): no "1 min left (≈1 s per card)"
@@ -424,7 +453,7 @@ $("#cancelBatch").onclick = async () => {
   const cn = B.rows.filter(r => r.state === "cancel").length; B.stopMsg = `Stopped. ${ok} kept, ${cn} not scanned.`; saveB(); renderBatch();
   toast(B.stopMsg, 4500);
 };
-$("#clearBatch").onclick = () => { B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
+$("#clearBatch").onclick = () => { if (B) B.rows.forEach(dropThumb); B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
 function restoreBatch() { renderBatch(); poll(); refreshBatchCards(); }
 async function refreshBatchCards() {   // reviewer r9: the upload list shows each card's CURRENT state, not the one at scan time
   try { const rows = (B.rows || []).filter(r => r.state === "done" && r.card); if (!rows.length) return;
@@ -460,7 +489,8 @@ $("#fAtt").onchange = e => { Q.att = e.target.checked; pushQueueState(); renderQ
 $("#fNew").onchange = e => { Q.nx = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fDup").onchange = e => { Q.dup = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fArch").onchange = e => { Q.arch = e.target.checked; Q.sel.clear(); pushQueueState(); loadQueue(); };
-$("#fText").oninput = e => { Q.text = e.target.value; pushQueueState(); renderQueue(); };
+let fTextT = null;   // audit 2026-10: no full re-render on every keystroke
+$("#fText").oninput = e => { Q.text = e.target.value; clearTimeout(fTextT); fTextT = setTimeout(() => { pushQueueState(); renderQueue(); }, 150); };
 // round 21 (part-timer/reviewer r20): ~130 batches in the drop-down. Recent ones (and the one in use) are listed; old and test batches behind "Show all"
 let SHOWALLB = false;
 const TESTB = /\b(qa|test|demo|e2e|skeptic|r\d{1,2})\b/i;
@@ -573,9 +603,13 @@ function scheduleQueuePoll() {
     qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; const want = Q.batch, s0 = qSeq;
       try { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");   // round 16 (skeptic r15 M1): never the 200-card default page
         const cs = await call("/api/cards" + (qs.toString() ? "?" + qs : "")); if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden) return;
-        Q.cards = cs.filter(c => inBatch(c, want)); Q.cardsFor = want; renderQueue(); } catch {} }, 5000);
+        const fresh = cs.filter(c => inBatch(c, want));
+        if (Q.cardsFor === want && JSON.stringify(fresh) === JSON.stringify(Q.cards)) { scheduleQueuePoll(); return; }   // audit 2026-10: nothing changed
+        Q.cards = fresh; Q.cardsFor = want; renderQueue(); } catch {} }, 5000);
 }
 function renderQueue() {
+  const ae = document.activeElement, fTr = ae && ae !== document.body && $("#qBody").contains(ae) ? ae.closest("tr") : null;   // audit 2026-10: focus survives a re-render
+  const fId = fTr && fTr.dataset.id, fSel = ae && ae.classList && ae.classList.contains("sel") ? ".sel" : "a";
   const rows = filtered(); Q.cards.forEach(c => { STATUS[c.id] = c.status; }); SS.order = JSON.stringify(rows.map(c => c.id)); SS.queueHash = location.hash.startsWith("#queue") ? location.hash : (SS.queueHash || "#queue");
   $("#qBody").innerHTML = rows.map(c => `<tr data-id="${c.id}">
     <td><input type="checkbox" class="sel" aria-label="Select card #${c.id} ${esc(c.name)}" ${Q.sel.has(c.id) ? "checked" : ""}></td>
@@ -584,13 +618,14 @@ function renderQueue() {
     <td>${esc(c.company)}</td><td>${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
     <td class="att">${c.attention.length ? `<ul class="reasons">${c.attention.map(a => `<li><span class="flag ${a.code.startsWith("dup") ? "dup" : a.code === "invalid" ? "bad" : "low"}">${esc(a.text)}</span></li>`).join("")}</ul>` : `<span class="flag ok">Looks good</span>`}</td>
     <td><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
+  if (fId) { const tr = $(`#qBody tr[data-id="${+fId}"]`), el = tr && (tr.querySelector(fSel) || tr.querySelector("a")); if (el) el.focus({preventScroll: true}); }
   const anyFilter = Q.att || Q.nx || Q.dup || Q.text || Q.batch;
   $("#qEmpty").hidden = rows.length > 0;
   $("#qEmpty").textContent = Q.cards.length ? (anyFilter ? "No cards match. Clear the filters or search." : `No ${({pending: "pending", approved: "approved", rejected: "rejected"})[Q.s] || ""} cards in this batch. ` + (Q.s === "pending" ? "See “All”, or go to Export." : "See “Pending” or “All”.")) : "No cards yet. Go to “Scan cards” to add some.";
   if (!rows.length && Q.batch && Q.s === "pending" && !Q.att && !Q.nx && !Q.dup && !Q.text && Q.cards.length && Q.cardsFor === Q.batch && !(Q.reading && Q.batch === Q.reading))
     $("#qEmpty").innerHTML = `<b>✓ All done:</b> no pending cards in ${esc(($("#fBatch").selectedOptions[0] || {}).textContent || "this batch")}.` + (Q.cards.some(c => c.status === "approved") ? ` <a href="#export" data-export-from="${esc(Q.batch || "")}">Export it</a>` : " Nothing to export: no card was approved.");   // round 20   // round 15 (part-timer r14)
   if (!rows.length && Q.reading && Q.batch === Q.reading) $("#qEmpty").innerHTML = `<span class="spin" aria-hidden="true"></span> Reading your newest batch. Cards appear as they finish.`;
-  $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = filtered().map(c => c.id); [...Q.sel].forEach(i => { if (!vis.includes(i) || (Q.cards.find(c => c.id === i) || {}).status !== (Q.s || (Q.cards.find(c => c.id === i) || {}).status)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree
+  $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = new Set(rows.map(c => c.id)); [...Q.sel].forEach(i => { if (!vis.has(i)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree; audit 2026-10: a Set, not O(n²) (a shown card always has the shown status)
   const inB = Q.cardsFor === Q.batch ? Q.cards.filter(c => inBatch(c, Q.batch)) : [], cnt = {pending: 0, approved: 0, rejected: 0, "": inB.length};
   inB.forEach(c => cnt[c.status]++); $$("#statusTabs button").forEach(b => b.querySelector("span").textContent = `(${cnt[b.dataset.s]})`);
 

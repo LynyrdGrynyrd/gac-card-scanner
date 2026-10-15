@@ -57,3 +57,13 @@ def test_upload_401_pauses_instead_of_failing():
     assert "x.status === 401" in js and "authPause()" in js and "/api/auth/state" in js
     assert "data-retry=" in js
     assert "Please sign in" not in js.split("function upload(")[1].split("function conn(")[0]
+
+def test_upload_thumbnails_are_small_and_revoked():
+    js = _src(os.path.join(UI, "ui.js"))
+    assert "resizeWidth: 96" in js and "URL.revokeObjectURL(r.thumb)" in js
+    assert "row.thumb = isPdf(f)" not in js                      # no full-resolution blob URL per row any more
+
+def test_queue_render_is_debounced_and_keeps_focus():
+    js = _src(os.path.join(UI, "ui.js"))
+    assert re.search(r'\$\("#fText"\)\.oninput = .*setTimeout\(.*150\)', js)
+    assert "vis.includes(" not in js and "focus({preventScroll: true})" in js.split("function renderQueue(")[1].split("\n}\n")[0]
