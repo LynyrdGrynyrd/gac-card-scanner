@@ -44,6 +44,8 @@ STREET = re.compile(rf"^\s*(?:no\.?\s*)?\d{{1,6}}[a-z]?(?:-\d+)?,?\s+.*\b(?:{STR
 UNIT = re.compile(r"^(?:\d{1,3}(?:st|nd|rd|th)\s+(?:floor|fl)\.?|(?:floor|fl|level|unit|apt|room|rm|bldg|building|tower)\.?\s*#?\s*[\w-]{1,5})$", re.I)
 LABEL = re.compile(r"^(tel\.?|mailing|mail|postal|visitors?( and deliveries)?|deliver(?:y|ies)|shipping|physical|street|location|headquarters|hq|address|postanschrift|hausanschrift|anschrift|telephones?|phones?|references)\b[\w &]*:?$", re.I)
 OTHER_ADDR_LABEL = re.compile(r"visitor|deliver|physical|location|shipping|hausanschrift", re.I)
+# OSS re-check 2026-10-15: the label and the address on ONE line ("Visitors and deliveries: 47 N Main St")
+INLINE_ADDR_LABEL = re.compile(r"^((?:mailing|mail|postal|visitors?(?: and deliveries)?|deliver(?:y|ies)|shipping|physical|street|location|headquarters|hq|office|address|postanschrift|hausanschrift|anschrift)(?:\s+address)?)\s*:\s*(\S.*)$", re.I)
 TITLE_WORDS = r"president|ceo|cfo|coo|cto|cio|cmo|owner|owners|founder|co-founder|director|directeur|directora?|manager|vp|svp|evp|vice|officer|partner|chair|chairman|chairwoman|coordinator|specialist|engineer|consultant|analyst|associate|executive|realtor|attorney|lawyer|counsel|agent|advisor|adviser|sales|marketing|lead|head|principal|supervisor|administrator|representative|secretary|journalist|author|writer|editor|photographer|designer|artist|coach|scout|technologist|developer|programmer|architect|accountant|cpa|broker|producer|professor|dean|instructor|teacher|nurse|physician|doctor|dentist|therapist|pastor|treasurer|member|candidate|senator|congressman|mayor|commissioner|trustee|recruiter|recruitment|admissions|strategist|planner|assistant|intern|clerk|technician|mechanic|chef|baker|stylist|trainer|organizer|ambassador|attaché|attache|manager,|gm|md|principal|superintendent|controller|comptroller|auditor|underwriter|banker|lender|officer|liaison|navigator|curator|librarian|registrar|counselor"
 TITLE = re.compile(rf"\b({TITLE_WORDS})\b", re.I)
 COMPANY = re.compile(r"\b(inc|incorporated|llc|l\.l\.c|llp|ltd|limited|corp|corporation|co\.|company|group|bank|hospital|university|college|associates|partners|solutions|services|industries|chamber|foundation|clinic|law|consulting|systems|tire|rubber|realty|insurance|construction|labs?|gmbh|ag|s\.a\.|sa|plc|pty|enterprises|entertainment|designs?|studios?|media|trading|computer|computers|games|restaurant|cafe|center|centre|galeria|gallery|embassy|agency|institute|team|club|association|society|council|network|holdings|capital|financial|partners|technologies|technology|tech|electronics|motors|works|werke|aktiengesellschaft|foods|market|press|publishing|records|radio|realty|properties|homes|builders|dental|medical|health|healthcare|pharmacy|church|ministries|school|academy|museum|hotel|inn|resort|salon|spa|fitness|logistics|transport|manufacturing|supply|supplies|wikimedia|wikipedia)\b", re.I)
@@ -75,6 +77,11 @@ def _norm_line(l):
     l = re.sub(r"(,\s*)0([A-Z])(?=\s*\d{5})", r"\1O\2", l)           # ",0H44106" -> ",OH44106"
     l = re.sub(r"\b([A-Z]{2})(\d{5})\b", r"\1 \2", l)               # "OH44106" -> "OH 44106"
     l = re.sub(r"^(\d{2,5})[lI](?=\s)", r"\g<1>1", l)                # "291l Cedar" -> "2911 Cedar"
+    m = re.match(r"^(\d[\dOoIl|]{1,5})(?=\s)", l)                     # OSS re-check 2026-10-15: "25o8 Jonathan Terrace Ave" lost the
+    if m and not m.group(1).isdigit():                                # whole street line; fixed only when the result reads as a street
+        fx = m.group(1).translate(str.maketrans("OoIl|", "00111")) + l[m.end():]
+        if STREET.search(fx) and not STREET.search(l): l = fx
+    l = re.sub(r"\bP\.?\s?0\.?\s*(?=Box\b)", "P.O. ", l, flags=re.I)   # "P.0. Box" (zero for O) -> "P.O. Box"
     if "@" not in l and not re.search(r"www|https?:|\.[a-z]{2,3}\b", l):
         l = re.sub(r"^(\d{1,6})(?=[A-Z][a-z])", r"\1 ", l)                          # "5811Jones" -> "5811 Jones"
         l = re.sub(r"(?<=[a-z]{4})(?=[A-Z][a-z]{2,})", " ", l)                       # "CourseAve" -> "Course Ave" (keeps McX/LaX/DeX)
@@ -182,7 +189,14 @@ def parse(text: str, meta=None) -> dict:
     conf["website"] = 0.85 if f["website"] else 0
     f["phones"] = _phones(lines, used)
     conf["phones"] = 0.9 if f["phones"] and all(p["valid"] for p in f["phones"]) else (0.5 if f["phones"] else 0)
-    # labels
+    # labels. A label sharing its line with the address ("Mailing address: PO Box 12") counts like a label on its own line:
+    # the label text is dropped, and an other-address label (visitors, deliveries …) starts the other address on that line
+    inline_other = set()
+    for i, l in enumerate(lines):
+        m = INLINE_ADDR_LABEL.match(l)
+        if m and i not in used and (STREET.search(m.group(2)) or US_ZIP.search(m.group(2))):
+            lines[i] = m.group(2)
+            if OTHER_ADDR_LABEL.search(m.group(1)): inline_other.add(i)
     other_after = set()
     for i, l in enumerate(lines):
         if LABEL.match(l) and not re.search(r"\d", l) and len(l.split()) <= 4:
@@ -215,17 +229,17 @@ def parse(text: str, meta=None) -> dict:
     blocks, cur = [], []
     for i in range(n):
         if kinds[i]:
-            if cur and (block[i] != block[cur[-1]] and i - cur[-1] > 1 or i - cur[-1] > 2): blocks.append(cur); cur = []
+            if cur and (block[i] != block[cur[-1]] and i - cur[-1] > 1 or i - cur[-1] > 2 or i in inline_other): blocks.append(cur); cur = []
             cur.append(i)
         elif cur and (not (i in used and LABEL.match(lines[i])) or i in other_after): blocks.append(cur); cur = []
     if cur: blocks.append(cur)
     blocks = [bl for bl in blocks if any(kinds[i] == 2 for i in bl) or any(STREET.search(lines[i]) and re.search(r"\d", lines[i]) for i in bl)]
-    if other_after:
-        oa = min(other_after)
+    if other_after or inline_other:
+        oa = min([*other_after, *(i - 0.5 for i in inline_other)])   # an inline label sits "just before" its own line
         later = [bl for bl in blocks if bl[0] > oa]
         if later: f["other_address"] = ", ".join(clean_addr(lines[i]) for i in later[0]); used |= set(later[0]); blocks = [bl for bl in blocks if bl is not later[0]]
         else:
-            j = oa + 1; parts = []
+            j = int(oa + 1); parts = []
             while j < n and j not in used and len(parts) < 2 and not LABEL.match(lines[j]): parts.append(lines[j]); used.add(j); j += 1
             f["other_address"] = ", ".join(parts)
     if blocks:
@@ -234,6 +248,7 @@ def parse(text: str, meta=None) -> dict:
         order = sorted(best, key=lambda i: (0 if (STREET.search(lines[i]) and not US_ZIP.search(lines[i])) else 1, i)) if any(US_ZIP.search(lines[i]) or CITY_ST_ZIP.search(lines[i]) for i in best) else best
         f["address"] = ", ".join(dict.fromkeys(clean_addr(lines[i]) for i in order if clean_addr(lines[i])))
         used |= set(best)
+    elif f["other_address"]: f["address"], f["other_address"] = f["other_address"], ""   # the only address on the card is the address
     conf["address"] = 0.85 if US_ZIP.search(f["address"]) else (0.5 if f["address"] else 0)
     # department
     for i, l in enumerate(lines):

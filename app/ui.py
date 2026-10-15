@@ -909,6 +909,7 @@ def _run(jid, data, engine, ext, batch, label, fname, sha, who, skip_ai=False): 
     with JLOCK:
         if (JOBS.get(jid) or {}).get("state") != "queued": return   # round 19: cancelled while waiting in line
         JOBS[jid]["state"] = "reading"; JOBS[jid]["started"] = time.time()
+    final = None
     try:
         if data is None:   # queued jobs keep only a file on disk, not the photo bytes in memory
             with open(os.path.join(INBOX, jid + ".bin"), "rb") as fh: data = fh.read()
@@ -926,18 +927,21 @@ def _run(jid, data, engine, ext, batch, label, fname, sha, who, skip_ai=False): 
         else: maybe_ai_check(cid)
         cards, metas = _active()
         e = enrich(store.get(cid), cards, metas)
-        with JLOCK: JOBS[jid] |= {"state": "done", "card": e, "finished": time.time()}
+        final = {"state": "done", "card": e, "finished": time.time()}
     except Exception as ex:
-        with JLOCK:
-            if (JOBS.get(jid) or {}).get("state") == "cancelled" or isinstance(ex, _Cancelled): JOBS[jid] |= {"state": "cancelled", "finished": time.time()}
-            else: JOBS[jid] |= {"state": "error", "error": _calm_read_error(ex), "finished": time.time()}
+        with JLOCK: stopped = (JOBS.get(jid) or {}).get("state") == "cancelled" or isinstance(ex, _Cancelled)
+        final = {"state": "cancelled", "finished": time.time()} if stopped else {"state": "error", "error": _calm_read_error(ex), "finished": time.time()}
     finally:
-        with JLOCK: j = dict(JOBS.get(jid) or {})
+        # the final state is published only after the done record is written and the inbox files (.reading included) are
+        # gone, so nobody polling the job sees "done" while the reader still owns its files (flaky on Windows CI)
+        with JLOCK: j = dict(JOBS.get(jid) or {}) | (final or {})
         try:
             with open(os.path.join(DONE, jid + ".json"), "w") as fh:
                 json.dump({k: j.get(k) for k in ("id", "state", "file", "batch", "error", "created", "started", "finished")} | {"card_id": (j.get("card") or {}).get("id")}, fh)
         except Exception: pass
         _inbox_clear(jid)
+        if final:
+            with JLOCK: JOBS[jid] |= final
 
 @router.post("/api/jobs")
 async def create_job(request: Request, image: UploadFile = File(...), engine: str = Form("auto"), batch: str = Form(""),
