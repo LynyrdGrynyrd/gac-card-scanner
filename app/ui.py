@@ -1459,6 +1459,8 @@ def _ai_run(cid, why):
         c = store.get(cid); f = c["fields"]; g = merge.merge(f, v, c["raw_text"] or "")
         for k in ("address", "other_address"):   # a line break in the AI's address is a separator, never glue ('State RdCuyahoga')
             if isinstance(g.get(k), str): g[k] = re.sub(r"\s*[\r\n]+\s*", ", ", g[k]).strip(" ,")
+        from . import consistency as _cons, plausibility as _plaus
+        _cons.apply(g); _plaus.apply(g)   # audit 2026-10: flags describe the merged values (merge() is pure: f is untouched)
         src = sources(cid)
         edited = {k for k, x in src.items() if str(x).startswith("edited")}
         if "first_name" in edited or "last_name" in edited: edited.add("name")
@@ -2411,8 +2413,9 @@ def attach_back(cid, data, ext, initials, confirm_other_person=False, user=None)
     # unreferenced from now on, so the retention clean-up removes it with its thumbnails as an orphan
     with WRITE_LOCK: return _attach_back_write(cid, c, r, name, initials, user)
 
-SITE_TLDS = set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
-                "app dev ai tv me health law pro global group tech online site store shop church school example".split())
+from . import parser as _P
+SITE_TLDS = _P.KNOWN_TLDS | set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
+                "app dev ai tv me health law pro global group tech online site store shop church school example".split())   # audit 2026-10: one list with the parser
 def plausible_site(w, emails=()):
     """Round 10 (skeptic R9-4): a website read from the back of a card is only filled in when its domain matches an email
     domain on the card, or it is a normal-looking domain with a known ending (OCR junk like 'wvw.c0m.xq' is dropped)."""
