@@ -1,0 +1,23 @@
+# Weekly dependency update PRs. CI (unit tests on 3 OSes, pip-audit, accuracy gate) must pass before merging.
+# requirements.lock.txt is the tested pin set; after a Python bump, regenerate it as its header says.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
