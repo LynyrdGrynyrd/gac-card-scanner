@@ -2,7 +2,7 @@
 so every path goes through the same checks). /api/scan contract untouched.
 UI state (batches, hashes, archive, audit history, duplicate decisions, undo snapshots, exports, field sources)
 lives in extra tables in the same SQLite DB so store.py stays unchanged."""
-import asyncio, copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, html as _html
+import asyncio, copy, io, os, re, csv, json, time, uuid, hashlib, datetime, threading, sqlite3, html as _html
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse, FileResponse, Response, RedirectResponse, JSONResponse
@@ -41,8 +41,7 @@ for _d in (UP, EXP, INBOX, DONE): os.makedirs(_d, exist_ok=True)
 # ---------------------------------------------------------------- extra tables
 META_COLS = ["card_id", "batch", "batch_label", "filename", "sha256", "archived", "dup_resolution", "crm_action", "exported",
              "field_sources", "image_deleted", "ai_status", "ai_detail", "override", "reexport", "back_image", "kept_apart", "ai_rejected"]
-def db():
-    c = store.db()
+def _init_ui(c):
     c.execute("""CREATE TABLE IF NOT EXISTS card_meta(card_id INTEGER PRIMARY KEY, batch TEXT, batch_label TEXT,
       filename TEXT, sha256 TEXT, archived INTEGER DEFAULT 0, dup_resolution TEXT, crm_action TEXT, exported REAL)""")
     have = {r[1] for r in c.execute("PRAGMA table_info(card_meta)")}
@@ -61,6 +60,13 @@ def db():
         try: c.execute("ALTER TABLE exports ADD COLUMN batch_label TEXT")
         except Exception as e:
             if "duplicate column" not in str(e): raise
+    for name, ix in (("ix_hist_card", "card_history(card_id, id)"), ("ix_hist_action", "card_history(action, reviewer)"),
+                     ("ix_meta_batch", "card_meta(batch)"), ("ix_meta_sha", "card_meta(sha256)"),
+                     ("ix_actions_user", "actions(user_id, undone)"), ("ix_exports_file", "exports(filename)")):
+        c.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {ix}")
+def db():
+    """Audit 2026-10 P0-4: schema set-up runs once per database file, not on every connection."""
+    c = store.db(); store.once("ui", _init_ui)
     return c
 
 def meta(cid):
@@ -68,9 +74,12 @@ def meta(cid):
     return dict(r) if r else {k: None for k in META_COLS} | {"card_id": cid, "archived": 0}
 
 def set_meta(cid, **kw):
-    m = meta(cid); m.update(kw)
+    """Audit 2026-10 P0-1: write ONLY the given columns. The old read-whole-row / INSERT OR REPLACE put back stale values
+    of every other column, so a background writer (AI check, export marking, retention) could undo a reviewer's change."""
+    cols = [k for k in kw if k in META_COLS and k != "card_id"]
     with db() as c:
-        c.execute(f"INSERT OR REPLACE INTO card_meta({','.join(META_COLS)}) VALUES({','.join(':' + k for k in META_COLS)})", {k: m.get(k) for k in META_COLS})
+        c.execute("INSERT INTO card_meta(card_id) VALUES(?) ON CONFLICT(card_id) DO NOTHING", (cid,))
+        if cols: c.execute(f"UPDATE card_meta SET {','.join(k + '=?' for k in cols)} WHERE card_id=?", (*(kw[k] for k in cols), cid))
 
 def log(cid, reviewer, action, frm=None, to=None, detail=None):
     with db() as c:
@@ -817,6 +826,13 @@ def _thumb(p, w):
         return t
     except Exception:
         return None
+def remove_photo(name):
+    """Audit 2026-10 F08: delete an uploaded photo AND every thumbnail made from it. Safe to repeat (missing files are fine).
+    Use this wherever a front or back photo is deleted (retention, permanent delete, orphan clean-up)."""
+    if not name: return
+    try: os.remove(os.path.join(UP, os.path.basename(name)))
+    except FileNotFoundError: pass
+    drop_thumbs(name)
 def drop_thumbs(name):
     """Delete cached thumbnails of a photo (called wherever the photo itself is deleted)."""
     if not name: return
@@ -1281,25 +1297,30 @@ AI_TURN: dict = {}       # batch -> checks queued so far (round-robin priority)
 AI_RETRIES: dict = {}    # cid -> automatic retries after connection refused
 AI_MAX_WAIT = int(os.environ.get("AI_MAX_WAIT", "1800"))   # background checks waiting longer than this are skipped
 def _ai_worker():
+    """Audit 2026-10 P0-3: one failing card (e.g. 'database is locked') must not end the thread and stop every later check."""
     while True:
-        prio, seq, cid, why = AI_Q.get()
-        while BACK_BUSY.is_set(): time.sleep(0.25)   # yield to a person's back-of-card OCR
-        if AI_WAIT.get(cid) != (prio, seq): continue      # superseded (e.g. re-queued as manual)
-        AI_WAIT.pop(cid, None)
-        try:
-            c = store.get(cid); m = meta(cid); det = json.loads(m.get("ai_detail") or "{}")
-        except Exception: c, m, det = None, {}, {}
-        why_skip = None
-        if not c or c["status"] != "pending": why_skip = "the card was already decided"
-        manual = bool(det.get("manual"))
-        if not why_skip and not manual and m.get("exported"): why_skip = "the card was already exported"
-        elif not why_skip and not manual and time.time() - (det.get("queued_at") or time.time()) > AI_MAX_WAIT: why_skip = "the AI was busy for too long"
-        if why_skip:
-            if c: set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"why": why, "note": why_skip}))
-            continue
-        t0 = time.time(); AI_RUNNING.update(cid=cid, since=t0)
-        try: _ai_run(cid, why)
-        finally: AI_TIMES.append(time.time() - t0); del AI_TIMES[:-10]; AI_RUNNING.clear()
+        try: _ai_worker_step()
+        except Exception as e:
+            print("AI worker error (continuing):", repr(e), flush=True); time.sleep(1)
+def _ai_worker_step():
+    prio, seq, cid, why = AI_Q.get()
+    while BACK_BUSY.is_set(): time.sleep(0.25)   # yield to a person's back-of-card OCR
+    if AI_WAIT.get(cid) != (prio, seq): return      # superseded (e.g. re-queued as manual)
+    AI_WAIT.pop(cid, None)
+    try:
+        c = store.get(cid); m = meta(cid); det = json.loads(m.get("ai_detail") or "{}")
+    except Exception: c, m, det = None, {}, {}
+    why_skip = None
+    if not c or c["status"] != "pending": why_skip = "the card was already decided"
+    manual = bool(det.get("manual"))
+    if not why_skip and not manual and m.get("exported"): why_skip = "the card was already exported"
+    elif not why_skip and not manual and time.time() - (det.get("queued_at") or time.time()) > AI_MAX_WAIT: why_skip = "the AI was busy for too long"
+    if why_skip:
+        if c: set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"why": why, "note": why_skip}))
+        return
+    t0 = time.time(); AI_RUNNING.update(cid=cid, since=t0)
+    try: _ai_run(cid, why)
+    finally: AI_TIMES.append(time.time() - t0); del AI_TIMES[:-10]; AI_RUNNING.clear()
 # started by start_workers() from the served app's lifespan, never on import (mctrade-r3 incident)
 def ai_progress(cid):
     """Where a card is in the AI line and how long a check usually takes."""
@@ -1621,14 +1642,16 @@ def ai_skip_waiting(request: Request):
 def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
     """Removal request: delete the card, its photo, metadata, history and any undo snapshots holding its data.
     Exported files already downloaded are outside the app; stored export copies containing it are deleted too."""
+    if body.get("confirm") != cid: return JSONResponse({"error": "Confirm by sending {\"confirm\": <card id>}."}, 422)
+    # audit 2026-10 P0-5: under WRITE_LOCK (a save that already passed its version check can't write merged values back),
+    # database first and in ONE transaction together with its audit rows, files after the commit, VACUUM last and optional
+    with WRITE_LOCK: return _hard_delete(cid, request)
+
+def _hard_delete(cid, request):
     c = store.get(cid)
     if not c: raise HTTPException(404, "Card not found")
-    if body.get("confirm") != cid: return JSONResponse({"error": "Confirm by sending {\"confirm\": <card id>}."}, 422)
-    p = os.path.join(UP, os.path.basename(c.get("image") or ""))
-    if c.get("image") and os.path.isfile(p): os.remove(p)
-    drop_thumbs(c.get("image"))
-    bi = meta(cid).get("back_image")
-    if bi and os.path.isfile(os.path.join(UP, os.path.basename(bi))): os.remove(os.path.join(UP, os.path.basename(bi)))
+    user = request.state.user
+    photos = [c.get("image"), meta(cid).get("back_image")]
     if os.path.isdir(CORR):
         for fn in os.listdir(CORR):
             if fn.startswith(f"card{cid}_"): os.remove(os.path.join(CORR, fn))
@@ -1636,7 +1659,7 @@ def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
         if os.path.isfile(gp):
             with open(gp) as fh: gt = json.load(fh)
             with open(gp, "w") as fh: json.dump({k: v for k, v in gt.items() if not k.startswith(f"card{cid}_")}, fh, indent=1)
-    removed_exports = 0; removed_merged = 0
+    removed_exports = 0; removed_merged = 0; export_files = []
     x0 = db(); x0.execute("PRAGMA secure_delete=ON")   # overwrite freed pages so the text can't be recovered from the file
     with x0 as x:
         x.execute("DELETE FROM cards WHERE id=?", (cid,)); x.execute("DELETE FROM card_meta WHERE card_id=?", (cid,))
@@ -1681,11 +1704,20 @@ def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
         for e in x.execute("SELECT id, ts, stored, card_ids FROM exports WHERE stored IS NOT NULL").fetchall():
             ids_ = json.loads(e["card_ids"] or "[]")
             if cid in ids_ or any(t in ids_ and e["ts"] >= targets[t][0] for t in targets):   # also exports of a merge target made after the merge
-                ep = os.path.join(EXP, e["stored"])
-                for q in [ep] + [ep + "." + n for n in COMPANION]:
-                    if os.path.isfile(q): os.remove(q)
+                ep = os.path.join(EXP, e["stored"]); export_files += [ep] + [ep + "." + n for n in COMPANION]
                 x.execute("UPDATE exports SET stored=NULL WHERE id=?", (e["id"],)); removed_exports += 1
-    x0.execute("VACUUM"); x0.close()
+        # the audit rows are part of the same transaction: no delete without its record, no record without the delete
+        x.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
+                  (cid, time.time(), user["initials"], "deleted_on_request", None, None, json.dumps({"export_copies": removed_exports, "merged_removed": removed_merged})))
+        x.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), user["username"],
+                  f"deleted card #{cid} on request (photo, details; history kept without personal data; {removed_exports} stored export file(s))", None))
+    for ph in photos: remove_photo(ph)   # F08: front and back, with their thumbnails
+    for q in export_files:
+        try: os.remove(q)
+        except FileNotFoundError: pass
+    try: x0.execute("VACUUM")   # compacts the file so freed pages are gone; best-effort (the delete is already committed)
+    except sqlite3.OperationalError as e: print("VACUUM after delete skipped:", e, flush=True)
+    finally: x0.close()
     for fn in os.listdir(DONE):   # job records (they hold the original file name)
         p_ = os.path.join(DONE, fn)
         try:
@@ -1695,8 +1727,6 @@ def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
     with JLOCK:
         for jid in [k for k, j in JOBS.items() if (j.get("card") or {}).get("id") == cid]: JOBS.pop(jid, None)
     AI_WAIT.pop(cid, None)
-    log(cid, request.state.user["initials"], "deleted_on_request", detail={"export_copies": removed_exports, "merged_removed": removed_merged})
-    auth.alog(request.state.user["username"], f"deleted card #{cid} on request (photo, details; history kept without personal data; {removed_exports} stored export file(s))")
     return {"deleted": cid, "export_copies_deleted": removed_exports, "merged_details_removed": removed_merged}
 
 def _redact(action, detail):
@@ -2327,8 +2357,8 @@ def attach_back(cid, data, ext, initials, confirm_other_person=False, user=None)
                              "need": "confirm_other_person", "back_name": who_b}, 409)
     name = uuid.uuid4().hex + "_back" + (ext if ext in (".jpg", ".jpeg", ".png", ".webp") else ".jpg")
     with open(os.path.join(UP, name), "wb") as fh: fh.write(data)
-    old = meta(cid).get("back_image")
-    if old and os.path.isfile(os.path.join(UP, os.path.basename(old))): os.remove(os.path.join(UP, os.path.basename(old)))
+    # audit 2026-10: a replaced back photo is no longer deleted here (Undo restores the old one and needs the file); it is
+    # unreferenced from now on, so the retention clean-up removes it with its thumbnails as an orphan
     with WRITE_LOCK: return _attach_back_write(cid, c, r, name, initials, user)
 
 SITE_TLDS = set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
@@ -2967,7 +2997,7 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
         xkey = "batch:" + (batch or "__all__"); busy_ = _export_claim(xkey, {c["id"] for c in sel}, user["username"])
         if busy_: auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + f"): another export of these cards was running (started by {busy_['by']} at {time.strftime('%H:%M:%S', time.localtime(busy_['since']))}); nothing was exported" + _cl)
         if busy_: return JSONResponse({"error": f"Another export of these cards is running right now (started by {busy_['by']} at {time.strftime('%H:%M:%S', time.localtime(busy_['since']))}). Nothing was exported: wait for it to finish, then check the export history before exporting again.", "need": "export_busy"}, 409)
-        try: return _do_export_real(kind, request, status, batch, sel, metas, user)
+        try: return _do_export_real(kind, request, status, batch, sel, metas, user, seen_)
         finally: _export_release(xkey)
     blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
     res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, preview=preview)
@@ -2991,11 +3021,24 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
         return Response(body, media_type=mt, headers=hdrs)
     raise AssertionError('unreachable')
 
-def _do_export_real(kind, request, status, batch, sel, metas, user):
+def _stale_export(kind, batch, user, sel, changed, now_, when):
+    words = {"template": "the MC Trade template", "contacts": "the MC Trade contacts file", "cards": "the cards (edited, approved or rejected)"}
+    auth.alog(user["username"], f"refused export ({kind}, " + (f"batch {batch}" if batch else "all batches") + f"): changed {when}: "
+              + ", ".join(words[k] for k in changed) + "; nothing was exported: cards " + ", ".join(f"#{c['id']}" for c in sel[:500]))
+    return JSONResponse({"error": f"{' and '.join(words[k] for k in changed).capitalize()} changed {when}. Nothing was exported: check the sign-off again, then export.",
+                         "need": "stale_review", "changed": changed, "now": now_}, 409)
+
+def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
     # re-read the set INSIDE the claim: cards exported by a run that just finished are not exported again by accident
     sel, metas, probs = _export_set(status, batch)
     if probs: return JSONResponse({"error": "Some cards in this batch look like the same person. Resolve them in the review screen before exporting.", "duplicates": probs}, 409)
     if not sel: return JSONResponse({"error": "No cards to export (they may have just been exported by someone else: see the export history)."}, 404)
+    # audit 2026-10 P0-2 / F01: the re-read set must still be exactly what the sign-off showed (a card approved in between
+    # would otherwise be exported without anyone having looked at it on the sign-off)
+    built_v = export_versions(sel)
+    if seen:
+        drift = [k for k, v in seen.items() if v and v != built_v[k]]
+        if drift: return _stale_export(kind, batch, user, sel, drift, built_v, "since the sign-off was shown")
     blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
     res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel)
     body, mt, fn = res[:3]; extras = res[3] if len(res) > 3 else {}
@@ -3006,14 +3049,28 @@ def _do_export_real(kind, request, status, batch, sel, metas, user):
     for nm, data in extras.items():
         with open(os.path.join(EXP, stored + "." + nm), "wb") as fh: fh.write(data)
     now = time.time()
-    with db() as c:
-        c.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                  (now, user["username"], user["initials"], kind, status, len(sel), fn, json.dumps([x["id"] for x in sel]), stored, blabel if batch else ""))
-    for c in sel:
-        if not (metas.get(c["id"]) or {}).get("exported"): set_meta(c["id"], exported=now)
-        if (metas.get(c["id"]) or {}).get("reexport"): set_meta(c["id"], reexport=None)
-        log(c["id"], user["initials"], "exported", detail={"file": fn, "template_version": template_version()})
-    with db() as c: eid = c.execute("SELECT MAX(id) FROM exports").fetchone()[0]
+    # audit 2026-10 P0-2: mark the cards only if nothing changed while the file was being built (an edit made meanwhile
+    # is not in the file; marking it exported would hide it from the next export). Checked and written under WRITE_LOCK,
+    # in one transaction, so no save can slip in between; the export id comes from this insert (F02), not MAX(id).
+    with WRITE_LOCK:
+        cur = [store.get(c["id"]) for c in sel]
+        now_v = export_versions([x for x in cur if x]) if all(cur) else None
+        if now_v != built_v:
+            for p_ in [stored] + [stored + "." + nm for nm in extras]:
+                try: os.remove(os.path.join(EXP, p_))
+                except OSError: pass
+            return _stale_export(kind, batch, user, sel, [k for k in built_v if not now_v or now_v[k] != built_v[k]], now_v, "while the file was being built")
+        curm = all_metas(); tv = template_version()
+        with db() as c:
+            eid = c.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (now, user["username"], user["initials"], kind, status, len(sel), fn, json.dumps([x["id"] for x in sel]), stored, blabel if batch else "")).lastrowid
+            for x in sel:
+                m = curm.get(x["id"]) or {}
+                c.execute("INSERT INTO card_meta(card_id) VALUES(?) ON CONFLICT(card_id) DO NOTHING", (x["id"],))
+                if not m.get("exported"): c.execute("UPDATE card_meta SET exported=? WHERE card_id=?", (now, x["id"]))
+                if m.get("reexport"): c.execute("UPDATE card_meta SET reexport=NULL WHERE card_id=?", (x["id"],))
+                c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
+                          (x["id"], now, user["initials"], "exported", None, None, json.dumps({"file": fn, "template_version": tv})))
     return Response(body, media_type=mt, headers={"Content-Disposition": f'attachment; filename="{fn}"', "X-Card-Count": str(len(sel)),
                                                   "X-Export-Id": str(eid), "X-Companions": ",".join(extras)} | summ_h)
 
@@ -3065,17 +3122,14 @@ def purge(now=None, who="retention"):
     if auth.get_setting("retention_enabled") != "1": return res
     di = int(auth.get_setting("image_retention_days")); de = int(auth.get_setting("export_retention_days"))
     for r in db().execute("SELECT id,image,created FROM cards WHERE image IS NOT NULL AND image!='' AND status!='pending' AND created<?", (now - di * 86400,)).fetchall():
-        p = os.path.join(UP, os.path.basename(r["image"]))
-        if os.path.isfile(p): os.remove(p)
-        drop_thumbs(r["image"])
-        bi = meta(r["id"]).get("back_image")
-        if bi and os.path.isfile(os.path.join(UP, os.path.basename(bi))): os.remove(os.path.join(UP, os.path.basename(bi)))
+        remove_photo(r["image"]); remove_photo(meta(r["id"]).get("back_image"))   # F08: both sides, with thumbnails
         with db() as c: c.execute("UPDATE cards SET image='' WHERE id=?", (r["id"],))
         set_meta(r["id"], image_deleted=now); log(r["id"], who, "photo_deleted", detail={"after_days": di}); res["images"] += 1
     for r in db().execute("SELECT id,stored,ts FROM exports WHERE stored IS NOT NULL AND ts<?", (now - de * 86400,)).fetchall():
         p = os.path.join(EXP, r["stored"])
         for q in [p] + [p + "." + n for n in COMPANION]:
-            if os.path.isfile(q): os.remove(q)
+            try: os.remove(q)
+            except FileNotFoundError: pass
         with db() as c: c.execute("UPDATE exports SET stored=NULL WHERE id=?", (r["id"],))
         res["exports"] += 1
     # undo snapshots hold full copies of card data but can only be used for 24 h: drop them after 2 days
@@ -3091,7 +3145,12 @@ def purge(now=None, who="retention"):
     for fn in os.listdir(UP):
         fp = os.path.join(UP, fn)
         if fn not in known and os.path.isfile(fp) and os.path.getmtime(fp) < now - di * 86400 and os.path.getmtime(fp) < now - 3600:
-            os.remove(fp); res["orphans"] = res.get("orphans", 0) + 1
+            remove_photo(fn); res["orphans"] = res.get("orphans", 0) + 1
+    for fn in os.listdir(THUMBS):   # F08: thumbnails whose photo is gone (e.g. deleted by an older version)
+        base = fn.rsplit(".", 2)[0] if fn.endswith(".webp") else None
+        if base and base not in known and not os.path.isfile(os.path.join(UP, base)):
+            try: os.remove(os.path.join(THUMBS, fn)); res["orphan_thumbs"] = res.get("orphan_thumbs", 0) + 1
+            except FileNotFoundError: pass
     if res["images"] or res["exports"] or res.get("orphans"): auth.alog(who, f"retention purge: {res['images']} photo(s), {res['exports']} export file(s) deleted")
     return res
 

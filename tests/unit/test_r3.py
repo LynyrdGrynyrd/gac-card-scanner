@@ -1,4 +1,4 @@
-"""Round-3 tester findings (qa/*-r3.md). Run from a copy: .venv/bin/python -m pytest tests/unit"""
+"""Round-3 tester findings (qa/*-r3.md). Run: .venv/bin/python -m pytest tests/unit"""
 import io, os, json, csv
 from test_app import mk
 

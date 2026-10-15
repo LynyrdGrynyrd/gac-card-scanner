@@ -1,5 +1,5 @@
-"""Unit/integration tests (pytest). Uses a temporary database: run from a COPY of the project, never next to live data:
-   cd <copy> && .venv/bin/python -m pytest tests/unit --cov=app"""
+"""Unit/integration tests (pytest). Uses a temporary database and data folder (conftest.py), so it never touches live data:
+   .venv/bin/python -m pytest tests/unit --cov=app"""
 import io, os, json, time
 from conftest import Client
 

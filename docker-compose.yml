@@ -14,6 +14,8 @@ services:
       SCAN_WORKERS: "1"
     volumes:
       - gac-data:/srv/gac/data          # database, card photos, export copies (back this up)
+      - gac-backups:/srv/gac/backups    # nightly backups (better: bind-mount a folder on another disk, e.g. - /mnt/usb/gac:/srv/gac/backups)
       # - ./certs:/srv/gac/certs:ro     # optional HTTPS: cert.pem + key.pem (python -m app.make_cert, or mkcert)
 volumes:
   gac-data:
+  gac-backups:

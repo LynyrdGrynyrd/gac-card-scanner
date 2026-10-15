@@ -29,6 +29,11 @@ app.include_router(_phone.router)
 app.include_router(_updates.router)
 app.include_router(_ui.router)  # also answers the retired legacy URLs (redirect or 410)
 app.middleware("http")(_auth.middleware)  # sign-in required everywhere except /login, /setup, /static, /health
+from .bodylimit import BodyLimit as _BodyLimit
+def _body_limit():   # the public demo's smaller per-photo cap counts real bytes too (plus form overhead)
+    from . import demo as _d
+    return min(_auth.MAX_BODY, _d.max_bytes() + 64 * 1024) if _d.enabled() else _auth.MAX_BODY
+app.add_middleware(_BodyLimit, limit=_body_limit, headers=_auth.SEC_HEADERS)   # added last = runs first, before any body is read
 from . import paths
 UP = paths.data("uploads"); os.makedirs(UP, exist_ok=True)
 

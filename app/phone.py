@@ -131,7 +131,9 @@ def running(): return bool(_SRV["server"] and _SRV["thread"] and _SRV["thread"].
 
 def _reaper():
     while running():
-        time.sleep(15); _purge()
+        time.sleep(15)
+        try: _purge()
+        except Exception as e: print("phone reaper error (continuing):", repr(e), flush=True)   # audit 2026-10 P0-3
 
 # ---------------------------------------------------------------- desktop side (signed-in, main app)
 router = APIRouter()
@@ -188,6 +190,9 @@ def revoke_all():
 # ---------------------------------------------------------------- phone side (LAN server: upload only)
 phone_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 SEC = dict(auth.SEC_HEADERS); SEC["Content-Security-Policy"] = SEC["Content-Security-Policy"].replace(" 'unsafe-eval'", "").replace("connect-src 'self'", "connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'")
+
+from .bodylimit import BodyLimit as _BodyLimit
+phone_app.add_middleware(_BodyLimit, limit=52 * 1024 * 1024, message="Upload is too large (25 MB per photo).", headers=SEC)   # audit 2026-10 P0-12
 
 @phone_app.middleware("http")
 async def _guard(request: Request, call_next):
