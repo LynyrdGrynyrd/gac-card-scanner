@@ -2,7 +2,8 @@
 # developers install it TOGETHER with the lock:   pip install -r requirements.lock.txt -r requirements-dev.txt
 # Resolved against the lock for Python 3.12-3.13 on Linux, Windows and macOS (no pin in the lock is changed) with:
 #   uv pip compile <the 5 tools below> -c requirements.lock.txt --universal --python-version 3.12 --annotation-style line
-# Packages the lock already pins (anyio, click, colorama, h11, idna, packaging, pyyaml, typing-extensions) are not repeated.
+# Packages the lock already pins (anyio, certifi, charset-normalizer, click, colorama, h11, idna, packaging, pyyaml, requests,
+# typing-extensions, urllib3) are not repeated.
 # The test tools
 pytest==9.1.1             # tests/unit, tests/api, tests/e2e
 httpx==0.28.1             # fastapi.testclient
@@ -10,8 +11,6 @@ hypothesis==6.169.4       # tests/unit/test_props_parser.py (also used by schema
 schemathesis==4.31.1      # tests/api
 playwright==1.64.0        # tests/e2e (then: python -m playwright install chromium)
 # Their dependencies
-certifi==2026.7.22        # via httpcore, httpx, requests
-charset-normalizer==3.5.2  # via requests
 graphql-core==3.2.13      # via hypothesis-graphql
 greenlet==3.5.6           # via playwright
 harfile==0.5.0            # via schemathesis
@@ -26,8 +25,6 @@ pluggy==1.7.0             # via pytest
 pyee==14.0.0              # via playwright
 pygments==2.21.0          # via pytest, rich
 pyrate-limiter==4.5.0     # via schemathesis
-requests==2.34.2          # via schemathesis
 rich==15.0.0              # via schemathesis
 sortedcontainers==2.4.0   # via hypothesis
-urllib3==2.8.0            # via requests
 werkzeug==3.1.9           # via schemathesis
