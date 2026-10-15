@@ -100,7 +100,7 @@ def test_remove_contacts_deletes_no_bak(env):
     adm = env["adm"]; d = crm_source.DATA
     open(os.path.join(d, "mctrade_contacts.csv.bak"), "w").write("old leftover")
     r = adm.post("/api/admin/mctrade-contacts", files={"image": ("real.csv", open(FAKE_REAL, "rb"))}); assert r.status_code == 200, r.text
-    p = os.path.join(d, "mctrade_contacts.csv"); assert os.path.isfile(p) and (os.stat(p).st_mode & 0o777) == 0o600
+    p = os.path.join(d, "mctrade_contacts.csv"); assert os.path.isfile(p) and (os.name == "nt" or (os.stat(p).st_mode & 0o777) == 0o600)   # (no POSIX modes on Windows)
     assert not os.path.exists(p + ".bak")                                         # the leftover was wiped by the upload
     r = adm.post("/api/admin/mctrade-contacts", files={"image": ("real2.csv", open(FAKE_REAL, "rb"))}); assert r.status_code == 200
     assert not os.path.exists(p + ".bak")                                         # replacing keeps no copy
@@ -243,7 +243,7 @@ def test_restore_script(tmp_path):
     if not os.path.exists(exe): exe = sys.executable   # CI / checkouts without a .venv
     out = subprocess.run([exe, "-c", py], cwd=root, env=env_, capture_output=True, text=True); assert out.returncode == 0, out.stderr
     bk = out.stdout.strip().splitlines()[-1]; assert bk.endswith(".tgz")
-    sqlite3.connect(db).execute("DELETE FROM cards").connection.commit()
+    con = sqlite3.connect(db); con.execute("DELETE FROM cards"); con.commit(); con.close()   # closed: Windows can't move an open file
     out = subprocess.run(["sh", os.path.join(root, "scripts", "restore_backup.sh"), bk], cwd=root, env=env_ | {"GAC_DB": str(db)}, capture_output=True, text=True)
     assert out.returncode == 0 and "restored" in out.stdout, out.stdout + out.stderr
     assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM cards").fetchone()[0] == 1

@@ -26,10 +26,11 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
                 if val: f[k] = val; f.setdefault("confidence", {})[("name" if k in ("first_name", "last_name") else k)] = 0.99
             f["sources"]["qr"] = "vcard"; break
         elif not f["website"] and t.lower().startswith(("http", "www")): f["website"] = t
-    if os.getenv("CONSISTENCY", "1") == "1":
-        from . import consistency
-        consistency.apply(f)
-        from . import plausibility; plausibility.apply(f)   # suggestions only (f['suggestions']); values untouched
+    cons = os.getenv("CONSISTENCY", "1") == "1"
+    if cons:   # first pass: the AI merge below reads these confidences
+        from . import consistency, plausibility
+        pre = dict(f.get("confidence") or {}); consistency.apply(f); post = dict(f["confidence"])
+        plausibility.apply(f)   # suggestions only (f['suggestions']); values untouched
     if use_vlm is None: use_vlm = os.getenv("USE_VLM", "0") == "1"
     if use_vlm or vlm_result is not None:
         from . import vlm, merge
@@ -39,4 +40,9 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
         except Exception as e: f["sources"]["vlm_error"] = str(e)[:200]
     if os.getenv("REALCARD_POSTFIX", "1") == "1":
         from . import postfix; f = postfix.apply(f)
+    if cons:   # audit 2026-10: flags and suggestions describe the final (merged + post-fixed) values; the first pass's untouched adjustments are undone so they don't stack
+        conf = f.setdefault("confidence", {})
+        for k, x in post.items():
+            if k in pre and conf.get(k) == x: conf[k] = pre[k]
+        consistency.apply(f); plausibility.apply(f)
     return {"engine": r["engine"], "text": r["text"], "fields": f}

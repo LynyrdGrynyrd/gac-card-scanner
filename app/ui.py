@@ -110,9 +110,14 @@ def snapshot(ids, user, label):
     with db() as c:
         aid = c.execute("INSERT INTO actions(ts,user_id,username,label,snapshot) VALUES(?,?,?,?,?)",
                         (time.time(), user["id"], user["username"], label, json.dumps(snap))).lastrowid
-    _UNSEALED.append(aid); return aid
+    _unsealed().append(aid); return aid
 
-_UNSEALED: list = []
+# audit 2026-10 P1: per THREAD (= per request), so one request's _seal() never seals another request's snapshot before
+# that request has written (Undo then saw before == after and "undid" nothing while reporting success)
+_SEAL_TLS = threading.local()
+def _unsealed():
+    if not hasattr(_SEAL_TLS, "ids"): _SEAL_TLS.ids = []
+    return _SEAL_TLS.ids
 def _row_state(i):
     r = db().execute("SELECT * FROM cards WHERE id=?", (i,)).fetchone()
     m = db().execute("SELECT * FROM card_meta WHERE card_id=?", (i,)).fetchone()
@@ -120,8 +125,9 @@ def _row_state(i):
 def _seal():
     """Round 9 (skeptic R9-1): once the action has been written, store each card's state AFTER it, so Undo can tell
     which values the action changed and which were changed later by someone else."""
-    while _UNSEALED:
-        aid = _UNSEALED.pop()
+    pend = _unsealed()
+    while pend:
+        aid = pend.pop()
         r = db().execute("SELECT snapshot FROM actions WHERE id=?", (aid,)).fetchone()
         if not r: continue
         snap = json.loads(r[0])
@@ -474,10 +480,16 @@ def _cands(c, others, metas, ctx):
     for k_ in _bkeys(c["fields"], metas.get(c["id"]) or {}):
         for o in ctx["idx"].get(k_, ()): seen[o["id"]] = o
     return [o for o in others if o["id"] in seen]   # same order as before
+_CRM_IX = {"rows": None, "ix": None}; _CRM_IXL = threading.Lock()
+def _crm_index(rows):
+    """One mctrade_sync.Index per contacts list object (the list is cached by crm_source until the file changes)."""
+    with _CRM_IXL:
+        if _CRM_IX["rows"] is not rows: _CRM_IX.update(rows=rows, ix=mctrade_sync.Index(rows))
+        return _CRM_IX["ix"]
 def dupes(c, others, metas):
     f = c["fields"]; m = metas.get(c["id"]) or {}
     _crm_rows, _crm_sample = crm_source.rows_for_hints()
-    crm = [d | {"sample": _crm_sample} for d in mctrade_sync.match(f, _crm_rows) if d["score"] >= 0.3]
+    crm = [d | {"sample": _crm_sample} for d in _crm_index(_crm_rows).match(f) if d["score"] >= 0.3]
     ctx = _dctx(others, metas)
     # the card's OWN meta is part of the key: approval_check() changes it in place (kept_apart) before asking again
     ck = (c["id"], c["status"], json.dumps(f, sort_keys=True, default=str), json.dumps([m.get(k_) for k_ in _DK], default=str))
@@ -896,6 +908,21 @@ def wait_for_memory(jid=None, max_s=None):
         with JLOCK: j = JOBS.get(jid) or {}; j.pop("waiting_memory", None); j.pop("waiting_memory_msg", None)
     return True
 JOBS, JLOCK = {}, threading.Lock()
+DEAD_JOBS: set = set()   # audit 2026-10 F09: jobs from before a demo wipe; a worker still reading one never creates its card
+def reset_jobs():
+    """Public demo wipe: every job (queued, reading, finished) belongs to the old generation. Running readers are stopped,
+    queued work is cancelled, finished results lose their card data, and the AI queue is emptied."""
+    from . import reader
+    with JLOCK:
+        for jid, j in JOBS.items():
+            DEAD_JOBS.add(jid); reader.stop(jid)
+            JOBS[jid] = {"id": jid, "state": "cancelled", "batch": "", "file": "", "created": j.get("created"), "finished": time.time()}
+        CANCELLED_BATCH.clear()
+    AI_WAIT.clear()
+    try:
+        while True: AI_Q.get_nowait()
+    except _queue.Empty: pass
+    with _BATCH_LOCK: BATCH_OWNER.clear()
 CANCELLED_BATCH = {}   # (who, batch) -> time Cancel was pressed: an upload that lands just after it is not scanned (round 21)
 MAX_BYTES = 25 * 1024 * 1024
 
@@ -942,7 +969,7 @@ def ingest(data, engine, ext, jid=None, meta_kw=None):
     # round 22 (newcomer r21 HIGH): Cancel is atomic. The card is created (with its batch) under JLOCK only if the job was
     # not cancelled meanwhile; Cancel takes the same lock and can no longer stop a job that already has a card.
     with JLOCK:
-        if jid and (JOBS.get(jid) or {}).get("state") == "cancelled":
+        if jid and (jid in DEAD_JOBS or (JOBS.get(jid) or {}).get("state") == "cancelled"):
             try: os.remove(os.path.join(UP, name))
             except OSError: pass
             raise _Cancelled()
@@ -1127,6 +1154,10 @@ CALM_POISON = "This file stopped the scanner while it was being read, so it was 
 def _enqueue_pdf(data, fname, n, engine, batch, batch_label, allow_duplicate, who, had_back, t0=None, skip_ai=False):
     if t0 is not None and _cancelled_since(who, batch, t0):
         return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
+    from . import demo
+    if demo.enabled():   # audit 2026-10 P1 (F09): a PDF in the public demo reads only as many pages as the cap still allows
+        n = min(n, demo.capacity_left())
+        if n <= 0: return JSONResponse({"error": f"Public demo is full ({demo.max_cards()} cards)."}, 429)
     jid = uuid.uuid4().hex[:12]
     args = dict(kind="pdf", engine=engine, batch=batch or "", label=batch_label or "", fname=fname, pages=n, allow_duplicate=allow_duplicate, who=who, skip_ai=bool(skip_ai))
     with open(os.path.join(INBOX, jid + ".pdf"), "wb") as fh: fh.write(data)
@@ -1428,6 +1459,8 @@ def _ai_run(cid, why):
         c = store.get(cid); f = c["fields"]; g = merge.merge(f, v, c["raw_text"] or "")
         for k in ("address", "other_address"):   # a line break in the AI's address is a separator, never glue ('State RdCuyahoga')
             if isinstance(g.get(k), str): g[k] = re.sub(r"\s*[\r\n]+\s*", ", ", g[k]).strip(" ,")
+        from . import consistency as _cons, plausibility as _plaus
+        _cons.apply(g); _plaus.apply(g)   # audit 2026-10: flags describe the merged values (merge() is pure: f is untouched)
         src = sources(cid)
         edited = {k for k, x in src.items() if str(x).startswith("edited")}
         if "first_name" in edited or "last_name" in edited: edited.add("name")
@@ -1645,12 +1678,30 @@ def hard_delete(cid: CardId, request: Request, body: dict = Body(default={})):
     if body.get("confirm") != cid: return JSONResponse({"error": "Confirm by sending {\"confirm\": <card id>}."}, 422)
     # audit 2026-10 P0-5: under WRITE_LOCK (a save that already passed its version check can't write merged values back),
     # database first and in ONE transaction together with its audit rows, files after the commit, VACUUM last and optional
-    with WRITE_LOCK: return _hard_delete(cid, request)
+    with WRITE_LOCK: return _hard_delete(cid, request.state.user)
 
-def _hard_delete(cid, request):
+TOMBSTONES = os.path.join(DATA, "deleted_cards.json")
+def _tombstones():
+    try:
+        with open(TOMBSTONES) as fh: return {int(k): v for k, v in json.load(fh).items()}
+    except (FileNotFoundError, ValueError): return {}
+def _add_tombstone(cid, created=None):
+    """Audit 2026-10 P1 (F07): remember every card deleted on request, so restoring an older backup can't bring it back
+    (backup.restore keeps this file; apply_tombstones() deletes such cards again at the next start)."""
+    t = _tombstones(); t[cid] = {"deleted": time.time(), "created": created}; tmp = TOMBSTONES + ".tmp"
+    with open(tmp, "w") as fh: json.dump({str(k): v for k, v in t.items()}, fh)
+    os.replace(tmp, TOMBSTONES)
+def apply_tombstones():
+    # the card's scan time must match too, so a tombstone can never hit a different card that got the same number
+    gone = [cid for cid, v in _tombstones().items() if (c := store.get(cid)) and (not isinstance(v, dict) or v.get("created") in (None, c["created"]))]
+    for cid in gone:
+        with WRITE_LOCK: _hard_delete(cid, {"initials": "SYS", "username": "restore"})
+    if gone: auth.alog("restore", f"deleted {len(gone)} card(s) again that had been deleted on request before the restored backup was made: " + ", ".join(f"#{i}" for i in gone))
+    return gone
+
+def _hard_delete(cid, user):
     c = store.get(cid)
     if not c: raise HTTPException(404, "Card not found")
-    user = request.state.user
     photos = [c.get("image"), meta(cid).get("back_image")]
     if os.path.isdir(CORR):
         for fn in os.listdir(CORR):
@@ -1711,6 +1762,7 @@ def _hard_delete(cid, request):
                   (cid, time.time(), user["initials"], "deleted_on_request", None, None, json.dumps({"export_copies": removed_exports, "merged_removed": removed_merged})))
         x.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), user["username"],
                   f"deleted card #{cid} on request (photo, details; history kept without personal data; {removed_exports} stored export file(s))", None))
+    _add_tombstone(cid, c.get("created"))
     for ph in photos: remove_photo(ph)   # F08: front and back, with their thumbnails
     for q in export_files:
         try: os.remove(q)
@@ -2361,8 +2413,9 @@ def attach_back(cid, data, ext, initials, confirm_other_person=False, user=None)
     # unreferenced from now on, so the retention clean-up removes it with its thumbnails as an orphan
     with WRITE_LOCK: return _attach_back_write(cid, c, r, name, initials, user)
 
-SITE_TLDS = set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
-                "app dev ai tv me health law pro global group tech online site store shop church school example".split())
+from . import parser as _P
+SITE_TLDS = _P.KNOWN_TLDS | set("com net org edu gov mil us io co info biz ca uk de fr it es nl be ch at au nz jp cn in br mx ie se no dk fi pl pt "
+                "app dev ai tv me health law pro global group tech online site store shop church school example".split())   # audit 2026-10: one list with the parser
 def plausible_site(w, emails=()):
     """Round 10 (skeptic R9-4): a website read from the back of a card is only filled in when its domain matches an email
     domain on the card, or it is a normal-looking domain with a known ending (OCR junk like 'wvw.c0m.xq' is dropped)."""
@@ -2520,10 +2573,12 @@ def archive(request: Request, body: dict = Body(...)):
         ids = [c["id"] for c in store.all_(None)]
     elif b == "__none__": ids = [r[0] for r in db().execute("SELECT c.id FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL")]
     else: ids = [r[0] for r in db().execute("SELECT card_id FROM card_meta WHERE batch=?", (b,))]
-    ids = [i for i in ids if not meta(i).get("archived")]
-    if ids: snapshot(ids, user, f"Archive {len(ids)} {_s(len(ids), 'card')}")
-    for i in ids: set_meta(i, archived=1); log(i, rv, "archived", detail={"batch": b})
-    _seal()
+    with WRITE_LOCK:   # audit 2026-10 P1: like every other card change (snapshot, write, seal as one step)
+        ids = [i for i in ids if not meta(i).get("archived")]
+        try:
+            if ids: snapshot(ids, user, f"Archive {len(ids)} {_s(len(ids), 'card')}")
+            for i in ids: set_meta(i, archived=1); log(i, rv, "archived", detail={"batch": b})
+        finally: _seal()
     if b == "__all__": auth.alog(user["username"], f"Clear all test data: archived {len(ids)} {_s(len(ids), 'card')} (nothing deleted; Undo restores them): " + ", ".join(f"#{i}" for i in ids[:200]))
     return {"archived": len(ids)}
 
@@ -2715,7 +2770,7 @@ def strict_profile_id(c, existing=None):
     sure = []
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return None      # round 7: never a Profile ID from SAMPLE data
-    for m_ in mctrade_sync.match(c["fields"], existing):
+    for m_ in _crm_index(existing).match(c["fields"]):
         exact_name = mctrade_sync._nname(m_["name"]) == mctrade_sync._nname(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}")
         if "email exact" in m_["why"] or (exact_name and "phone exact" in m_["why"] and m_["score"] >= 0.5): sure.append(m_["profile_id"])
     sure = list(dict.fromkeys(sure))
@@ -2724,7 +2779,7 @@ def exact_email_profile(c, existing=None):
     """Profile ID of an existing MC Trade profile with exactly this card's email (create-new cards: would duplicate it)."""
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return None
-    hits = list(dict.fromkeys(m_["profile_id"] for m_ in mctrade_sync.match(c["fields"], existing) if "email exact" in m_["why"]))
+    hits = list(dict.fromkeys(m_["profile_id"] for m_ in _crm_index(existing).match(c["fields"]) if "email exact" in m_["why"]))
     return hits[0] if hits else None
 
 def crm_look(c, existing=None):
@@ -2732,10 +2787,10 @@ def crm_look(c, existing=None):
     existing = existing if existing is not None else crm_source.real()
     if existing is None: return {}
     f = c["fields"]; nm = mctrade_sync._nname(f"{f.get('first_name','')} {f.get('last_name','')}")
-    byid = {str(r_["profile_id"]): r_ for r_ in existing}
+    byid = _crm_index(existing).byid
     cem = {e.strip().lower() for e in f.get("emails") or [] if (e or "").strip()}
     email, strong, name = [], [], []
-    for m_ in mctrade_sync.match(f, existing):
+    for m_ in _crm_index(existing).match(f):
         pid = str(m_["profile_id"]); exact = bool(nm) and mctrade_sync._nname(m_["name"]) == nm
         if "email exact" in m_["why"]: email.append(pid); strong.append(pid)
         elif exact and ("phone exact" in m_["why"] or any(w.startswith("org~") for w in m_["why"])): strong.append(pid)
@@ -2788,7 +2843,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         def _kept_pair(a, b_): return b_ in _kept(metas.get(a) or {}) or a in _kept(metas.get(b_) or {})
         _real = crm_source.real(); _hint_rows, _ = crm_source.rows_for_hints()
         def _hint(c):
-            m_ = mctrade_sync.match(c["fields"], _hint_rows)
+            m_ = _crm_index(_hint_rows).match(c["fields"])
             return f"{m_[0]['name']} ({m_[0]['organization']})" if m_ else None
         res = mx.build(sel, aff, style, hard_errors, kept=_kept_pair, confirmed=lambda f_: list(valid_confirmations(f_)), crm_look=lambda c: crm_look(c, _real),
                        crm_real=_real is not None, crm_hint=_hint, updates_on=auth.get_setting("mctrade_updates_enabled") == "1",
@@ -3154,10 +3209,28 @@ def purge(now=None, who="retention"):
     if res["images"] or res["exports"] or res.get("orphans"): auth.alog(who, f"retention purge: {res['images']} photo(s), {res['exports']} export file(s) deleted")
     return res
 
+JOB_KEEP_S = int(os.environ.get("JOB_KEEP_S", "7200"))
+def prune_memory(now=None):
+    """Audit 2026-10 P1 (F05): finished jobs and old throttle entries no longer pile up in memory for the whole uptime.
+    A finished job is still found through its record in data/jobs_done (24 h) after it leaves memory."""
+    from . import reader, phone
+    now = now or time.time(); n = 0
+    with JLOCK:
+        for jid in [k for k, j in JOBS.items() if j.get("state") in ("done", "error", "cancelled") and (j.get("finished") or j.get("created") or 0) < now - JOB_KEEP_S]:
+            JOBS.pop(jid, None); n += 1
+        for k in [k for k, t in CANCELLED_BATCH.items() if t < now - 3600]: CANCELLED_BATCH.pop(k, None)
+        reader.CANCELLED.intersection_update(set(JOBS) | set(reader.RUNNING))
+    for cid in [c for c in list(AI_RETRIES) if c not in AI_WAIT]: AI_RETRIES.pop(cid, None)
+    auth.prune_fails(now)
+    for ip in [ip for ip, ts in list(phone._BAD.items()) if not ts or max(ts) < now - 60]: phone._BAD.pop(ip, None)
+    return n
+
 def _retention_loop():
     while True:
         try: purge()
         except Exception as e: print("retention error:", e)
+        try: prune_memory()
+        except Exception as e: print("memory prune error:", e)
         time.sleep(3600)
 
 def recover():
@@ -3181,6 +3254,12 @@ def recover():
             # crash loop), so it is set aside as failed with a calm message instead.
             j = {"id": jid, "kind": args.get("kind"), "state": "error", "file": args.get("fname"), "batch": args.get("batch") or "",
                  "error": CALM_POISON, "finished": time.time()}
+            # audit 2026-10 P1: the crash may have come AFTER the card was saved (history, AI check, enrich). Then the
+            # file was read fine: report the job as done with that card instead of blaming the file.
+            r_ = args.get("sha") and args.get("kind") != "pdf" and db().execute(
+                "SELECT m.card_id FROM card_meta m JOIN cards c ON c.id=m.card_id WHERE m.sha256=? AND COALESCE(m.batch,'')=? AND c.created>=? ORDER BY m.card_id DESC LIMIT 1",
+                (args["sha"], args.get("batch") or "", os.path.getmtime(os.path.join(INBOX, fn)) - 5)).fetchone()
+            if r_: j |= {"state": "done", "error": None, "card": {"id": r_[0]}}
             _done_record(jid, j); _inbox_clear(jid); print("set aside a file that was being read when the server stopped:", jid)
             continue
         if args.get("kind") == "pdf":
@@ -3225,6 +3304,8 @@ def start_workers():
     threading.Thread(target=_ai_worker, daemon=True, name="ai-check").start()
     threading.Thread(target=_retention_loop, daemon=True, name="retention").start()
     threading.Thread(target=recover, daemon=True, name="recover").start()
+    try: apply_tombstones()
+    except Exception as e: print("re-applying removal requests failed:", e, flush=True)
     try:   # round 8: nightly backup (02:30, 7 kept); GAC_BACKUP=0 turns it off
         from . import backup as _bk; _bk.start()
     except Exception as e: print("backup scheduler not started:", e)
@@ -3398,7 +3479,8 @@ def _check_template(data):
     crm_source.check_xlsx(data)
     try:
         wb = load_workbook(io.BytesIO(data), read_only=True)
-        sheets = [[("" if x is None else str(x)) for x in (next(w.iter_rows(min_row=1, max_row=1, max_col=1000, values_only=True), ()) or ())] for w in wb.worksheets]
+        try: sheets = [[("" if x is None else str(x)) for x in (next(w.iter_rows(min_row=1, max_row=1, max_col=1000, values_only=True), ()) or ())] for w in wb.worksheets]
+        finally: wb.close()
     except Exception: raise ValueError("That isn't an Excel (.xlsx) file.")
     hdr = next((r for r in sheets if any(mx._hnorm(x) in ("indemail", "affcode1") for x in r)), None)
     if hdr is None: raise ValueError("No sheet has an IndEmail or AffCode1 column in its first row: this doesn't look like the MC Trade import template.")
@@ -3432,8 +3514,10 @@ async def upload_template(request: Request, image: UploadFile = File(...)):
     except ValueError as e: _refused(u, "template", image.filename, str(e)); return JSONResponse({"error": str(e)}, 422)
     dst = mx.TEMPLATE_XLSX
     prev = len([h for h in mx.headers()[0] if h]) if os.path.isfile(dst) else 0
+    tmp = dst + ".uploading"   # audit 2026-10 P1 (F03): written in full first; the current template is only replaced after that
+    with open(tmp, "wb") as fh: fh.write(data); fh.flush(); os.fsync(fh.fileno())
     had = _rotate_bak(dst)
-    with open(dst, "wb") as fh: fh.write(data)
+    os.replace(tmp, dst)
     hdr, src = mx.headers()
     unknown = [h for h in hdr if h and not mx.canonical(h)]
     auth.alog(u, f"settings: uploaded the MC Trade import template ({_safe_fname(image.filename)}, {len([h for h in hdr if h])} columns"
@@ -3508,12 +3592,15 @@ async def upload_contacts(request: Request, image: UploadFile = File(...)):
     try: rows, n, skipped = await asyncio.wait_for(asyncio.to_thread(_check_contacts, data, ext), timeout=30)
     except asyncio.TimeoutError: _refused(u, "MC Trade contacts", image.filename, "took too long"); return JSONResponse({"error": "The file took too long to read: refused."}, 422)
     except ValueError as e: _refused(u, "MC Trade contacts", image.filename, str(e)); return JSONResponse({"error": str(e)}, 422)
-    for e_ in ("xlsx", "csv"):   # round 8: the previous contacts file is wiped, not kept as .bak
-        p_ = os.path.join(crm_source.DATA, f"mctrade_contacts.{e_}")
-        crm_source.secure_delete(p_); crm_source.secure_delete(p_ + ".bak")
-    _cp = os.path.join(crm_source.DATA, f"mctrade_contacts.{ext}")
-    with open(os.open(_cp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as fh: fh.write(data)
-    os.chmod(_cp, 0o600)
+    # audit 2026-10 P1 (F03): the new file is written in full BEFORE the old one goes (a failed write used to leave no
+    # contacts file at all); the old one is still wiped, not kept (round 8)
+    _cp = os.path.join(crm_source.DATA, f"mctrade_contacts.{ext}"); tmp = _cp + ".uploading"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as fh: fh.write(data); fh.flush(); os.fsync(fh.fileno())
+    os.chmod(tmp, 0o600)
+    if os.path.isfile(_cp): os.replace(_cp, _cp + ".old")
+    os.replace(tmp, _cp)
+    for p_ in [_cp + ".old"] + [os.path.join(crm_source.DATA, f"mctrade_contacts.{e_}") + sfx for e_ in ("xlsx", "csv") for sfx in ("", ".bak") if not (e_ == ext and sfx == "")]:
+        crm_source.secure_delete(p_)
     crm_source.write_loader(request.state.user)   # round 11 (mctrade-r7 C1): who loaded it, and when, is shown with the source
     auth.alog(u, f"settings: uploaded the MC Trade contacts export ({_safe_fname(image.filename)}, {len(rows)} people with a Profile ID); "
                  "exports and the dry run now use it" + (f"; {skipped} {_s(skipped, 'row')} with the scanner's SAMPLE emails skipped" if skipped else "") + f"; contacts version {contacts_version()}")

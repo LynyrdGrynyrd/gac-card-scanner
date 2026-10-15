@@ -27,8 +27,11 @@ class FormatError(Exception):
     """Message is shown to the user as is."""
 
 
+IMAGE_MAGIC = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF8", b"BM", b"II*\x00", b"MM\x00*", b"RIFF")
 def is_pdf(data: bytes) -> bool:
-    return b"%PDF-" in data[:1024]
+    """A PDF header may sit anywhere in the first 1 KB (some writers put junk first), but a file that starts like a photo
+    is a photo, even if '%PDF-' happens to appear in its first bytes (audit 2026-10 C5: such a JPEG went down the PDF path)."""
+    return b"%PDF-" in data[:1024] and not data.startswith(IMAGE_MAGIC) and not is_heif(data)
 
 
 def is_heif(data: bytes) -> bool:

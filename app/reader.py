@@ -36,7 +36,9 @@ def _limiter(cap_mb):
     return _limit
 
 
-def _call(args, data, key=None):
+def _call(args, data, key=None, mem_mb=None, timeout=None):
+    # audit 2026-10 P1 (C3): the limits are per call; run_ocr used to swap the module globals while other reads ran
+    mem_mb = mem_mb or MEM_MB; timeout = timeout or TIMEOUT
     root = os.path.join(os.path.dirname(__file__), "..")
     with tempfile.TemporaryDirectory(prefix="gac-read-") as td:
         src = os.path.join(td, "in.bin")
@@ -47,7 +49,7 @@ def _call(args, data, key=None):
         argv = [sys.executable, "--gac-reader", *rest] if getattr(sys, "frozen", False) else [sys.executable, "-m", "app.reader", *rest]
         res_f = os.path.join(td, "result.json")   # the answer comes back in a file (a windowed exe may have no stdout)
         env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", GAC_READER_OUT=res_f)
-        kw = {"preexec_fn": _limiter(MEM_MB)} if os.name == "posix" else {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        kw = {"preexec_fn": _limiter(mem_mb)} if os.name == "posix" else {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
         p = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, env=env, text=True, **kw)
         if key: RUNNING[key] = p
         import threading, time
@@ -55,7 +57,8 @@ def _call(args, data, key=None):
         def watch():
             t0 = time.time()
             while p.poll() is None:
-                if _rss_mb(p.pid) > MEM_MB or time.time() - t0 > TIMEOUT:
+                # audit 2026-10: the hard backstop is enforced here too; macOS ignores RLIMIT_AS and Windows has no RLIMIT
+                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)) or time.time() - t0 > timeout:
                     killed.append(1)
                     try: p.kill()
                     except Exception: pass
@@ -85,12 +88,42 @@ def _call(args, data, key=None):
 
 
 def _rss_mb(pid):
+    """Resident memory of the child in MB. Audit 2026-10 P1 (C4): /proc only exists on Linux; Windows and macOS have no
+    RLIMIT backstop either, so without this the memory cap did nothing there (only the time limit applied)."""
     try:
         with open(f"/proc/{pid}/status") as fh:
             for ln in fh:
                 if ln.startswith("VmRSS:"): return int(ln.split()[1]) / 1024
+    except FileNotFoundError: pass
+    except Exception: return 0
+    if os.name == "nt": return _rss_windows(pid)
+    if sys.platform == "darwin": return _rss_ps(pid)
+    return 0
+def _rss_windows(pid):
+    try:
+        import ctypes
+        from ctypes import wintypes
+        class PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+        k32 = ctypes.windll.kernel32; h = k32.OpenProcess(0x1000 | 0x0010, False, pid)   # QUERY_LIMITED_INFORMATION | VM_READ
+        if not h: return 0
+        try:
+            m = PMC(); m.cb = ctypes.sizeof(PMC)
+            if ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(m), m.cb): return m.WorkingSetSize / (1024 * 1024)
+        finally: k32.CloseHandle(h)
     except Exception: pass
     return 0
+_PS_LAST = {}
+def _rss_ps(pid):
+    import time
+    t, v = _PS_LAST.get(pid, (0, 0))
+    if time.time() - t < 0.5: return v   # ps costs a process start: at most twice a second
+    try: v = int(subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, timeout=2).stdout.strip() or 0) / 1024
+    except Exception: v = 0
+    _PS_LAST[pid] = (time.time(), v); return v
 
 
 CANCELLED = set()
@@ -107,10 +140,7 @@ OCR_MEM_MB = int(os.environ.get("OCR_MEM_MB", "1500"))    # OCR child RSS cap (r
 OCR_TIMEOUT = float(os.environ.get("OCR_TIMEOUT", "180"))
 def run_ocr(data, engine=None, key=None):
     """Round 21: OCR + parsing run in a capped child process, so the web server's memory stays flat."""
-    global MEM_MB, TIMEOUT
-    old = (MEM_MB, TIMEOUT); MEM_MB, TIMEOUT = OCR_MEM_MB, OCR_TIMEOUT
-    try: return _call(["ocr", engine or ""], data, key)
-    finally: MEM_MB, TIMEOUT = old
+    return _call(["ocr", engine or ""], data, key, mem_mb=OCR_MEM_MB, timeout=OCR_TIMEOUT)
 
 def run_count(data): return _call(["count"], data)["pages"]
 def run_page(data, i, n, fname, key=None): return _call(["page", i, n, os.path.basename(fname or "upload")], data, key)

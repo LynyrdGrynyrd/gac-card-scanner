@@ -49,7 +49,9 @@ def dr_has_first(path, dr):
     try:
         if path.lower().endswith(".xlsx"):
             from openpyxl import load_workbook
-            wb = load_workbook(path, read_only=True); hdr = [str(h or "") for h in next(wb.worksheets[-1].iter_rows(max_row=1, values_only=True), ())]
+            wb = load_workbook(path, read_only=True)
+            try: hdr = [str(h or "") for h in next(wb.worksheets[-1].iter_rows(max_row=1, values_only=True), ())]
+            finally: wb.close()   # audit 2026-10: else Windows can't delete or replace the file afterwards
         else:
             with open(path, newline="", encoding="utf-8-sig") as fh: hdr = next(csv.reader(fh), [])
     except Exception: return False
@@ -112,7 +114,7 @@ def real():
 
 def sample_rows():
     if not os.path.isfile(SAMPLE): return []   # round 10: a fresh install without the sample file still works
-    with open(SAMPLE) as fh: return list(csv.DictReader(fh))
+    with open(SAMPLE, encoding="utf-8", newline="") as fh: return list(csv.DictReader(fh))
 
 def rows_for_hints():
     """-> (rows, is_sample). The review box may hint from SAMPLE data (labelled so); IDs never come from it."""
@@ -126,7 +128,7 @@ def write_loader(user):
         json.dump({"by": f"{user.get('display') or user.get('username')} ({user.get('username')})", "at": time.time()}, fh)
 def loader():
     import json, time
-    try: d = json.load(open(loader_path()))
+    try: d = json.load(open(loader_path(), encoding="utf-8"))
     except Exception: return ""
     return f"loaded by {d.get('by')} at {time.strftime('%b %d %H:%M', time.localtime(d.get('at') or 0))}"
 def info():

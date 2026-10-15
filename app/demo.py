@@ -25,8 +25,8 @@ def seed_count(): return int(os.environ.get("GAC_DEMO_SEED", "12"))
 
 UPLOAD_PATHS = ("/api/jobs", "/api/scan")
 def is_upload(p): return p in UPLOAD_PATHS or (p.startswith("/api/cards/") and p.endswith("/back"))
-BLOCKED_PREFIX = ("/api/admin/",)
-BLOCKED = {"/api/me/password", "/api/auth/setup"}
+BLOCKED_PREFIX = ("/api/admin/", "/api/phone/")   # audit 2026-10 P1: no phone pairing (it would show the container's LAN address)
+BLOCKED = {"/api/me/password", "/api/auth/setup", "/api/jobs/cancel"}   # one shared login: a visitor could cancel everyone's uploads
 
 _STATE = {"last_wipe": 0.0}
 _LOCK = threading.Lock()
@@ -61,10 +61,19 @@ def refuse(request):
         except ValueError: clen = 0
         if clen > max_bytes():
             return JSONResponse({"error": f"Public demo: photos are limited to {max_bytes() // (1024 * 1024)} MB."}, 413)
-        from . import store
-        if store.db().execute("SELECT COUNT(*) FROM cards").fetchone()[0] >= max_cards():
+        if capacity_left() <= 0:
             return JSONResponse({"error": f"Public demo is full ({max_cards()} cards). It is wiped every {wipe_hours():g} hours."}, 429)
     return None
+
+def capacity_left():
+    """Audit 2026-10 P1 (F09): cards that exist PLUS uploads still queued or being read count toward the cap (parallel
+    uploads, or one PDF with many pages, used to get past it)."""
+    from . import store, ui
+    n = store.db().execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+    with ui.JLOCK:
+        n += sum(1 for j in ui.JOBS.values() if j.get("state") in ("queued", "reading") and j.get("kind") != "pdf")
+        n += sum(max(0, (j.get("pages") or 0) - (j.get("page") or 0)) for j in ui.JOBS.values() if j.get("kind") == "pdf" and j.get("state") in ("queued", "splitting"))
+    return max_cards() - n
 
 # ------------------------------------------------------------------ seed / wipe
 def ensure_user():
@@ -95,6 +104,7 @@ def wipe(reseed=True):
     """Delete every card, upload, export, thumbnail, history row and sign-in log entry, then re-seed."""
     from . import store, ui, auth
     with _LOCK:
+        ui.reset_jobs()      # audit 2026-10 P1 (F09): old jobs/queues first, so nothing from before the wipe can come back
         ui.db(); auth.db()   # make sure all tables exist
         with store.db() as c:
             for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():

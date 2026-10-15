@@ -1,6 +1,6 @@
 import sqlite3, json, time, os, threading
 from . import paths
-DB = paths.data("cards.db")
+DB = os.environ.get("GAC_DB") or paths.data("cards.db")   # audit 2026-10: GAC_DB was honoured by backup.py only
 BUSY_MS = int(os.environ.get("GAC_DB_BUSY_MS", "30000"))   # wait this long for another writer instead of failing at once
 CARDS_SQL = """CREATE TABLE IF NOT EXISTS cards(id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL, status TEXT DEFAULT 'pending',
       engine TEXT, raw_text TEXT, fields TEXT, image TEXT, reviewer TEXT, note TEXT, decided REAL)"""

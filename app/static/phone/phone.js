@@ -28,6 +28,9 @@ function pick(side) {
   $(side === "front" ? "#fFront" : "#fBack").click();
 }
 $("#bFront").onclick = () => pick("front"); $("#bBack").onclick = () => pick("back");
+// audit 2026-10: the phone's camera app takes a sharper photo than a 1920x1080 preview frame (better for reading), so it is
+// offered even while the live preview is on
+$("#camApp").onclick = () => $(target === "back" ? "#fBack" : "#fFront").click();
 $("#fFront").onchange = async e => { if (e.target.files[0]) setShot("front", await shrink(e.target.files[0])); e.target.value = ""; };
 $("#bFile").onclick = () => $("#fFile").click();   // round 18: saved photo / HEIC / PDF (no camera)
 $("#fFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
@@ -42,14 +45,26 @@ async function startLive() {
   }
   try {
     stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: "environment"}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+    if (document.hidden) { stopLive(true); return; }   // hidden while the permission prompt was open
     const v = $("#video"); v.srcObject = stream; await v.play(); $("#live").hidden = false; detect();
-    $("#camNote").textContent = "Live preview on. The frame turns green when a card fills it.";
+    $("#camNote").textContent = "Live preview on. The frame turns green when a card fills it. For the sharpest photo, tap “Use camera app”.";
   } catch { stream = null; $("#camNote").textContent = "Camera permission was not given, so the camera app is used instead."; }
 }
+// audit 2026-10: the camera (and the 4 Hz detect loop) kept running while the page was hidden. Stop the tracks when the page
+// is hidden and start the preview again when it comes back.
+let liveWanted = false, detGen = 0;
+function stopLive(keep) {
+  liveWanted = !!keep && (liveWanted || !!stream); detGen++;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; const v = $("#video"); if (v) v.srcObject = null;
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (stream) stopLive(true); } else if (liveWanted && !stream) { liveWanted = false; startLive(); } });
+addEventListener("pagehide", () => stopLive(false));
 function detect() {   // compares edge strength along the guide's border vs. the middle: cheap, no library needed
   const v = $("#video"), c = document.createElement("canvas"), W = 160, H = 90; c.width = W; c.height = H; const g = c.getContext("2d", {willReadFrequently: true});
+  const gen = ++detGen;
   const tick = () => {
-    if (!stream) return;
+    if (!stream || gen !== detGen || document.hidden) return;
     if (v.videoWidth) {
       g.drawImage(v, 0, 0, W, H); const d = g.getImageData(0, 0, W, H).data, L = (x, y) => { const i = (y * W + x) * 4; return d[i] * .3 + d[i + 1] * .59 + d[i + 2] * .11; };
       const x0 = Math.round(W * .06), x1 = Math.round(W * .94), y0 = Math.round(H * .14), y1 = Math.round(H * .86); let e = 0, n = 0;
@@ -62,7 +77,8 @@ function detect() {   // compares edge strength along the guide's border vs. the
   tick();
 }
 $("#snap").onclick = () => {
-  const v = $("#video"), c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0);
+  const v = $("#video"); if (!stream || !v.videoWidth) return;   // audit 2026-10: the preview is restarting (page was hidden)
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0);
   c.toBlob(b => { setShot(target, b); if (target === "front" && !shots.back) { target = "back"; msg("Front captured. Turn the card over for the back, or tap Send."); } }, "image/jpeg", 0.9);
 };
 
@@ -94,7 +110,7 @@ async function poll() {
     for (const x of j.jobs) if (x.parent && !sent.some(y => y.id === x.id)) { const p = sent.find(y => y.id === x.parent); if (p) { p.kids = (p.kids || 0) + 1; sent.splice(sent.indexOf(p), 0, {id: x.id, state: x.state, n: `${p.n}.${p.kids}`}); } }
     for (let i = sent.length - 1; i >= 0; i--) if (sent[i].state === "split") sent.splice(i, 1);
     render();
-    if (sent.some(s => s.state === "queued" || s.state === "reading" || s.state === "splitting")) pT = setTimeout(poll, 3000);
+    if (sent.some(s => s.state === "queued" || s.state === "reading" || s.state === "splitting")) pT = setTimeout(poll, document.hidden ? 10000 : 3000);   // audit 2026-10: slower while hidden
   } catch { pT = setTimeout(poll, 5000); }
 }
 async function state() {

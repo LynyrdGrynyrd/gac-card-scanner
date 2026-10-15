@@ -5,11 +5,16 @@ const SS = sessionStorage;
 const ASSET_V = ((document.currentScript && document.currentScript.src.match(/[?&]v=([0-9a-f]+)/)) || [])[1] || "";
 try { localStorage.removeItem("reviewer"); } catch {}
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
-const hideToast = re_ => { const t = $("#toast"); if (!re_ || re_.test(t.textContent)) { t.classList.remove("show"); clearTimeout(t._h); } };
+// audit 2026-10 (WCAG 2.2.1): the toast waits while the pointer or keyboard focus is in it, and a faded toast leaves no
+// focusable Undo button behind
+const toastOff = t => { t.classList.remove("show"); clearTimeout(t._h); t.querySelectorAll(".toastbtn").forEach(b => b.remove()); };
+const toastLater = (t, ms) => { clearTimeout(t._h); t._h = setTimeout(() => { if (!t.contains(document.activeElement)) toastOff(t); }, ms); };
+const hideToast = re_ => { const t = $("#toast"); if (!re_ || re_.test(t.textContent)) toastOff(t); };
 const toast = (m, ms = 4500, undo = false) => { const t = $("#toast"); t.textContent = m;   /* round 15 (reviewer r14): 2.6 s was too quick */   // undo: true = the card Undo, or a function = its own undo
-  if (undo) { const b = document.createElement("button"); b.className = "toastbtn"; b.textContent = "Undo"; b.onclick = () => typeof undo === "function" ? undo() : doUndo(); t.append(b); ms = Math.max(ms, 6000); }
-  t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); refreshUndo();
-  t.onmouseenter = () => clearTimeout(t._h); t.onmouseleave = () => { clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2500); }; };   // round 17 (reviewer r16 N5)
+  if (undo) { const b = document.createElement("button"); b.type = "button"; b.className = "toastbtn"; b.textContent = "Undo"; b.onclick = () => typeof undo === "function" ? undo() : doUndo(); t.append(b); ms = Math.max(ms, 6000); }
+  t.classList.add("show"); toastLater(t, ms); if (undo) refreshUndo();   // audit 2026-10: no GET /api/undo for every toast, only after undoable actions
+  t.onmouseenter = () => clearTimeout(t._h); t.onmouseleave = () => toastLater(t, 2500); };   // round 17 (reviewer r16 N5)
+{ const t = $("#toast"); t.addEventListener("focusin", () => clearTimeout(t._h)); t.addEventListener("focusout", () => toastLater(t, 2500)); }   // audit 2026-10: keyboard focus pauses it too
 const csrf = () => (document.cookie.match(/(?:^|; )gac_csrf=([^;]*)/) || [])[1] || "";
 let SIGNING_OUT = false;   // reviewer r9: nothing may write a draft once sign-out started (beforeunload ran saveDraft after clearDrafts)
 function saveDraft() { if (SIGNING_OUT) return; if (dirty && cur) try { SS.draft = JSON.stringify({id: cur.id, uid: ME && ME.id, vals: dirtyVals()}); } catch {} keepDraft(); }
@@ -24,16 +29,30 @@ async function call(u, o = {}) {
   const av = r.headers.get("X-GAC-Asset");   // round 9: the app was updated while this tab was open
   if (av && ASSET_V && av !== ASSET_V && !$("#verWarn")) {
     if (!dirty && !SAVING && !$("#dlg").open && !$$('[aria-busy="true"]').length) { saveDraft(); location.reload(); }   // round 11 (newcomer r10): never mid-action
-    else document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="alert" role="alert">The scanner was updated. Save your work, then <a href="javascript:location.reload()">reload the page</a>.</div>`);
+    else { document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="alert" role="alert">The scanner was updated. Save your work, then <button type="button" class="link" id="verReload">reload the page</button>.</div>`);
+      $("#verReload").onclick = () => location.reload(); }   // audit 2026-10: a javascript: URL is blocked by the CSP
   }
   const uid = r.headers.get("X-GAC-User");
   if (ME && uid && uid !== String(ME.id) && !$("#swapWarn")) {   // another tab signed this browser in as someone else
     document.body.insertAdjacentHTML("afterbegin", `<div id="swapWarn" class="alert bad" role="alert">Someone else signed in on this browser in another tab, so your actions would be saved under <b>their name</b>. <a href="/ui">Reload</a> or sign in again.</div>`);
   }
-  if (r.status === 401) { saveDraft(); dirty = false; location.href = "/login?next=" + encodeURIComponent("/ui" + location.hash); throw new Error("Please sign in."); }
+  if (r.status === 401) { const e = new Error(handleAuth(401, j)); e.status = 401; e.data = j || {}; throw e; }
   if (!r.ok) { const e = new Error((j && (j.error || j.detail)) || ("Server error " + r.status)); e.status = r.status; e.data = j || {}; throw e; }
+  if (o.meta) o.meta.headers = r.headers;   // audit 2026-10: paged lists read X-Total
   const sm = o.method === "POST" && u.match(/^\/api\/cards\/(\d+)$/); if (sm) dropDraft(+sm[1]);   // saved: the draft is no longer needed
   return j;
+}
+// audit 2026-10: ONE place for an expired session, used by call(), the downloads (fetchOk) and the uploads. While photos are
+// still waiting to upload, a 401 pauses the uploads (the photos stay in this tab) instead of leaving the page for /login.
+function handleAuth(status, j) {
+  if (status !== 401) return (j && (j.error || j.detail)) || null;
+  if (upPending()) { authPause(); return "Your sign-in expired. Sign in again: the waiting photos upload after that."; }
+  saveDraft(); dirty = false; location.href = "/login?next=" + encodeURIComponent("/ui" + location.hash); return "Please sign in.";
+}
+async function fetchOk(u) {   // audit 2026-10: downloads need the raw Response (a Blob), but errors are handled like call()'s
+  const r = await fetch(u, {credentials: "same-origin"}); if (r.ok) return r;
+  let j = {}; try { j = await r.json(); } catch {}
+  const e = new Error(handleAuth(r.status, j) || r.statusText || ("Server error " + r.status)); e.status = r.status; e.data = j; throw e;
 }
 const post = (u, b) => call(u, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(b)});
 async function busy(btn, label, fn) {
@@ -72,7 +91,6 @@ function ask({title, html = "", input = null, buttons, wide = false, check = nul
 /* ---------- signed-in user ---------- */
 let ME = null;
 const who = () => ME ? ME.initials : "";
-const needWho = async () => true;
 async function loadMe() {
   ME = await call("/api/me");
   { const w = document.getElementById("scanWho"); if (w && ME) w.innerHTML = `Scanning as <b>${esc(ME.display || ME.username)}</b> (${esc(ME.initials || "")}). Not you? <a href="/login">Sign in as yourself</a>.`; }   // round 15 (coordinator r14 #4)
@@ -178,10 +196,31 @@ let B = JSON.parse(SS.batch || "null");   // {id,label,rows:[{key,file,state,msg
 const saveB = () => { if (B) SS.batch = JSON.stringify({...B, rows: B.rows.map(r => ({...r, thumb: undefined, blob: undefined}))}); };
 let BATCHES = []; call("/api/batches").then(b => BATCHES = b).catch(() => {});
 let uploading = 0; const UPCONC = 3, upq = [];
+const upPending = () => !!(upq.length || uploading || (B && B.rows.some(r => r.state === "wait" && r.blob)));
+// audit 2026-10: a 401 while uploading used to mark every photo "Not added: Please sign in" and the files were lost. Now the
+// queue pauses, the photos stay "waiting", one message offers a sign-in in a new tab, and the uploads resume by themselves.
+let AUTH_PAUSED = false, authT = null;
+function authPause() {
+  AUTH_PAUSED = true;
+  let el = $("#authPause"); if (!el) { document.body.insertAdjacentHTML("afterbegin", `<div id="authPause" class="alert bad" role="alert"></div>`); el = $("#authPause"); }
+  const n = B ? B.rows.filter(r => r.state === "wait").length : 0;
+  el.innerHTML = `<b>Your sign-in expired, so uploading is paused.</b> ${n ? plural(n, "photo") + " waiting; nothing is lost. " : ""}Keep this tab open, <a href="/login?next=%2Fui%23upload" target="_blank" rel="noopener">sign in again</a> (opens a new tab), then come back: the upload carries on by itself.`;
+  el.hidden = false; if (!authT) authT = setInterval(authCheck, 3000); renderBatch();
+}
+async function authCheck() {   // runs while this tab is hidden too: the person is signing in in the other tab
+  if (!AUTH_PAUSED) return;
+  let s = null; try { s = await (await fetch("/api/auth/state", {credentials: "same-origin"})).json(); } catch { return; }
+  if (!s || !s.user || !AUTH_PAUSED) return;
+  if (ME && s.user.id !== ME.id) { $("#authPause").innerHTML = `This browser is now signed in as <b>${esc(s.user.display)}</b>, not <b>${esc(ME.display)}</b>, so uploading stays paused (the photos would be saved under their name). Sign in as ${esc(ME.display)} in the other tab.`; return; }
+  AUTH_PAUSED = false; clearInterval(authT); authT = null; $("#authPause").hidden = true;
+  toast("Signed in again: uploading carries on.", 4000); renderBatch(); pumpUploads(); poll();
+}
+addEventListener("focus", () => { if (AUTH_PAUSED) authCheck(); });
 function newBatch() {
   // round 8 (newcomer r8 N2): the batch name is kept exactly as typed (only spaces tidied, control characters and < > dropped);
   // nothing is appended. Your own batch with the same name from the last 12 h is reused; if someone else (or an older batch)
   // already uses the name, a visible " (2)" is added and you are told.
+  if (B) B.rows.forEach(dropThumb);   // audit 2026-10: the previous batch's rows are gone from the page
   const d = new Date(), id = "B" + d.toISOString().replace(/\D/g, "").slice(0, 14) + "-" + Math.random().toString(16).slice(2, 6);   // round 13: unique even when two people start in the same second
   const name = $("#batchName").value.replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   const norm = x => (x || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -221,18 +260,36 @@ async function enqueue(files) {
   else if (renamed) { const old = B.label; newBatch(); toast(`Started a new batch “${B.label}” (the previous one was “${old}”).`, 6000); }
   if (!B) newBatch();
   $("#clearBatch").dataset.fresh = "0";
-  B.rows = B.rows.filter(r => r.state !== "cancel");   // round 21 (reviewer r20): no stale cancelled rows on the next upload
+  B.rows = B.rows.filter(r => r.state !== "cancel" || dropThumb(r));   // round 21 (reviewer r20): no stale cancelled rows on the next upload
   for (const f of files) {
     const row = {key: Math.random().toString(36).slice(2), file: f.webkitRelativePath || f.name, state: "wait"};
     if (/(^|\/)\./.test(row.file)) continue;              // hidden system files in folders
     if (!isImg(f)) { row.state = "rej"; row.msg = "Can't scan this file. Use JPG, PNG, HEIC or PDF."; }
     else if (!f.size) { row.state = "rej"; row.msg = "File is empty."; }
-    else { row.blob = f; row.thumb = isPdf(f) || /\.hei[cf]$/i.test(f.name) ? null : URL.createObjectURL(f); upq.push(row); }
+    else { row.blob = f; row.thumb = null; if (!isPdf(f) && !/\.hei[cf]$/i.test(f.name)) thq.push(row); upq.push(row); }
     ROWB.set(row, B); B.rows.push(row);
   }
-  B.stopped = false; saveB(); renderBatch(); pumpUploads();
+  B.stopped = false; saveB(); renderBatch(); pumpUploads(); pumpThumbs();
+}
+// audit 2026-10: upload thumbnails were full-resolution blob URLs that were never revoked (hundreds of decoded 12 MP photos
+// on a big batch). Now one ~96 px thumbnail per photo, made one at a time; its URL is revoked when the row goes.
+const thq = []; let thBusy = false;
+function dropThumb(r) { if (r && r.thumb && r.thumb.startsWith("blob:")) URL.revokeObjectURL(r.thumb); if (r) r.thumb = null; return false; }
+async function pumpThumbs() {
+  if (thBusy) return; thBusy = true;
+  try { while (thq.length) {
+    const r = thq.shift(), live = () => B && B.rows.includes(r) && r.blob; if (!live() || r.thumb) continue;
+    let u = null;
+    try { const bm = await createImageBitmap(r.blob, {resizeWidth: 96, resizeQuality: "low"}), c = document.createElement("canvas");
+      c.width = bm.width; c.height = bm.height; c.getContext("2d").drawImage(bm, 0, 0); if (bm.close) bm.close();
+      const tb = await new Promise(res => c.toBlob(res, "image/jpeg", 0.7)); if (tb) u = URL.createObjectURL(tb); } catch {}
+    if (!u) u = URL.createObjectURL(r.blob);   // no resize support (older browsers): the photo itself, as before
+    if (!live()) { URL.revokeObjectURL(u); continue; }
+    r.thumb = u; renderRow(r);
+  } } finally { thBusy = false; }
 }
 function pumpUploads() {
+  if (AUTH_PAUSED) return;
   while (uploading < UPCONC && upq.length) { const r = upq.shift(); uploading++; upload(r).finally(() => { uploading--; pumpUploads(); }); }
 }
 const ROWB = new WeakMap();   // audit 2026-10 P0-14: row -> the batch it was added to (not whatever batch is current at send time)
@@ -256,7 +313,10 @@ function upload(row, allowDup = false) {
       else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 13: the server may give this batch its own id
       else if (x.status === 409 && j.cancelled) { row.state = "cancel"; row.msg = ""; }
       else if (x.status === 409) { row.state = "dup"; row.msg = j.error; row.dupOf = j.duplicate_of; }
-      else { row.state = "rej"; row.msg = j.error || "Upload failed (" + x.status + ")."; if (x.status === 401) saveB(); }
+      else if (x.status === 401) { row.state = "wait"; row.msg = ""; upq.unshift(row); authPause(); }   // audit 2026-10: kept, sent after signing in
+      else if (x.status === 403 && j.need === "reload" && !row.csrfTry) {   // stale CSRF cookie: any signed-in GET renews it; send once more
+        row.csrfTry = 1; row.state = "wait"; row.msg = ""; call("/api/me").catch(() => {}).finally(() => { upq.unshift(row); pumpUploads(); }); }
+      else { row.state = "rej"; row.msg = j.error || "Upload failed (" + x.status + ")."; row.retry = x.status >= 500 || [403, 408, 429].includes(x.status); }   // audit 2026-10: Retry button
       if (row.stop) cancelJobs([row].concat(bb.rows.filter(r => r.src === row.file)));   // round 19: Cancel pressed while this photo was uploading
       saveB(); renderBatch(); poll(); res();
     };
@@ -287,19 +347,20 @@ function splitRow(row, j, bb = B) {
   const dir = row.file.includes("/") ? row.file.slice(0, row.file.lastIndexOf("/") + 1) : "";
   const rows = j.jobs.map(x => ({key: Math.random().toString(36).slice(2), file: dir + x.file, state: x.job ? "queued" : (x.status === 409 ? "dup" : "rej"),
     job: x.job, msg: x.job ? "" : x.error, dupOf: x.duplicate_of, src: row.file}));
-  bb.rows.splice(bb.rows.indexOf(row), 1, ...rows);
+  bb.rows.splice(bb.rows.indexOf(row), 1, ...rows); dropThumb(row);
   toast(`${row.file.split("/").pop()}: ${j.jobs.length} cards found` + (j.back_skipped ? ". Back photo not used (single cards only)." : "."), 6000);
 }
 let pollT = null;
 async function poll() {
   clearTimeout(pollT);
-  if (!B) return;
+  if (!B || AUTH_PAUSED) return;   // audit 2026-10: resumed by authCheck()
   const live = B.rows.filter(r => ["queued", "reading", "splitting"].includes(r.state) && r.job);
   if (!live.length) return;
   try {
     const j = await call("/api/jobs?ids=" + live.map(r => r.job).join(","));
+    const byJob = new Map(B.rows.filter(x => x.job).map(x => [x.job, x]));   // audit 2026-10: no O(n²) find on big batches
     for (const job of j.jobs) {
-      const r = B.rows.find(x => x.job === job.id); if (!r) continue;
+      const r = byJob.get(job.id); if (!r) continue;
       if (r.pdf) {
         addKids(r, job);
         if (job.state === "split") { B.rows.splice(B.rows.indexOf(r), 1); toast(`${r.file.split("/").pop()}: ${plural(r.kids || 0, "card")} found.` + (job.note ? " " + job.note : ""), 6000); }
@@ -308,7 +369,7 @@ async function poll() {
         else { r.state = job.state; r.page = job.page; }
         continue;
       }
-      if (job.state === "done") { r.state = "done"; r.card = {id: job.card.id, img: job.card.image, name: job.card.name || (job.card.company ? "(no name) – " + job.card.company : "(no name)"), att: job.card.attention.map(a => a.text), blocked: !!job.card.blocked}; }
+      if (job.state === "done") { delete r.blob; r.state = "done"; r.card = {id: job.card.id, img: job.card.image, name: job.card.name || (job.card.company ? "(no name) – " + job.card.company : "(no name)"), att: job.card.attention.map(a => a.text), blocked: !!job.card.blocked}; }
       else if (job.state === "error") { r.state = "err"; r.msg = job.error; }
       else if (job.state === "cancelled") r.state = "cancel";
       else { r.state = job.state; r.msg = job.waiting_memory ? (job.waiting_memory_msg || "Waiting for memory…") : ""; }   // round 22: calm memory-guard wait
@@ -323,7 +384,7 @@ async function poll() {
     saveB(); renderBatch();
     if (j.jobs.some(x => x.state === "done" || x.state === "error")) { refreshCounts(); if (!$("#v-queue").hidden && Q.batch && Q.batch === B.id) loadQueue(); }   // round 15: newly read cards of the batch shown appear without a reload
   } catch (e) { if (e instanceof TypeError) conn(false); }   // network error: say "Reconnecting…" and keep trying
-  pollT = setTimeout(poll, 1200);
+  pollT = setTimeout(poll, document.hidden ? 5000 : 1200);   // audit 2026-10: slower while the tab is hidden
 }
 const ST = {splitting: "Reading PDF…", wait: "Waiting to upload", up: "Uploading…", queued: "In line to be read", reading: "Reading card…", done: "Added", rej: "Not added", dup: "Not added", err: "Failed", cancel: "Cancelled"};
 function rowHTML(r) {
@@ -333,21 +394,33 @@ function rowHTML(r) {
   if (r.state === "splitting" && r.pages) st = esc(`Reading PDF: page ${r.page || 1} of ${r.pages}…`);
   if (r.state === "queued" && r.pdf) st = "PDF in line to be read";
   if (r.msg) st += `<span class="why">${esc(r.msg)}</span>`;
+  if (r.state === "wait" && AUTH_PAUSED) st += `<span class="why">Paused until you sign in again</span>`;
+  if (r.blob && (r.state === "err" || (r.state === "rej" && r.retry))) st += ` <button type="button" class="link" data-retry="${r.key}">Retry</button>`;   // audit 2026-10
   if (r.state === "dup") st += ` <span class="why">${r.dupOf ? `<a href="#review/${r.dupOf}">Open card #${r.dupOf}</a> · ` : ""}${r.blob ? `<button type="button" class="link" data-again="${r.key}">Scan it anyway</button>` : ""}</span>`;
   const tsrc = r.thumb || (r.card && r.card.img ? `/img/${encodeURIComponent(r.card.img)}?w=160` : null);   // round 20: PDF/HEIC cards get the server's thumbnail once read
   const th = tsrc && r.state !== "rej" ? `<img alt="" src="${tsrc}">` : `<span class="thumbph" aria-hidden="true">${r.state === "rej" ? "✕" : "▢"}</span>`;
   return `${th}<div><div class="nm">${esc(r.file)}</div><div class="progress mini" aria-hidden="true"><div style="width:${pct}%"></div></div></div><span class="st ${cls}">${st}</span>`;
 }
-function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) li.innerHTML = rowHTML(r); }
+function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) { const h = rowHTML(r); if (li._h !== h) { li.innerHTML = h; li._h = h; } } }
 function renderBatch() {
   if (!B || !B.rows.length) { $("#batch").hidden = true; return; }
   $("#batch").hidden = false; $("#batchTitle").textContent = "Batch: " + B.label;
-  $("#batchList").innerHTML = B.rows.map(r => `<li data-k="${r.key}" class="${["rej", "dup", "err", "cancel"].includes(r.state) ? "rej" : ""}">${rowHTML(r)}</li>`).join("");
+  // audit 2026-10: the list was rebuilt on every 1.2 s poll (all images, focus lost); now only changed rows are touched
+  { const ul = $("#batchList"), old = new Map([...ul.children].map(li => [li.dataset.k, li])); let prev = null;
+    for (const r of B.rows) {
+      let li = old.get(r.key); old.delete(r.key);
+      if (!li) { li = document.createElement("li"); li.dataset.k = r.key; }
+      const h = rowHTML(r), c = ["rej", "dup", "err", "cancel"].includes(r.state) ? "rej" : "";
+      if (li._h !== h) { li.innerHTML = h; li._h = h; } if (li.className !== c) li.className = c;
+      const at = prev ? prev.nextSibling : ul.firstChild; if (at !== li) ul.insertBefore(li, at); prev = li;
+    }
+    old.forEach(li => li.remove()); }
   // round 20 (d): cancelled cards are not "finished"; they are counted on their own
   const cn = B.rows.filter(r => r.state === "cancel").length, n = B.rows.length - cn, fin = B.rows.filter(r => ["done", "rej", "dup", "err"].includes(r.state)).length;
   const ok = B.rows.filter(r => r.state === "done").length, bad = fin - ok, chk = B.rows.filter(r => r.state === "done" && r.card.att.length).length;
   const p = n ? Math.round(100 * fin / n) : 100; $("#batchBar div").style.width = p + "%"; $("#batchBar").setAttribute("aria-valuenow", p);
-  $("#batchSummary").textContent = B.stopMsg ? B.stopMsg.replace(/\.$/, "") : (B.stopped && fin === n ? `Stopped. ${ok} kept, ${cn} not scanned` : `${fin} of ${n} finished · ${ok} added`) + (chk && !B.stopped ? ` (${chk} to check)` : "") + (bad ? ` · ${bad} not added` : "") + (cn && !(B.stopped && fin === n) ? ` · ${cn} not scanned` : "");
+  const sum_ = B.stopMsg ? B.stopMsg.replace(/\.$/, "") : (B.stopped && fin === n ? `Stopped. ${ok} kept, ${cn} not scanned` : `${fin} of ${n} finished · ${ok} added`) + (chk && !B.stopped ? ` (${chk} to check)` : "") + (bad ? ` · ${bad} not added` : "") + (cn && !(B.stopped && fin === n) ? ` · ${cn} not scanned` : "");
+  if ($("#batchSummary").textContent !== sum_) $("#batchSummary").textContent = sum_;   // audit 2026-10: a live region: only real changes
   const left = n - fin;
   const qa = left ? (B.ahead || 0) : 0;   // round 14: other people's cards waiting ahead in the shared reading line count too
   const etaS = (left + qa) * (B.avg || 0), etaTxt = etaS < 60 ? "less than a minute left" : `about ${Math.round(etaS / 60)} min left`;   // round 15 (part-timer r14): no "1 min left (≈1 s per card)"
@@ -356,7 +429,10 @@ function renderBatch() {
   $("#batchLegend").hidden = !fin; $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(B.id)}&s=pending`;
   $("#clearBatch").hidden = fin !== n; $("#cancelBatch").hidden = fin === n || !!B.stopped;
 }
-$("#batchList").addEventListener("click", e => { if (B && !B.t0) B.t0 = Date.now() / 1000; const k = e.target.dataset.again; if (!k) return; const r = B.rows.find(x => x.key === k); r.msg = ""; upload(r, true); });
+$("#batchList").addEventListener("click", e => { if (B && !B.t0) B.t0 = Date.now() / 1000;
+  const rk = e.target.dataset.retry, rr = rk && B && B.rows.find(x => x.key === rk);   // audit 2026-10: send a failed photo again (it is still in this tab)
+  if (rr && rr.blob) { Object.assign(rr, {state: "wait", msg: "", retry: false, job: undefined, tries: 0, csrfTry: 0}); B.stopped = false; B.stopMsg = ""; upq.push(rr); saveB(); renderBatch(); pumpUploads(); return; }
+  const k = e.target.dataset.again; if (!k) return; const r = B.rows.find(x => x.key === k); r.msg = ""; upload(r, true); });
 // round 19: Cancel stops the cards still waiting (not yet uploaded or in line to be read); cards already added stay.
 async function cancelJobs(rows) {
   const ids = rows.filter(r => ["queued", "splitting", "reading"].includes(r.state) && r.job).map(r => r.job); if (!ids.length) return 0;
@@ -382,7 +458,7 @@ $("#cancelBatch").onclick = async () => {
   const cn = B.rows.filter(r => r.state === "cancel").length; B.stopMsg = `Stopped. ${ok} kept, ${cn} not scanned.`; saveB(); renderBatch();
   toast(B.stopMsg, 4500);
 };
-$("#clearBatch").onclick = () => { B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
+$("#clearBatch").onclick = () => { if (B) B.rows.forEach(dropThumb); B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
 function restoreBatch() { renderBatch(); poll(); refreshBatchCards(); }
 async function refreshBatchCards() {   // reviewer r9: the upload list shows each card's CURRENT state, not the one at scan time
   try { const rows = (B.rows || []).filter(r => r.state === "done" && r.card); if (!rows.length) return;
@@ -405,7 +481,7 @@ function applyQueueState(q) {
   Q.batch = q.has("batch") ? (q.get("batch") === "all" ? "" : q.get("batch")) : remembered;
   Q.batchFromMemory = !q.has("batch") && remembered !== null;   // round 24 (newcomer/datamanager r23): the queue always opens on your newest batch
   Q.att = q.get("att") === "1"; Q.nx = q.get("nx") === "1"; Q.dup = q.get("dup") === "1"; Q.text = q.get("q") || ""; Q.arch = q.get("arch") === "1";
-  $$("#statusTabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.s === Q.s));
+  $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.s === Q.s));
   $("#fAtt").checked = Q.att; $("#fNew").checked = Q.nx; $("#fDup").checked = Q.dup; $("#fText").value = Q.text; $("#fArch").checked = Q.arch;
 }
 function pushQueueState() {
@@ -413,12 +489,14 @@ function pushQueueState() {
   SS.queueHash = "#queue?" + p;
   if (location.hash.startsWith("#queue") && !$("#dlg").open) history.replaceState(null, "", "#queue?" + p);   // round 15: never rewrite the URL of another page or under an open question
 }
-$$("#statusTabs button").forEach(b => b.onclick = () => { Q.s = b.dataset.s; $$("#statusTabs button").forEach(x => x.setAttribute("aria-selected", x === b)); Q.sel.clear(); pushQueueState(); loadQueue(); });
+$$("#statusTabs button").forEach(b => b.onclick = () => { Q.s = b.dataset.s; $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x === b));   // audit 2026-10: aria-pressed buttons, not tabs without tabpanels
+ Q.sel.clear(); pushQueueState(); loadQueue(); });
 $("#fAtt").onchange = e => { Q.att = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fNew").onchange = e => { Q.nx = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fDup").onchange = e => { Q.dup = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fArch").onchange = e => { Q.arch = e.target.checked; Q.sel.clear(); pushQueueState(); loadQueue(); };
-$("#fText").oninput = e => { Q.text = e.target.value; pushQueueState(); renderQueue(); };
+let fTextT = null;   // audit 2026-10: no full re-render on every keystroke
+$("#fText").oninput = e => { Q.text = e.target.value; clearTimeout(fTextT); fTextT = setTimeout(() => { pushQueueState(); renderQueue(); }, 150); };
 // round 21 (part-timer/reviewer r20): ~130 batches in the drop-down. Recent ones (and the one in use) are listed; old and test batches behind "Show all"
 let SHOWALLB = false;
 const TESTB = /\b(qa|test|demo|e2e|skeptic|r\d{1,2})\b/i;
@@ -492,12 +570,14 @@ async function loadQueue(force) {
     $("#fBatch").value = Q.batch || "";
     if (($("#fBatch").value || "") !== (Q.batch || "")) { $("#fBatch").insertAdjacentHTML("beforeend", `<option value="${esc(Q.batch)}">(selected batch)</option>`); $("#fBatch").value = Q.batch; }
     pushQueueState(); filterBatchOptions();
-    const want = Q.batch, qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");
+    const want = Q.batch, qs = queueQs(want), key = qs.toString();
     if (Q.cardsFor !== want) { $$("#statusTabs button span").forEach(x => x.textContent = ""); $("#qBody").innerHTML = ""; }   // never show another batch's counts under this name
-    const cards = await call("/api/cards" + (qs.toString() ? "?" + qs : ""));
+    // audit 2026-10: All batches is paged (a reload keeps the cards already loaded with "Load more")
+    const pg = want ? null : await cardsUpTo(qs, Q.cardsFor === want && Q.qsKey === key ? Math.max(QPAGE, Q.cards.length) : QPAGE);
+    const cards = pg ? pg.cs : await call("/api/cards?" + qs);
     if (seq !== qSeq || $("#v-queue").hidden || want !== Q.batch) return;
-    Q.cards = want ? cards.filter(c => inBatch(c, want)) : cards; Q.cardsFor = want;
-    Q.loaded = true; $("#fBatch").disabled = false;
+    Q.cards = want ? cards.filter(c => inBatch(c, want)) : cards; Q.cardsFor = want; Q.qsKey = key; Q.total = pg ? pg.total : null;
+    $("#fBatch").disabled = false;
     renderQueue(); refreshCounts();
     // round 20 (coordinator r19): the list once showed Pending (0) / All (0) for a batch that has cards, until a reload.
     // If the batch list says it has cards but none came back, load it once more.
@@ -507,6 +587,25 @@ async function loadQueue(force) {
   } catch (e) { if (seq === qSeq) { $("#qEmpty").hidden = false; $("#qEmpty").textContent = "Couldn't load cards: " + e.message + ". Is the scanner window still open?"; } }
   finally { if (seq === qSeq) { $("#qLoading").hidden = true; Q.loading = false; if (Q.again) { Q.again = false; setTimeout(() => loadQueue(), 0); } } }
 }
+// audit 2026-10: "All batches" asked for every card (limit=0: ~9 s at 2,000 cards, each enriched by the server). It is
+// paged now (the server's 200-card page; X-Total/X-Offset/X-Limit) with "Load more"; one-batch views stay unpaged.
+const QPAGE = 200;
+async function cardsPage(qs, off, lim) { const m = {}, p = new URLSearchParams(qs); p.set("limit", String(lim)); p.set("offset", String(off));
+  const cs = await call("/api/cards?" + p, {meta: m}); const t = m.headers && m.headers.get("X-Total"); return {cs, total: t ? +t : off + cs.length}; }
+async function cardsUpTo(qs, n) {   // the first n cards of a paged list (the server sends at most 500 per request)
+  let out = [], total = 0;
+  do { const r = await cardsPage(qs, out.length, Math.min(500, n - out.length)); out = out.concat(r.cs); total = r.total; if (!r.cs.length) break; } while (out.length < Math.min(n, total));
+  return {cs: out, total};
+}
+const queueQs = want => { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else if (Q.s) qs.set("status", Q.s); if (Q.arch) qs.set("archived", "true"); return qs; };
+$("#qMoreBtn").onclick = async e => {
+  const b = e.currentTarget, want = Q.batch, s0 = qSeq, key = Q.qsKey; if (want !== "" || b.getAttribute("aria-busy") === "true") return;
+  b.setAttribute("aria-busy", "true");   // not disabled: that would drop keyboard focus
+  try { const r = await cardsPage(new URLSearchParams(key), Q.cards.length, QPAGE); if (s0 !== qSeq || Q.batch !== want || Q.qsKey !== key) return;
+    const have = new Set(Q.cards.map(c => c.id)); Q.cards = Q.cards.concat(r.cs.filter(c => !have.has(c.id))); Q.total = r.total; renderQueue(); }
+  catch (x) { toast("Couldn't load more cards: " + x.message, 5000); }
+  finally { b.removeAttribute("aria-busy"); }
+};
 const inBatch = (c, b) => !b || (b === "__none__" ? !c.batch : c.batch === b);
 function filtered() {
   const raw = Q.text.toLowerCase().trim(), idOnly = /^#\d+$/.test(raw), q = raw.replace(/^#/, "");
@@ -528,12 +627,17 @@ let qPoll = null;
 function scheduleQueuePoll() {
   clearTimeout(qPoll);
   if (Q.cards.some(c => c.ai_status === "queued" || c.ai_status === "checking"))
-    qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; const want = Q.batch, s0 = qSeq;
-      try { const qs = new URLSearchParams(); if (want) qs.set("batch", want); else qs.set("limit", "0"); if (Q.arch) qs.set("archived", "true");   // round 16 (skeptic r15 M1): never the 200-card default page
-        const cs = await call("/api/cards" + (qs.toString() ? "?" + qs : "")); if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden) return;
-        Q.cards = cs.filter(c => inBatch(c, want)); Q.cardsFor = want; renderQueue(); } catch {} }, 5000);
+    qPoll = setTimeout(async () => { if ($("#v-queue").hidden) return; if (document.hidden) { scheduleQueuePoll(); return; } const want = Q.batch, s0 = qSeq;   // audit 2026-10: no work while hidden
+      try { const qs = queueQs(want), key = qs.toString();   // round 16 (skeptic r15 M1): never the 200-card default page; audit 2026-10: All batches: the pages already loaded
+        const pg = want ? null : await cardsUpTo(qs, Math.max(QPAGE, Q.cards.length)), cs = pg ? pg.cs : await call("/api/cards?" + qs);
+        if (want !== Q.batch || s0 !== qSeq || $("#v-queue").hidden || (Q.qsKey && Q.qsKey !== key)) return;
+        const fresh = cs.filter(c => inBatch(c, want)), total = pg ? pg.total : null;
+        if (Q.cardsFor === want && total === Q.total && JSON.stringify(fresh) === JSON.stringify(Q.cards)) { scheduleQueuePoll(); return; }   // audit 2026-10: nothing changed
+        Q.cards = fresh; Q.cardsFor = want; Q.total = total; renderQueue(); } catch {} }, 5000);
 }
 function renderQueue() {
+  const ae = document.activeElement, fTr = ae && ae !== document.body && $("#qBody").contains(ae) ? ae.closest("tr") : null;   // audit 2026-10: focus survives a re-render
+  const fId = fTr && fTr.dataset.id, fSel = ae && ae.classList && ae.classList.contains("sel") ? ".sel" : "a";
   const rows = filtered(); Q.cards.forEach(c => { STATUS[c.id] = c.status; }); SS.order = JSON.stringify(rows.map(c => c.id)); SS.queueHash = location.hash.startsWith("#queue") ? location.hash : (SS.queueHash || "#queue");
   $("#qBody").innerHTML = rows.map(c => `<tr data-id="${c.id}">
     <td><input type="checkbox" class="sel" aria-label="Select card #${c.id} ${esc(c.name)}" ${Q.sel.has(c.id) ? "checked" : ""}></td>
@@ -542,15 +646,20 @@ function renderQueue() {
     <td>${esc(c.company)}</td><td>${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
     <td class="att">${c.attention.length ? `<ul class="reasons">${c.attention.map(a => `<li><span class="flag ${a.code.startsWith("dup") ? "dup" : a.code === "invalid" ? "bad" : "low"}">${esc(a.text)}</span></li>`).join("")}</ul>` : `<span class="flag ok">Looks good</span>`}</td>
     <td><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
+  if (fId) { const tr = $(`#qBody tr[data-id="${+fId}"]`), el = tr && (tr.querySelector(fSel) || tr.querySelector("a")); if (el) el.focus({preventScroll: true}); }
   const anyFilter = Q.att || Q.nx || Q.dup || Q.text || Q.batch;
   $("#qEmpty").hidden = rows.length > 0;
   $("#qEmpty").textContent = Q.cards.length ? (anyFilter ? "No cards match. Clear the filters or search." : `No ${({pending: "pending", approved: "approved", rejected: "rejected"})[Q.s] || ""} cards in this batch. ` + (Q.s === "pending" ? "See “All”, or go to Export." : "See “Pending” or “All”.")) : "No cards yet. Go to “Scan cards” to add some.";
   if (!rows.length && Q.batch && Q.s === "pending" && !Q.att && !Q.nx && !Q.dup && !Q.text && Q.cards.length && Q.cardsFor === Q.batch && !(Q.reading && Q.batch === Q.reading))
-    $("#qEmpty").innerHTML = `<b>✓ All done:</b> no pending cards in ${esc(($("#fBatch").selectedOptions[0] || {}).textContent || "this batch")}.` + (Q.cards.some(c => c.status === "approved") ? ` <a href="#export" onclick="sessionStorage.exportFrom=${esc(JSON.stringify(Q.batch || ""))}">Export it</a>` : " Nothing to export: no card was approved.");   // round 20   // round 15 (part-timer r14)
+    $("#qEmpty").innerHTML = `<b>✓ All done:</b> no pending cards in ${esc(($("#fBatch").selectedOptions[0] || {}).textContent || "this batch")}.` + (Q.cards.some(c => c.status === "approved") ? ` <a href="#export" data-export-from="${esc(Q.batch || "")}">Export it</a>` : " Nothing to export: no card was approved.");   // round 20   // round 15 (part-timer r14)
   if (!rows.length && Q.reading && Q.batch === Q.reading) $("#qEmpty").innerHTML = `<span class="spin" aria-hidden="true"></span> Reading your newest batch. Cards appear as they finish.`;
-  $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = filtered().map(c => c.id); [...Q.sel].forEach(i => { if (!vis.includes(i) || (Q.cards.find(c => c.id === i) || {}).status !== (Q.s || (Q.cards.find(c => c.id === i) || {}).status)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree
+  $("#archiveBatch").disabled = !Q.batch || Q.arch; { const vis = new Set(rows.map(c => c.id)); [...Q.sel].forEach(i => { if (!vis.has(i)) Q.sel.delete(i); }); $("#selAll").checked = Q.sel.size > 0; if (!Q.sel.size) $("#selNote").hidden = true; syncSel(); } syncSel(); scheduleQueuePoll();   // newcomer r9 N3: the header box, the note and the button count always agree; audit 2026-10: a Set, not O(n²) (a shown card always has the shown status)
   const inB = Q.cardsFor === Q.batch ? Q.cards.filter(c => inBatch(c, Q.batch)) : [], cnt = {pending: 0, approved: 0, rejected: 0, "": inB.length};
-  inB.forEach(c => cnt[c.status]++); $$("#statusTabs button").forEach(b => b.querySelector("span").textContent = `(${cnt[b.dataset.s]})`);
+  inB.forEach(c => cnt[c.status]++);
+  // audit 2026-10: a paged All batches list only knows the total of the status shown (X-Total)
+  const paged = Q.batch === "" && Q.cardsFor === "" && Q.total != null;
+  $$("#statusTabs button").forEach(b => b.querySelector("span").textContent = paged ? (b.dataset.s === Q.s ? `(${Q.total})` : "") : `(${cnt[b.dataset.s]})`);
+  $("#qMore").hidden = !(paged && Q.total > Q.cards.length); if (!$("#qMore").hidden) $("#qMoreBtn").textContent = `Load more (${Q.cards.length} of ${Q.total} shown)`;
 
 }
 $("#qBody").addEventListener("click", e => {
@@ -558,6 +667,8 @@ $("#qBody").addEventListener("click", e => {
   if (e.target.classList.contains("sel")) { e.target.checked ? Q.sel.add(id) : Q.sel.delete(id); syncSel(); return; }
   if (e.target.tagName !== "A") location.hash = "review/" + id;
 });
+// audit 2026-10 C9: "Export it" used an inline onclick, which the CSP (script-src 'self') blocks; one delegated listener instead
+$("#qEmpty").addEventListener("click", e => { const a = e.target.closest("a[data-export-from]"); if (a) SS.exportFrom = a.dataset.exportFrom; });
 // round 8 (newcomer r8 N1): the header box selects YOUR cards (cards in batches you scanned); other people's cards only on request
 $("#selAll").onchange = e => { const rows = filtered().filter(c => inBatch(c, Q.batch)), mine = rows.filter(c => MINE.has(c.batch)), others = rows.filter(c => !MINE.has(c.batch));
   Q.sel.clear(); if (e.target.checked) mine.forEach(c => Q.sel.add(c.id));
@@ -576,14 +687,13 @@ function syncSel() { const n = Q.sel.size; $("#bulkApprove").disabled = $("#bulk
     else if (nt && !nt.hidden && $("#selOthers")) { const b_ = nt.querySelector("b"); if (b_) b_.textContent = String(n); } }
   $("#bulkApprove").textContent = n ? `Approve ${n} selected card${n > 1 ? "s" : ""}` : "Approve selected"; $("#bulkReject").textContent = n ? `Reject ${n} selected card${n > 1 ? "s" : ""}` : "Reject selected"; }
 async function bulk(status, btn) {
-  const ids = [...Q.sel]; if (!ids.length || !await needWho()) return;
+  const ids = [...Q.sel]; if (!ids.length) return;
   $("#bulkApprove").disabled = $("#bulkReject").disabled = true;   // round 15 (reviewer r14): both off while one runs
   try { return await bulk_(status, btn, ids); } finally { syncSel(); }
 }
 // round 17 (newcomer r16 #2): "Approve all 1" read oddly: natural wording for 1 and 2
 const allN17 = (n, tail) => `Approve ${n}`;   // round 21 (newcomer r20): one approve label
 const cap17 = (xs, f, n = 10) => xs.slice(0, n).map(f).join("") + (xs.length > n ? `<li>…and ${xs.length - n} more (open the cards from the queue)</li>` : "");
-const ids17 = (xs, n = 10) => xs.slice(0, n).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ") + (xs.length > n ? ` …and ${xs.length - n} more` : "");
 async function bulk_(status, btn, ids) {
   const sel = Q.cards.filter(c => Q.sel.has(c.id)), decided = sel.filter(c => c.status !== "pending" && c.status !== status);
   const verb = status === "approved" ? "Approve" : "Reject";
@@ -600,13 +710,12 @@ async function bulk_(status, btn, ids) {
   const lk0 = pre ? pre.lookalikes || [] : [], ai0 = pre ? pre.ai_pending || [] : [], sk0 = pre ? pre.skipped || [] : [];
   // round 16 (reviewer r15 N2, coordinator r15 #6): words instead of raw scores, and long lists are capped
   const why16 = w => String(w || "").replace(/\bname~[\d.]+/g, "similar name").replace(/\borg~[\d.]+/g, "similar company").replace(/\bemail exact\b/g, "same email").replace(/\bphone exact\b/g, "same phone");
-  const cap16 = (xs, f) => xs.slice(0, 10).map(f).join("") + (xs.length > 10 ? `<li>…and ${xs.length - 10} more (open the cards from the queue)</li>` : "");
   // round 21 (r20 bots): about 5 short lines; ids and reasons behind "Show" / More
   const show = (n, inner) => `<details class="more small"><summary>Show ${n}</summary><ul>${inner}</ul></details>`;
   const line = [];
-  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap16(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
+  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
   if (ai0.length) line.push(`<li>${plural(ai0.length, "card")}: AI check not finished (approving cancels it).</li>`);
-  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap16(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
+  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
   if (decided.length) line.push(`<li>${plural(decided.length, "card")} already decided.</li>`);
   const preHtml = line.length ? `<ul>${line.join("")}</ul>` : "";
   const restN = pre ? (pre.would_approve || []).filter(i => !lk0.some(w => w.id === i)).length : 0;
@@ -640,20 +749,19 @@ async function bulk_(status, btn, ids) {
   if (res) {
       const warn = res.warnings || [];
       const msg = `Done: ${plural(res.updated.length, "card")} ${status}.` + (res.skipped.length ? ` ${res.skipped.length} skipped (still pending: open them from the queue).` : "") + (warn.length ? ` ${plural(warn.length, "card")} may already be in MC Trade.` : "");   // round 21: no second dialog repeating the list
-      toast(msg, res.skipped.length || warn.length ? 7000 : 4500, res.updated.length > 0); refreshUndo(); refreshCounts.t = 0; refreshCounts();   // round 12 (reviewer r10): nav badge follows a bulk decision
+      toast(msg, res.skipped.length || warn.length ? 7000 : 4500, res.updated.length > 0); refreshUndo(); refreshCounts();   // round 12 (reviewer r10): nav badge follows a bulk decision
   }
   syncSel(); setTimeout(syncSel, 0);   // busy() restored the old label ("… (3)"); show the real count
 }
 $("#bulkApprove").onclick = e => bulk("approved", e.currentTarget); $("#bulkReject").onclick = e => bulk("rejected", e.currentTarget);
 $("#archiveBatch").onclick = async e => { const btn = e.currentTarget;
-  const opt = $("#fBatch").selectedOptions[0]; if (!Q.batch || !await needWho()) return;
+  const opt = $("#fBatch").selectedOptions[0]; if (!Q.batch) return;
   const r = await ask({title: "Archive this batch?", html: `<p><b>${esc(opt.textContent)}</b> will be hidden from the queue and exports. Nothing is deleted. Tick “Show archived” to see it.</p>`,
     buttons: [{label: "Archive batch", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return;
   await busy(btn, "Archiving…", async () => { const x = await post("/api/batches/archive", {batch: Q.batch, reviewer: who()}); Q.batch = ""; pushQueueState(); toast(`${plural(x.archived, "card")} archived.`, 4500, x.archived > 0); await loadQueue(); });
 };
 $("#archiveAll").onclick = async e => { const btn = e.currentTarget;
-  if (!await needWho()) return;
   const r = await ask({title: "Archive all test data?", html: "<p>Hides every card in the queue from the queue and exports. Nothing is deleted. Undo brings them back.</p>",
     input: {label: "Type CLEAR to confirm", required: "Type CLEAR to confirm."}, buttons: [{label: "Archive everything", cls: "danger", value: 1, needInput: true, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return; if (r.input.trim() !== "CLEAR") { toast("Not cleared: you didn't type CLEAR."); return; }
@@ -674,7 +782,7 @@ async function openCard(id, opts = {}) {
   if (switching) {   // round 6 (newcomer F1): never show the previous card's values under the new card's number
     CARD_READY = false; cur = null; $("#rForm").inert = true; $("#rForm").classList.add("loading");
     $$("#rForm input, #rForm textarea").forEach(el => { if (!el.readOnly) { el.readOnly = true; el.dataset.ro16 = "1"; } });   // round 16 (part-timer r15): nothing typed into the empty form while it loads
-    $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; } });
+    $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; e._h = null; } });
     $("#h-r").textContent = `Loading card #${id}…`; $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = true);
   }
   let d; try { d = await call("/api/cards/" + id); } catch { if (tok === openSeq) { toast("Card not found."); location.hash = SS.queueHash || "queue"; } return; }
@@ -756,7 +864,7 @@ async function openCard(id, opts = {}) {
     $("#prev").disabled = i <= 0; $("#next").disabled = i < 0 || i >= o.length - 1; };
   showPos(null);
   { const b_ = d.batch || c.batch || "", seq_ = openSeq;
-    call("/api/cards?status=pending&limit=0" + (b_ ? "&batch=" + encodeURIComponent(b_) : "")).then(cs => {
+    call("/api/cards?status=pending" + (b_ ? "&limit=0&batch=" + encodeURIComponent(b_) : "&limit=500")).then(cs => {   // audit 2026-10: no batch: capped (only ids for Prev/Next)
       if (seq_ !== openSeq || !cur || cur.id !== c.id) return;
       const pend = new Set((cs || []).map(x => x.id)); let o = order();
       o.forEach(x => { if (pend.has(x)) STATUS[x] = "pending"; else if ((STATUS[x] ?? "pending") === "pending" && x !== c.id) STATUS[x] = "decided"; });
@@ -838,7 +946,7 @@ function renderAI(d) {
     const typ = p.busy ? "the AI is busy, so this may take a while"
               : p.typical_seconds ? `recent checks took about ${p.typical_seconds} s each` : "about a minute per card";
     // round 21 (all r20 bots): ONE plain sentence
-    h = `<b role="status">${p.eta_seconds ? `AI check in ~${fmtEta(p.eta_seconds)}` : s === "checking" ? "AI check running…" : "AI check soon"}.</b> Keep working.` +
+    h = `<b>${p.eta_seconds ? `AI check in ~${fmtEta(p.eta_seconds)}` : s === "checking" ? "AI check running…" : "AI check soon"}.</b> Keep working.` +
         `<div class="progress mini" aria-hidden="true"><div style="width:${s === "queued" ? 5 : Math.min(95, Math.round(100 * secs / (p.typical_seconds || 60)))}%"></div></div>`;
   }
   const ruleHints = (d.attention || []).filter(a => ["hint", "consistency"].includes(a.code));
@@ -860,7 +968,9 @@ function renderAI(d) {
   if (h && dirty && dirtyIds.size) h = `<p class="flag bad">Not saved yet: ${esc([...dirtyIds].map(i => LABEL[i.replace(/^x_/, "")] || i.replace(/^x_/, "")).join(", "))}. AI checks the saved card. Save, then check again.</p>` + h;   // reviewer r7
   // round 11 (reviewer r10 blocker 1): the AI is labelled plainly. It is a spelling/typo double-check, advisory only.
   if (h) h += `<p class="small aiNote">AI suggestions can be wrong. Check the photo.</p>`;
-  box.hidden = !h; box.innerHTML = h;
+  // audit 2026-10: #rAI is no longer a live region (it was replaced every 4 s and re-announced); a state change is announced
+  // once by the toast. Unchanged content is not rewritten, so focus on its buttons survives the poll.
+  box.hidden = !h; if (box._h !== h || box.dataset.cid !== String(d.id)) { box.innerHTML = h; box._h = h; box.dataset.cid = d.id; }
   box.querySelectorAll("[data-aik]").forEach(b => b.onclick = async () => {
     const k = b.dataset.aik, ch = b.dataset.aic;
     // round 12 (coordinator r4 #4): a second AI choice clicked while the first one was still reloading the card used the old
@@ -872,7 +982,7 @@ function renderAI(d) {
       catch (e) { if (e.data && e.data.need === "stale") { const n = await call("/api/cards/" + d.id); cur.version = n.version; return await post(`/api/cards/${d.id}/ai-decide`, {choices: {[k]: ch}, version: n.version, ...extra}); } throw e; } };
     if (dirty) {   // unsaved typing on the form: merge here in the browser, never on the server
       if (ch === "accept" && !setFormField(k, diff[k].to)) { toast("Save your edits first, then choose.", 4000); return; }
-      try { await send({record_only: true}); toast(ch === "accept" ? `AI value put in ${LABEL[k] || k}. Save to keep it.` : "Kept the current value.", 4000); await openCard(d.id, {keep: true}); }
+      try { await send({record_only: true}); toast(ch === "accept" ? `AI value put in ${LABEL[k] || k}. Save to keep it.` : "Kept the current value.", 4000); refreshUndo(); await openCard(d.id, {keep: true}); }
       catch (e) { toast("Not saved: " + e.message, 5000); box.querySelectorAll("[data-aik]").forEach(x => x.disabled = false); }
       return;
     }
@@ -880,6 +990,7 @@ function renderAI(d) {
     catch (e) { toast("Not saved: " + e.message, 5000); box.querySelectorAll("[data-aik]").forEach(x => x.disabled = false); } });
   if ($("#aiAsk")) $("#aiAsk").onclick = async () => { const typed = dirty; try { const r = await post(`/api/cards/${d.id}/ai-check`, {}); toast("AI double-check started" + (r.ahead ? ` (${r.ahead} ahead of it)` : "") + (typed ? ". It checks the saved card, not unsaved edits." : "."), typed ? 7000 : 3500); openCard(d.id, {keep: true}); } catch (e) { toast(e.message, 5000); } };
   if (s === "queued" || s === "checking") rPoll = setTimeout(async () => {
+    if (document.hidden) { renderAI(d); return; }   // audit 2026-10: no polling while the tab is hidden
     if (!$("#v-review").hidden && cur && cur.id === d.id && ($("#dlg").open || DECIDING)) { renderAI(d); return; }   // round 15 (part-timer r14): never reload the card under an open question (the merge dialog vanished); try again later
     if ($("#v-review").hidden || !cur || cur.id !== d.id || SAVING) return;   // round 10: root cause of the ghost "unsaved" badge: this
     const n = await call("/api/cards/" + d.id);                                 // poll re-opened the card with the TYPED values while a save was in flight
@@ -1036,7 +1147,6 @@ function collect() {
 }
 async function act(btn, extra, okMsg, sid = cur && cur.id) {
   if (!CARD_READY || !cur) { toast("Wait for the card to finish loading before saving.", 4000); return; }
-  if (!await needWho()) return;
   if (SAVING && !await waitSaveIdle()) { toast("Not saved: the last save is still running. Try again in a moment.", 6000); return; }   // round 14
   // round 11 (part-timer r4 CRITICAL): the card is fixed when the action starts. If the page moved to another card meanwhile
   // (e.g. while the merge dialog was open), nothing is saved: before, the merge was sent for the card now on screen, so the
@@ -1059,7 +1169,6 @@ async function decide(status, btn) {
 async function decide_(status, btn) {
   if (!CARD_READY) { toast("Wait for the card to finish loading before saving.", 4000); return; }
   const sid = cur.id;   // round 11 (part-timer r4): the card is fixed when the action starts (see act())
-  if (status && !await needWho()) return;
   // round 14 (LOST SAVE): a click while the previous save is still running used to be ignored without a word (busy button).
   // It now waits for that save, then saves what is on the form at that moment.
   if (SAVING || btn.getAttribute("aria-busy") === "true") {
@@ -1125,7 +1234,7 @@ async function decide_(status, btn) {
           // round 8 (part-timer r2): 'Next' stays inside THIS card's batch, asked from the server (also when the card was opened
           // by a direct link); "All done" only when that batch has no pending card left at all
           const myB = cur.batch || null, o = order(), i = o.indexOf(sid);
-          let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "0"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}
+          let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "500"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}   // audit 2026-10: capped without a batch
           let nx2;
           if (pl) { const ids = new Set(pl.map(x => x.id));
             nx2 = (i >= 0 ? (o.slice(i + 1).find(x => ids.has(x)) ?? o.slice(0, i).find(x => ids.has(x))) : undefined) ?? (pl.find(x => x.id > sid) || pl[0] || {}).id; }
@@ -1291,7 +1400,7 @@ async function exportInfo() {
       $("#xKeepAll").onclick = async () => {
         const r = await ask({title: `Mark ${pairs.length} pairs as different people?`, html: `<p>This saves a “different person” link on each listed card for the card next to it (${esc(pairs.slice(0, 12).map(([a, w]) => `#${a}↔#${w}`).join(", "))}${pairs.length > 12 ? "…" : ""}). Duplicate scans aren't included. Undo is available.</p>`,
           buttons: [{label: "Mark them all", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
-        if (!r.value || !await needWho()) return; let ok = 0, bad = 0;
+        if (!r.value) return; let ok = 0, bad = 0;
         for (const [a, w] of pairs) { try { const cv = (await call(`/api/cards/${a}`)).version; await post(`/api/cards/${a}`, {keep_apart: [w], card_id: a, version: cv}); ok++; } catch { bad++; } }
         toast(`${ok} pair(s) marked as different people` + (bad ? `, ${bad} not changed (open them)` : "") + ".", 4000, ok > 0); exportInfo(); };
     }
@@ -1300,10 +1409,24 @@ async function exportInfo() {
     return r;
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
 }
+// audit 2026-10: say what was really saved. In the desktop app each file goes through a native Save dialog that can be
+// cancelled (desktop.js gacSaveBlob answers {saved} | {cancelled} | {error}); a browser only takes the download over.
+async function saveBlob(blob, name) {
+  const d = window.gacSaveBlob && window.gacSaveBlob(blob, name); if (d) return await d;
+  const a = document.createElement("a"), u = URL.createObjectURL(blob); a.href = u; a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000); return {name, started: true};
+}
+const lostFiles = outs => outs.filter(o => !o.saved && !o.started);
+function savedText(outs) {
+  if (outs.every(o => o.started)) return `Your browser is downloading ${plural(outs.length, "file")}.`;
+  const ok = outs.filter(o => o.saved), no = lostFiles(outs);
+  return ((ok.length ? `Saved ${ok.length === 1 ? ok[0].saved : plural(ok.length, "file") + " to " + ok[0].saved.replace(/[\\/][^\\/]*$/, "")}.` : "") +
+    (no.length ? ` Not saved: ${no.map(o => `${o.name} (${o.cancelled ? "cancelled" : o.error || "failed"})`).join(", ")}.` : "")).trim();
+}
 async function dl(url) {   // fetch + save, so several files can be downloaded from one click
-  const r = await fetch(url); if (!r.ok) { let j = {}; try { j = await r.json(); } catch {} throw new Error(j.error || r.statusText); }
-  const nm = (r.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "file", a = document.createElement("a");
-  a.href = URL.createObjectURL(await r.blob()); a.download = decodeURIComponent(nm); document.body.append(a); a.click(); a.remove(); return r;
+  const r = await fetchOk(url);
+  const nm = (r.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "file";
+  return {r, out: await saveBlob(await r.blob(), decodeURIComponent(nm))};
 }
 $("#exPreview").onclick = async () => {
   // round 20 (coordinator r19): Preview shows the files ON SCREEN only; downloading the PREVIEW- copies is a separate button
@@ -1317,9 +1440,9 @@ $("#exPreview").onclick = async () => {
           ((v.warnings || []).length ? `<details class="more"><summary>In the file, with a warning (${v.warnings.length})</summary><ul>${v.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""),
           wide: true, buttons: [{label: "Close", cls: "primary", value: null, primary: true}, {label: "Download preview files (not for import)", value: "dl"}]});
         if (a.value !== "dl") return;
-        const r = await dl(q), comp = (r.headers.get("X-Companions") || "").split(",").filter(Boolean);
-        for (const c of comp) await dl(q + "&companion=" + c);
-        toast(`Saved ${plural(1 + comp.length, "PREVIEW file")} to Downloads. Not for import.`, 4000, true); }
+        const {r, out} = await dl(q), comp = (r.headers.get("X-Companions") || "").split(",").filter(Boolean), outs = [out];
+        for (const c of comp) outs.push((await dl(q + "&companion=" + c)).out);
+        toast(savedText(outs) + " These are PREVIEW files, not for import.", lostFiles(outs).length ? 8000 : 5000); }
   catch (e) { toast("Preview not made: " + e.message, 5000); }
 };
 $("#exDryrun").onclick = () => { window.open(`/api/export/dryrun?status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`, "_blank", "noopener"); };
@@ -1341,7 +1464,7 @@ async function loadExportHistory() {
     <td>${x.available ? `<a href="/api/exports/${x.id}/download">${esc(x.filename)}</a>` + (x.companions || []).map(c => ` · <a href="/api/exports/${x.id}/companion/${c}">${c === "readme.txt" ? "READ ME" : c === "updates.xlsx" ? "UPDATES file" : "extra columns"}</a>`).join("") : `${esc(x.filename)} <span class="sub">(${x.mine ? "copy deleted" : "only " + esc(x.initials) + " or an admin can download it"})</span>`}</td></tr>`).join("") || `<tr><td colspan="5">No exports yet.</td></tr>`;
 }
 $("#exHistEveryone") && ($("#exHistEveryone").onchange = () => loadExportHistory());
-const KIND_ = 0; const KIND = {xlsx: "MC Trade import (Excel)", csv: "Spreadsheet (CSV)", vcf: "Contacts (vCard)"};
+const KIND = {xlsx: "MC Trade import (Excel)", csv: "Spreadsheet (CSV)", vcf: "Contacts (vCard)"};
 $$(".tile").forEach(t => t.onclick = async () => {   // round 14 (parttimer r6): busy at once, one click only, checks in parallel
   if (t.getAttribute("aria-busy") === "true") return;
   t.setAttribute("aria-busy", "true"); const lbl0 = t.style.cursor; t.style.cursor = "progress"; toast("Preparing the export…", 1500);
@@ -1351,7 +1474,6 @@ async function tileExport(t) {
   const kind = t.dataset.ex, st = $("#exStatus").value;
   const pre = kind === "xlsx" ? call(`/api/export/xlsx?preview=1&view=1&status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`).catch(e => ({__err: e})) : null;
   const info = await exportInfo(); if (!info || !info.count || info.duplicates.length) return;
-  if (!await needWho()) return;
   { const eb_ = $("#exBatch").value, bo = (BATCHES || []).find(b => b.batch === eb_) || (exportInfo.list || []).find(b => b.batch === eb_);   // round 24 (reviewer r23): warn before exporting someone else's batch
     if (eb_ === "" || (bo && !bo.own)) { const who_ = bo && bo.owner ? bo.owner : "other people";
       const a_ = await ask({title: eb_ === "" ? "Export everyone's batches?" : `This batch belongs to ${who_}`, html: `<p>${eb_ === "" ? "You chose All batches: cards other people scanned are included." : `“${esc(bo.batch_label || bo.batch)}” was scanned by ${esc(who_)}, not you.`} Export it anyway?</p>`,
@@ -1372,21 +1494,20 @@ async function tileExport(t) {
                  (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
         (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
         `</ul></div>`; } } catch {} }
-  const r = await ask({title: `Export ${plural(info.count, "card")}?`, html: so + `<p>Format: <b>${KIND[kind]}</b><br>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b><br>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "One file goes to your Downloads folder."}</p>`,
+  const r = await ask({title: `Export ${plural(info.count, "card")}?`, html: so + `<p>Format: <b>${KIND[kind]}</b><br>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b><br>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p>`,
     buttons: [{label: "Export", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");
   try {
     const sv = seenV ? Object.entries(seenV).map(([k, x]) => `&seen_${k}=${encodeURIComponent(x)}`).join("") : "";
-    const res = await fetch(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
-    if (!res.ok) { let j = {}; try { j = await res.json(); } catch {} throw new Error(j.error || res.statusText); }
+    const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
     const name = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "export." + kind, n = res.headers.get("X-Card-Count");
-    const blob = await res.blob(), a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove();
+    const outs = [await saveBlob(await res.blob(), name)];
     $("#exDone").hidden = false;
     const eid = res.headers.get("X-Export-Id"), comp = (res.headers.get("X-Companions") || "").split(",").filter(Boolean);
-    for (const c of comp) { const r2 = await fetch(`/api/exports/${eid}/companion/${c}`); if (!r2.ok) continue;
-      const nm = (r2.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || c, a2 = document.createElement("a");
-      a2.href = URL.createObjectURL(await r2.blob()); a2.download = decodeURIComponent(nm); document.body.append(a2); a2.click(); a2.remove(); }
+    for (const c of comp) { let r2; try { r2 = await fetchOk(`/api/exports/${eid}/companion/${c}`); } catch (x) { if (x.status === 401) throw x; outs.push({name: c, error: x.message}); continue; }
+      const nm = (r2.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || c;
+      outs.push(await saveBlob(await r2.blob(), decodeURIComponent(nm))); }
     $("#exDone").className = "alert ok"; $("#exDone").hidden = false;
     let sm = null; try { sm = JSON.parse(res.headers.get("X-Summary") || "null"); } catch {}
     // round 23 (coordinator/newcomer r22): one short line, plus only what needs action
@@ -1394,8 +1515,10 @@ async function tileExport(t) {
         (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "") +
         (sm.possible.length ? ` <span class="flag low">Maybe in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "")
       : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the .xlsx${comp.includes("updates.xlsx") ? " (updates separately)" : ""}. Read the READ-ME and try 2 rows first.` : "");
+    const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
+    if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
     $("#exDone").dataset.batch = $("#exBatch").value;
-    toast(kind === "xlsx" ? `Saved ${1 + comp.length} files to Downloads. Read the READ-ME first.` : "Saved to Downloads.", 5000); exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
+    toast(savedText(outs) + (kind === "xlsx" && !lost.length ? " Read the READ-ME first." : ""), lost.length ? 9000 : 5000); exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
   } catch (e) { $("#exDone").hidden = false; $("#exDone").className = "alert bad"; $("#exDone").textContent = "Export failed: " + e.message; }
   finally { t.removeAttribute("aria-busy"); }
 }
@@ -1407,7 +1530,7 @@ const ADMV = {};   // round 15: versions of the shared admin state as shown on t
 async function loadAdmin() {
   if (!ME) return;   // route() runs again once the signed-in user is known
   if (ME.role !== "admin") { ["users", "settings", "audit"].forEach(t => $("#t-" + t).hidden = true); $("#adminTabs").hidden = true; toast("Only admins can open the Admin page."); return; }
-  $$("#adminTabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.t === adminTab));
+  $$("#adminTabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.t === adminTab));
   ["users", "settings", "audit"].forEach(t => $("#t-" + t).hidden = t !== adminTab);
   if (adminTab === "users") {
     const us = await call("/api/admin/users");
@@ -1425,8 +1548,14 @@ async function loadAdmin() {
   if (adminTab === "settings") {
     const st = await call("/api/admin/settings"), pv = await call("/api/admin/retention/preview");
     ADMV.seen = st;   // round 15 (manager r14): optimistic locking: the values shown are sent back with every save
-    call("/api/admin/backup-status").then(b => { const w = $("#sBackupWarn"); w.hidden = !b.same_disk;
-      if (b.same_disk) w.innerHTML = `<b>Backups are on this computer only.</b> Ask IT to set a backup drive. <details class="more"><summary>More</summary>If this disk fails, the cards and backups are lost together. Backup folder: ${esc(b.dir)}. IT: see the admin guide, section 2.5.</details>`; }).catch(() => {});
+    call("/api/admin/backup-status").then(b => { const w = $("#sBackupWarn");
+      // audit 2026-10 P1: a failed or missing backup is shown here too, not only in the server console
+      const old_ = b.enabled && (!b.last_at || Date.now() / 1000 - b.last_at > 50 * 3600), when_ = t => new Date(t * 1000).toLocaleString();
+      const msgs = [];
+      if (b.last_error) msgs.push(`<b>The last backup failed</b> (${esc(when_(b.last_error_at))}): ${esc(b.last_error)}. The scanner tries again every 10 minutes.`);
+      else if (old_) msgs.push(b.last_at ? `<b>No backup since ${esc(when_(b.last_at))}.</b> Backups run at night while the scanner is open.` : `<b>No backup yet.</b> The first one is made within a few minutes, then every night.`);
+      if (b.same_disk) msgs.push(`<b>Backups are on this computer only.</b> Ask IT to set a backup drive. <details class="more"><summary>More</summary>If this disk fails, the cards and backups are lost together. Backup folder: ${esc(b.dir)}. IT: see the admin guide, section 2.5.</details>`);
+      w.hidden = !msgs.length; w.innerHTML = msgs.join("<br>"); }).catch(() => {});
     $("#sOn").checked = st.retention_enabled === "1"; $("#sAI").checked = st.ai_check_enabled === "1"; $("#sUpd").checked = st.mctrade_updates_enabled === "1"; $("#sCorr").checked = st.corrections_enabled === "1"; $("#sAff").value = st.mctrade_affcode || ""; $("#sPh").value = st.phone_format || "gac"; $("#sPhone").checked = st.phone_mode_allowed === "1"; $("#sUpdChk").checked = st.update_check_enabled === "1";
     call("/api/admin/mctrade-template").then(t => { ADMV.tpl = t.version; return t; }).then(t => $("#sTpl").innerHTML = (t.present ? `<span class="chip ok">GAC template</span> ${t.columns.filter(Boolean).length} columns${t.unknown.length ? " · left blank: " + esc(t.unknown.join(", ")) : ""}` : `<span class="chip low">Default columns</span> Upload GAC's template before the first real import.`) + ` <span title="Version ${esc(t.version)}">` + (t.last_change ? `· changed by ${esc(t.last_change.by)}, ${esc(t.last_change.at)}` : "") + "</span>").catch(() => {});
     $("#sTplFile").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; const fd = new FormData(); fd.append("image", f); fd.append("expected_version", ADMV.tpl || "");
@@ -1477,13 +1606,14 @@ fetch("/health").then(r => r.json()).then(h => { const el = $("#appVer"); if (el
 setInterval(() => { if (!document.hidden) refreshCounts(); }, 15000);
 // round 10 (newcomer r9): the upload list updates by itself (a card approved, rejected or merged elsewhere shows its new state)
 setInterval(() => { if (!document.hidden && B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); }, 15000);
-window.addEventListener("focus", () => { if (B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); });
+window.addEventListener("focus", () => { refreshUndo(); if (B && (location.hash || "#upload").startsWith("#upload")) refreshBatchCards(); });   // audit 2026-10: Undo state from other tabs
 $(".skip").onclick = e => { e.preventDefault(); $("#main").focus(); };   // the hash is the router: don't navigate to "#main"
 
 /* ---------- phone mode (Scan with phone) ---------- */
 let phT = null;
 async function phoneRefresh() {
   clearTimeout(phT);
+  if (document.hidden) { phT = setTimeout(phoneRefresh, 5000); return; }   // audit 2026-10: no work while the tab is hidden
   try { const st = await call("/api/phone/status"); $("#bPhone").hidden = !st.allowed;
     if (!st.active) { $("#phonePanel").hidden = true; return; }
     $("#phoneCount").textContent = st.uploads || 0; const m = Math.max(0, Math.round((st.expires - Date.now() / 1000) / 60));
@@ -1510,6 +1640,7 @@ function aiWord(a) { return !a.enabled ? "AI check: off" : a.available ? "AI che
 function aiHeader(a) { const el = $("#aiQueue"); if (!el) return; el.hidden = false; el.textContent = aiWord(a);
   el.title = !a.enabled ? "AI check is off (Admin → Settings)." : a.available ? "AI check is on: unclear cards get a later typo check." : "The AI isn't answering right now. Scanning still works. See Help."; }
 async function aiQueueTick() {
+  if (document.hidden) { setTimeout(aiQueueTick, 20000); return; }   // audit 2026-10: no work while the tab is hidden
   try { const a = await call("/api/ai/status"), q = a.queue || {}, n = (q.waiting || 0) + (q.running || 0);
     // round 16 (coordinator r15 #2): everyone sees whether the AI double-check is on (read-only; an admin changes it in Settings)
     $("#aiQueue").hidden = false;
@@ -1529,6 +1660,8 @@ setTimeout(async () => { try { const u = await call("/api/update");
 // ---- Desktop "AI helper" download/start/stop (Admin > Settings). Shown only in the packaged desktop app.
 var aiHelperTimer = null;
 async function aiHelperRefresh() {
+  if (document.hidden && aiHelperRefresh.ran) { clearTimeout(aiHelperTimer); aiHelperTimer = setTimeout(aiHelperRefresh, 8000); return; }   // audit 2026-10
+  aiHelperRefresh.ran = true;
   let s; try { s = await call("/api/admin/ai-helper"); } catch (e) { return; }
   const box = $("#aiHelper"); if (!box) return;
   box.hidden = !(s.desktop || s.installed) || !s.supported;
@@ -1544,5 +1677,7 @@ async function aiHelperRefresh() {
   clearTimeout(aiHelperTimer); if (busyNow || (s.running && !box.hidden)) aiHelperTimer = setTimeout(aiHelperRefresh, busyNow ? 1500 : 8000);
 }
 for (const [id, path] of [["#aiHelperDl", "download"], ["#aiHelperStart", "start"], ["#aiHelperStop", "stop"], ["#aiHelperRm", "remove"]])
-  if ($(id)) $(id).onclick = async () => { if (path === "remove" && !confirm("Delete the downloaded AI helper files?")) return;
+  if ($(id)) $(id).onclick = async () => {   // audit 2026-10: the app's own dialog, not the browser's confirm()
+    if (path === "remove" && !(await ask({title: "Delete the AI helper?", html: "<p>The downloaded AI helper files are deleted from this computer. You can download them again later.</p>",
+        buttons: [{label: "Delete", cls: "danger", value: 1}, {label: "Cancel", value: null, primary: true, focus: true}]})).value) return;
     try { await post("/api/admin/ai-helper/" + path, {}); } catch (e) { toast(e.message, 5000); } aiHelperRefresh(); };

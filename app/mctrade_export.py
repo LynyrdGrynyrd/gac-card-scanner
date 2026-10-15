@@ -36,14 +36,16 @@ def _read_headers():
     if os.path.isfile(TEMPLATE_XLSX):
         from openpyxl import load_workbook
         wb = load_workbook(TEMPLATE_XLSX, read_only=True); ws = wb.worksheets[0]
-        for w in wb.worksheets:   # an instructions sheet may come first: use the sheet whose header row has IndEmail/AffCode1
-            first = [_hnorm(x) for x in next(w.iter_rows(min_row=1, max_row=1, values_only=True), ()) or ()]
-            if "indemail" in first or "affcode1" in first: ws = w; break
-        row = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        try:
+            for w in wb.worksheets:   # an instructions sheet may come first: use the sheet whose header row has IndEmail/AffCode1
+                first = [_hnorm(x) for x in next(w.iter_rows(min_row=1, max_row=1, values_only=True), ()) or ()]
+                if "indemail" in first or "affcode1" in first: ws = w; break
+            row = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        finally: wb.close()   # audit 2026-10: a read-only workbook keeps its file open; Windows then can't replace the template
         while row and row[-1] in (None, ""): row.pop()          # trailing empty cells are not columns
         return ["" if h is None else str(h) for h in row], "GAC template file"
     try:
-        with open(COLMAP) as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "the scanner's default column names (not checked against MC Trade)"
+        with open(COLMAP, encoding="utf-8") as fh: return [c["header"] for c in json.load(fh)["template_columns"]], "the scanner's default column names (not checked against MC Trade)"
     except Exception: return FALLBACK, "the scanner's default column names (not checked against MC Trade)"
 
 def canonical(h):
@@ -98,6 +100,7 @@ def content_problems(f):
         if TAG.search(dec) or (dec != v and re.search(r"[<>]", dec)): out[k] = f"{nm} contains HTML code ({v[:30]})"
         elif k not in ("social", "note") and (looks_formula(v) or looks_formula(dec)): out[k] = f"{nm} looks like a spreadsheet formula ({v[:30]})"
         elif INVISIBLE.search(v) and k != "note": out[k] = f"{nm} contains invisible characters (zero-width / text-direction); retype it"
+        elif k not in ("note", "address", "other_address") and re.search(r"[\r\n]", v): out[k] = f"{nm} contains a line break; put it on one line"   # audit 2026-10
     return out
 
 def phone(n, style="gac"):

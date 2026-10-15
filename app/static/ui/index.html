@@ -83,11 +83,11 @@
       <button class="btn danger" id="bulkReject" disabled>Reject selected</button></div></div>
   <p id="selNote" class="small" role="status" hidden></p>
   <div class="filters" role="group" aria-label="Filters">
-    <div class="seg" role="tablist" aria-label="Status" id="statusTabs">
-      <button role="tab" data-s="pending" aria-selected="true">Pending <span></span></button>
-      <button role="tab" data-s="approved" aria-selected="false">Approved <span></span></button>
-      <button role="tab" data-s="rejected" aria-selected="false">Rejected <span></span></button>
-      <button role="tab" data-s="" aria-selected="false">All <span></span></button>
+    <div class="seg" role="group" aria-label="Status" id="statusTabs">
+      <button type="button" data-s="pending" aria-pressed="true">Pending <span></span></button>
+      <button type="button" data-s="approved" aria-pressed="false">Approved <span></span></button>
+      <button type="button" data-s="rejected" aria-pressed="false">Rejected <span></span></button>
+      <button type="button" data-s="" aria-pressed="false">All <span></span></button>
     </div>
     <div class="fbatch"><label for="fBatch" class="inline">Batch</label><input id="fBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="12"><select id="fBatch" disabled><option value="">Loading…</option></select></div>
     <label class="chk"><input type="checkbox" id="fAtt"> Needs attention</label>
@@ -106,6 +106,7 @@
     <tbody id="qBody"></tbody>
   </table>
   </div>
+  <p class="btns" id="qMore" hidden><button type="button" class="btn small" id="qMoreBtn">Load more</button></p>
   <p id="qEmpty" class="empty" hidden></p>
   <p id="qLoading" class="empty" hidden><span class="spin" aria-hidden="true"></span> Loading…</p>
 </section>
@@ -128,7 +129,7 @@
       <div id="rRisk" class="alert" role="status" hidden></div>
       <div id="rWarn" class="alert info" hidden></div>
       <div id="rCons" class="alert" role="status" hidden></div>
-      <div id="rAI" class="alert info" role="status" hidden></div>
+      <div id="rAI" class="alert info" hidden></div>
       <div class="grid2" id="fields">
         <div class="f"><label for="first_name">First name <span class="req">*</span></label><input id="first_name" data-c="name" aria-describedby="e_name"></div>
         <div class="f"><label for="last_name">Last name</label><input id="last_name" data-c="name"></div>
@@ -159,7 +160,7 @@
 
 <section id="v-export" class="view" aria-labelledby="h-e" hidden>
   <h1 id="h-e">Export</h1>
-  <p class="lead">Files go to this computer's <b>Downloads</b> folder. Nothing is uploaded.</p>
+  <p class="lead">Files are saved on this computer. Nothing is uploaded.</p>
   <label for="exStatus">Cards</label>
   <select id="exStatus"><option value="approved_new">Ready to export</option><option value="approved">All approved</option><option value="all">All cards</option><option value="pending">Pending only</option><option value="rejected">Rejected only (admin)</option></select>
   <label for="exBatch">Batch</label>
@@ -187,8 +188,8 @@
 <section id="v-admin" class="view" aria-labelledby="h-a" hidden>
   <h1 id="h-a">Admin</h1>
 <!--ADMIN-BEGIN-->
-  <div class="seg" role="tablist" aria-label="Admin sections" id="adminTabs">
-    <button role="tab" data-t="users" aria-selected="true">Reviewers</button><button role="tab" data-t="settings" aria-selected="false">Settings</button><button role="tab" data-t="audit" aria-selected="false">Audit log</button>
+  <div class="seg" role="group" aria-label="Admin sections" id="adminTabs">
+    <button type="button" data-t="users" aria-pressed="true">Reviewers</button><button type="button" data-t="settings" aria-pressed="false">Settings</button><button type="button" data-t="audit" aria-pressed="false">Audit log</button>
   </div>
   <div id="t-users" class="panel">
     <h2>Reviewers</h2>
@@ -269,7 +270,7 @@
   </div>
   <div id="t-audit" class="panel" hidden>
     <h2>Audit log</h2>
-    <div class="row"><label class="sr" for="aQ">Search the audit log</label><input type="search" id="aQ" placeholder="Search the log" style="max-width:360px"><a class="btn small" id="aCsv" href="/api/admin/audit?fmt=csv&limit=5000">Download as CSV</a></div>
+    <div class="row"><label class="sr" for="aQ">Search the audit log</label><input type="search" id="aQ" placeholder="Search the log" style="max-width:360px"><a class="btn small" id="aCsv" href="/api/admin/audit?fmt=csv&limit=5000" download>Download as CSV</a></div>
     <div class="tablewrap"><table class="q plain"><caption class="sr">Audit log</caption><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Type</th><th scope="col">Card</th><th scope="col">What happened</th></tr></thead><tbody id="aBody"></tbody></table></div>
   </div>
 <!--ADMIN-END-->
@@ -288,6 +289,6 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <footer class="foot"><div class="wrap">Card Scanner <strong>Pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a> · <span id="appVer"></span></div></footer>
 <script src="/static/ui/ui.js?v=8"></script>
-<script src="/static/ui/desktop.js?v=3"></script>
+<script src="/static/ui/desktop.js?v=4"></script>
 </body>
 </html>

@@ -28,7 +28,12 @@ def to_csv(cards):
     b = io.StringIO(); w = csv.DictWriter(b, COLS); w.writeheader()
     for c in cards: w.writerow(_flat(c))
     return b.getvalue()
-def _e(s): return (s or "").replace("\\","\\\\").replace(",","\\,").replace(";","\\;").replace("\n","\\n")
+def _e(s): return (s or "").replace("\\","\\\\").replace(",","\\,").replace(";","\\;").replace("\r\n","\n").replace("\r","\n").replace("\n","\\n")
+def _v(s):
+    """Audit 2026-10 P1: a non-text vCard value (email, phone, URL, profile) on ONE line: a line break inside it could
+    otherwise end the card and start a forged one (a phone ending in a line break + 'END:VCARD' + 'BEGIN:VCARD' ...)."""
+    import re
+    return re.sub(r"[\r\n]+", " ", str(s or "")).strip()
 def to_vcard(cards):
     out = []
     for c in cards:
@@ -37,13 +42,13 @@ def to_vcard(cards):
              f"FN:{_e((f['first_name']+' '+f['last_name']).strip() or f['company'])}"]
         if f["company"]: v.append(f"ORG:{_e(f['company'])}")
         if f["title"]: v.append(f"TITLE:{_e(f['title'])}")
-        v += [f"EMAIL;TYPE=INTERNET:{e}" for e in f["emails"]]
+        v += [f"EMAIL;TYPE=INTERNET:{_v(e)}" for e in f["emails"]]
         tm = {"work":"WORK,VOICE","mobile":"CELL","fax":"WORK,FAX"}
         from . import mctrade_export as _mx   # round 21 (skeptic r20 L2): same phone style as CSV/XLSX ('330-555-0142 x12')
-        v += [f"TEL;TYPE={tm.get(p['type'],'VOICE')}:{_mx.phone(p['number']) or p['number']}" for p in f["phones"]]
-        if f["website"]: v.append(f"URL:{f['website']}")
+        v += [f"TEL;TYPE={tm.get(p['type'],'VOICE')}:{_v(_mx.phone(p['number']) or p['number'])}" for p in f["phones"]]
+        if f["website"]: v.append(f"URL:{_v(f['website'])}")
         if f["address"]: v.append(f"ADR;TYPE=WORK:;;{_e(f['address'])};;;;")
-        v += [f"X-SOCIALPROFILE:{s}" for s in f.get("social", [])]
+        v += [f"X-SOCIALPROFILE:{_v(s)}" for s in f.get("social", [])]
         v += [f"NOTE:GAC card scan #{c['id']} ({c['status']})", "END:VCARD"]
         out.append("\r\n".join(v))
     return "\r\n".join(out) + "\r\n"

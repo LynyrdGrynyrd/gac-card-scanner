@@ -28,6 +28,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 
+[InstallDelete]
+; Upgrades: remove the previous version's program files first, so files the new version no longer ships (old DLLs, old
+; Python packages) can't stay behind and be loaded. Only the program folder: card data is in %LOCALAPPDATA%\GAC Card Scanner.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
@@ -46,7 +51,12 @@ Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"
 Filename: "{app}\{#MyAppExe}"; Description: "Start {#MyAppName} now"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /F /IM ""{#MyAppExe}"" /T & taskkill /F /IM llama-server.exe /T"; Flags: runhidden; RunOnceId: "StopApp"
+; Stop the app; /T also stops its child processes, which includes the AI helper (llama-server) it started.
+Filename: "{cmd}"; Parameters: "/C taskkill /F /IM ""{#MyAppExe}"" /T"; Flags: runhidden; RunOnceId: "StopApp"
+; An AI helper left running after the app crashed has no parent any more: stop it too, but ONLY the copy this app
+; downloaded (its path is under %LOCALAPPDATA%\GAC Card Scanner\ai-helper\). "taskkill /IM llama-server.exe" would also
+; kill every other llama.cpp server on the computer, including ones that have nothing to do with this app.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ""$d = Join-Path $env:LOCALAPPDATA 'GAC Card Scanner\ai-helper\'; Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'llama-server.exe' -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"""; Flags: runhidden; RunOnceId: "StopAIHelper"
 ; Card data in %LOCALAPPDATA%\GAC Card Scanner is intentionally kept on uninstall (delete that folder to remove it).
 
 [Code]

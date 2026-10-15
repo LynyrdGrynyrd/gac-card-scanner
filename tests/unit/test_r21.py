@@ -130,7 +130,7 @@ def test_readme_checklist_and_428(env):
     adm = env["adm"]
     r = adm.get("/api/export/csv", params={"batch": "b1", "_nov": "1"})
     if r.status_code == 428: assert "now" not in r.json()
-    src = open(os.path.join(os.path.dirname(U.__file__), "ui.py")).read()
+    src = open(os.path.join(os.path.dirname(U.__file__), "ui.py"), encoding="utf-8").read()
     assert src.count("Test with two rows") == 0 and "Totals: " in src and "Before you import" in src
 
 def test_real_huge_page_pdf_fixture():

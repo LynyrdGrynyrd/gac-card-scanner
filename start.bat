@@ -30,7 +30,12 @@ if not exist ".venv\Scripts\python.exe" (
   %PY% -m venv .venv || (echo Could not create environment. & pause & exit /b 1)
 )
 ".venv\Scripts\python.exe" -m pip install -q --upgrade pip >nul 2>nul
-".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
+REM the tested, fully pinned versions (Python 3.12/3.13); on another Python version fall back to the ranges in requirements.txt
+".venv\Scripts\python.exe" -m pip install -q -r requirements.lock.txt
+if errorlevel 1 (
+  echo ^(Exact tested versions not available for this Python: installing compatible versions instead.^)
+  ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
+)
 if errorlevel 1 (echo Installing components failed - check the internet connection. & pause & exit /b 1)
 set "TESS="
 where tesseract >nul 2>nul && set TESS=1

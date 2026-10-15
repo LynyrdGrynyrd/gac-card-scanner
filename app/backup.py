@@ -20,7 +20,7 @@ KEEP = int(os.environ.get("BACKUP_KEEP", "7"))
 # audit 2026-10 P0-9: never back up the AI helper (~3 GB model), the desktop window's browser profile (holds the session
 # cookie), caches, logs or lock/instance files: only the cards database, photos, stored exports and admin uploads matter
 SKIP_DIRS = {"thumbs", "inbox", "jobs_done", "__pycache__", "ai-helper", "webview", ".ruff_cache"}
-SKIP_FILES = {"app.log", "instance.json"}
+SKIP_FILES = {"app.log", "app.log.1", "instance.json"}
 def _skip(name): return (name.startswith("mctrade_contacts.") or name.startswith(".workers") or name in SKIP_FILES
                          or name.endswith((".db-wal", ".db-shm", ".db-journal", ".part", ".tmp")))
 
@@ -109,7 +109,12 @@ def restore(path, data=None, db=None):
         finally: os.close(fd)
     aside = data + ".before-restore-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     keep_contacts = [f for f in (os.listdir(data) if os.path.isdir(data) else []) if f.startswith("mctrade_contacts.")]
-    if os.path.isdir(data): shutil.move(data, aside)
+    if os.path.isdir(data):   # audit 2026-10 (Windows CI): a virus scanner briefly holding a just-written file -> retry
+        for k in range(6):
+            try: os.rename(data, aside); break
+            except PermissionError:
+                if k == 5: raise RuntimeError("the data folder is in use (is the scanner, or a program with a file from it open, still running?)")
+                time.sleep(0.5 * (k + 1))
     os.makedirs(data)
     with tarfile.open(path, "r:gz") as t:
         for m in t.getmembers():
@@ -129,11 +134,32 @@ def restore(path, data=None, db=None):
     for sub in ("uploads", "exports", "inbox", "jobs_done", "thumbs"): os.makedirs(os.path.join(data, sub), exist_ok=True)
     for f in keep_contacts:   # the contacts export is never in a backup: keep the one that was uploaded
         shutil.copy2(os.path.join(aside, f), os.path.join(data, f))
+    _merge_tombstones(os.path.join(aside, "deleted_cards.json"), os.path.join(data, "deleted_cards.json"))
     c = sqlite3.connect(db); ok = c.execute("PRAGMA integrity_check").fetchone()[0]; c.close()
     if ok != "ok": raise RuntimeError("restored database failed its integrity check: " + ok)
     return {"manifest": man, "moved_aside": aside if os.path.isdir(aside) else None}
 
+def _merge_tombstones(old, new):
+    """Audit 2026-10 P1 (F07): cards deleted on request AFTER the backup was made must stay deleted. The current list is
+    merged into the restored one; the scanner deletes those cards again when it next starts (ui.apply_tombstones)."""
+    t = {}
+    for p in (new, old):
+        try:
+            with open(p) as fh: t.update(json.load(fh))
+        except (FileNotFoundError, ValueError): pass
+    if t:
+        with open(new, "w") as fh: json.dump(t, fh)
+
 # ---------------------------------------------------------------- nightly schedule (runs inside the scanner)
+STATE = {"last_ok": None, "last_path": None, "last_error": None, "last_error_at": None}
+def status():
+    """For Admin > Settings: the newest backup, the last error, where they go."""
+    bs = listing(); last = bs[-1] if bs else None
+    st = os.stat(last) if last else None
+    return {"dir": backup_dir(), "count": len(bs), "last_file": os.path.basename(last) if last else None,
+            "last_at": st.st_mtime if st else None, "last_size": st.st_size if st else None,
+            "last_error": STATE["last_error"], "last_error_at": STATE["last_error_at"],
+            "enabled": os.environ.get("GAC_BACKUP", "1") == "1"}
 def _next_run(now=None, hour=None):
     hour = int(os.environ.get("BACKUP_HOUR", "2")) if hour is None else hour
     now = now or datetime.datetime.now(); t = now.replace(hour=hour, minute=30, second=0, microsecond=0)
@@ -143,16 +169,22 @@ def _loop():
         try:
             if os.environ.get("GAC_BACKUP", "1") != "1": time.sleep(3600); continue
             last = listing(); age = time.time() - os.path.getmtime(last[-1]) if last else 1e9
-            if age > 26 * 3600:   # missed (the computer was off at night): back up soon after start
+            if age > 26 * 3600 or STATE["last_error"]:   # missed (computer off at night) or the last try failed: soon
                 time.sleep(600)
             else:
                 time.sleep(max(60, (_next_run() - datetime.datetime.now()).total_seconds()))
             p = make(); print("nightly backup:", p, flush=True)
+            STATE.update(last_ok=time.time(), last_path=p, last_error=None, last_error_at=None)
             try:
                 from . import auth; auth.alog("backup", f"nightly backup made ({os.path.basename(p)}; {len(listing())} kept)")
             except Exception: pass
         except Exception as e:
-            print("backup error:", e, flush=True); time.sleep(3600)
+            # audit 2026-10 P1: a failure is retried in 10 minutes (it used to wait for the next night: a 48 h gap) and shown
+            # in Admin > Settings, not only in the console
+            STATE.update(last_error=str(e)[:300], last_error_at=time.time()); print("backup error:", e, flush=True)
+            try:
+                from . import auth; auth.alog("backup", f"backup FAILED: {str(e)[:200]} (retrying in 10 minutes)")
+            except Exception: pass
 def same_disk():
     """Round 9 (manager-r9 L-r9-5): True when the backups sit on the same disk as the data (set GAC_BACKUP_DIR)."""
     try:
