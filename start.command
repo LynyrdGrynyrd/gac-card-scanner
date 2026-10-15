@@ -21,7 +21,10 @@ PY=$(command -v python3)
 if [ -z "$PY" ]; then echo; echo "Python 3 is not installed. Install it from https://www.python.org/downloads/ then double-click this file again."; read -r -p "Press Enter to close..."; exit 1; fi
 if [ ! -x .venv/bin/python ]; then echo "First-time setup (takes a few minutes)..."; "$PY" -m venv .venv || { read -r -p "Could not create environment. Press Enter..."; exit 1; }; fi
 .venv/bin/python -m pip install -q --upgrade pip >/dev/null 2>&1
-.venv/bin/python -m pip install -q -r requirements.txt || { echo "Installing components failed (check the internet connection)."; read -r -p "Press Enter to close..."; exit 1; }
+# the tested, fully pinned versions (Python 3.12/3.13); on another Python version fall back to the ranges in requirements.txt
+.venv/bin/python -m pip install -q -r requirements.lock.txt \
+  || { echo "(Exact tested versions not available for this Python: installing compatible versions instead.)"; .venv/bin/python -m pip install -q -r requirements.txt; } \
+  || { echo "Installing components failed (check the internet connection)."; read -r -p "Press Enter to close..."; exit 1; }
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v tesseract >/dev/null 2>&1; then
   echo; echo "!! The card-reading engine (Tesseract) is not installed."
