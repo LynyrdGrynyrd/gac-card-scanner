@@ -81,3 +81,39 @@ def test_two_people_on_one_card_flagged():
     f = _p("John & Jane Smith", "Owners", "Smith Bakery", "330-555-0101")
     assert "name" in f["needs_review"] and (f["confidence"].get("name") or 0) <= 0.5
     assert f["last_name"] != "Bakery"
+
+
+# OSS re-check 2026-10-15 (OSS-SURVEY.md, "Parser bugs found while probing")
+def test_inline_address_label_is_dropped_and_keeps_the_street():
+    f = _p("Jane Doe", "Director", "Acme Corp", "Mailing address: PO Box 12", "Akron, OH 44308", "jane@acme.com")
+    assert f["address"] == "PO Box 12, Akron, OH 44308"
+    f = _p("Jane Doe", "Director", "Acme Corp", "Address: 47 N Main St, Akron, OH 44308")
+    assert f["address"] == "47 N Main St, Akron, OH 44308"
+
+
+def test_inline_visitor_label_starts_the_other_address():
+    f = _p("Jane Doe", "Director", "Acme Corp", "100 Elm St", "Kent, OH 44240", "Visitors and deliveries: 47 N Main St", "Akron, OH 44308", "jane@acme.com")
+    assert (f["address"], f["other_address"]) == ("100 Elm St, Kent, OH 44240", "47 N Main St, Akron, OH 44308")
+
+
+def test_only_address_is_the_address_even_with_a_visitor_label():
+    for lab in (["Visitors and deliveries: 47 N Main St"], ["Visitors and deliveries:", "47 N Main St"]):
+        f = _p("Jane Doe", "Director", "Acme Corp", *lab, "Akron, OH 44308", "jane@acme.com", "330-555-0101")
+        assert (f["address"], f["other_address"]) == ("47 N Main St, Akron, OH 44308", ""), lab
+
+
+def test_ocr_letter_in_street_number():
+    f = _p("Jane Doe", "Director", "Acme Corp", "25o8 Jonathan Terrace Ave", "Barberton, OH 44229", "jane@acme.com")
+    assert f["address"] == "2508 Jonathan Terrace Ave, Barberton, OH 44229"
+    assert _p("Jane Doe", "2O1 Main St", "Akron, OH 44308")["address"] == "201 Main St, Akron, OH 44308"
+    assert _p("Jane Doe", "Sales", "Acme Corp", "3rd Floor", "jane@acme.com")["address"] == ""   # '3rd' is not a misread number
+
+
+def test_po_box_with_zero_for_o():
+    f = _p("Jane Doe", "Director", "Acme Corp", "P.0. Box 445", "Akron, OH 44308", "jane@acme.com")
+    assert f["address"] == "P.O. Box 445, Akron, OH 44308"
+
+
+def test_office_phone_label_is_not_an_address():
+    f = _p("Jane Doe", "Office: 330-555-0101", "Acme Corp", "jane@acme.com")
+    assert f["address"] == "" and [p["number"] for p in f["phones"]] == ["330-555-0101"]

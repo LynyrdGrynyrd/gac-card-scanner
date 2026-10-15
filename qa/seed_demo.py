@@ -2,9 +2,11 @@
 Usage: .venv/bin/python qa/seed_demo.py <admin-user> <password>"""
 import sys, time, glob, uuid, json, urllib.request, http.cookiejar
 B = "http://127.0.0.1:8765"
-op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+jar = http.cookiejar.CookieJar(); op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 def call(path, data=None, ctype=None):
-    rq = urllib.request.Request(B + path, data=data, headers={"Content-Type": ctype} if ctype else {})
+    # like the page: same-origin Origin header and the session's CSRF token on every change (the server refuses without them)
+    h = {"Origin": B, "X-CSRF-Token": next((c.value for c in jar if c.name == "gac_csrf"), "")} | ({"Content-Type": ctype} if ctype else {})
+    rq = urllib.request.Request(B + path, data=data, headers=h)
     return json.load(op.open(rq, timeout=120))
 call("/api/auth/login", json.dumps({"username": sys.argv[1], "password": sys.argv[2]}).encode(), "application/json")
 files = sorted(glob.glob("tests/synth2/*.jpg"))[:5] + ["qa/fixtures/qr_vcard_card.jpg"]
