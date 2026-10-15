@@ -118,7 +118,9 @@ def _phones(lines, used):
                 if re.search(p, suf): t = k; break
         out.append({"type": t or "work", "number": num.strip(), "valid": len(d) >= 10}); used.add(i)
     for i, ln in enumerate(lines):
-        if "@" in ln: continue
+        # property tests 2026-10: 'jsmith@acme.com  T: 330-555-0101' on one line lost the phone (the whole line was skipped).
+        # The email / @handle is blanked out instead (same length, so spans and labels still line up) and the rest is read.
+        if "@" in ln: ln = re.sub(r"\S*@\S*", lambda m: " " * len(m.group(0)), ln)
         is_addr = bool(STREET.search(ln) or US_ZIP.search(ln)) and not re.search(r"\b(tel|phone|fax|mobil|cell)", ln, re.I)
         spans = []
         for m in phonenumbers.PhoneNumberMatcher(ln, "US", leniency=phonenumbers.Leniency.POSSIBLE):

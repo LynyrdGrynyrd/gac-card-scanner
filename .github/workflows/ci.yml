@@ -30,7 +30,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: requirements.lock.txt
+          cache-dependency-path: |
+            requirements.lock.txt
+            requirements-dev.txt
       - name: Tesseract (Ubuntu, apt)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
@@ -46,12 +48,54 @@ jobs:
         run: brew install tesseract
       - name: Tesseract version
         run: tesseract --version
-      - name: Python deps (fully pinned lock)
-        run: pip install -r requirements.lock.txt pytest==9.1.1 httpx==0.28.1
-      - name: Unit tests
+      - name: Python deps (fully pinned lock + test tools)
+        run: pip install -r requirements.lock.txt -r requirements-dev.txt
+      - name: Unit tests (incl. the Hypothesis parser properties)
         run: python -m pytest -q -p no:cacheprovider tests/unit
       - name: Launcher smoke test (headless, from source)
         run: python packaging/smoke_test.py packaging/launcher.py
+
+  api-fuzz:
+    # Schemathesis: every API operation, in-process, signed in as an admin; any 500 fails (tests/api).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock.txt
+            requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.lock.txt -r requirements-dev.txt
+      - name: API fuzzing (no 5xx)
+        run: python -m pytest -q -p no:cacheprovider tests/api
+
+  e2e:
+    # Playwright (Chromium) against the real app on a free port: first run, scan, review, approve, export; roles; keyboard.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock.txt
+            requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.lock.txt -r requirements-dev.txt
+      - name: Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
+      - name: Browser tests
+        run: python -m pytest -q -p no:cacheprovider tests/e2e
 
   lint:
     # Strict-but-passing start: syntax errors, undefined names, mutable/called defaults. FastAPI's Body()/File()/Form()
@@ -85,8 +129,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install pip-audit==2.10.1
       - name: pip-audit (known vulnerabilities in the pinned dependencies)
-        # the lock pins every transitive package, so --no-deps audits exactly what gets installed
-        run: pip-audit -r requirements.lock.txt --no-deps --disable-pip --progress-spinner off
+        # the lock (and requirements-dev.txt on top of it) pin every transitive package, so --no-deps audits exactly what gets installed
+        run: pip-audit -r requirements.lock.txt -r requirements-dev.txt --no-deps --disable-pip --progress-spinner off
 
   accuracy:
     # Recognition accuracy gate on the synthetic sets (fails when accuracy drops below the floor).

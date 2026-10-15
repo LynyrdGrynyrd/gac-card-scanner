@@ -491,7 +491,7 @@ COMPANION = {"extra.csv": ("text/csv", "-extra-columns.csv"), "readme.txt": ("te
 def export_companion(eid: int, name: str, request: Request):
     """Companion files of an MC Trade import file: the non-template columns + rows left out, and the READ ME notes."""
     if name not in COMPANION: raise HTTPException(404)
-    r = U.db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone()
+    r = U.db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone() if 0 < eid < 2**63 else None   # fuzz 2026-10: a huge id was a 500
     u = request.state.user
     if r and u["role"] != "admin" and r["username"] != u["username"]:
         return JSONResponse({"error": "Only the person who made this export (or an admin) can download it."}, 403)
@@ -514,7 +514,7 @@ def export_history(request: Request):
 
 @U.router.get("/api/exports/{eid}/download")
 def export_again(eid: int, request: Request):
-    r = U.db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone()
+    r = U.db().execute("SELECT * FROM exports WHERE id=?", (eid,)).fetchone() if 0 < eid < 2**63 else None   # fuzz 2026-10: a huge id was a 500
     if not r or not r["stored"] or not os.path.isfile(os.path.join(U.EXP, r["stored"])):
         return JSONResponse({"error": "That file is no longer stored. Export again."}, 404)
     u = request.state.user

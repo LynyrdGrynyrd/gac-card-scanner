@@ -21,3 +21,17 @@ Run: `python -m pytest -q tests/unit` (all data goes to a temporary folder, see 
 - **Public demo:** `test_audit_p1_backend.py` (2), `test_demo.py` (1), `test_desktop_v021.py` (1)
 - **Desktop app, launcher, packaging, CI:** `test_audit_p1_backend.py` (4), `test_packaging_files.py` (4), `test_r15ui.py` (3), `test_app.py` (2), `test_desktop_v021.py` (2), `test_r24.py` (2), `test_r5.py` (2), `test_r6.py` (2)
 - **Frontend static checks:** `test_desktop_v021.py` (3), `test_frontend_static.py` (2), `test_r8.py` (1)
+
+## Other test layers
+
+Install the test tools once: `pip install -r requirements.lock.txt -r requirements-dev.txt` (exact pins, see the file).
+
+- **Parser properties (Hypothesis):** `tests/unit/test_props_parser.py`, part of the unit run. Any text: the parser never
+  crashes, returns the same shape, is deterministic and never invents an email or phone; generated cards: the planted
+  email and phone are found. Reproducible (`derandomize=True`), no example database written.
+- **API fuzzing (Schemathesis):** `python -m pytest -q tests/api` (~1.5 min). Every operation of the app's OpenAPI,
+  in-process, signed in as an admin with the CSRF header; any 5xx fails. The few excluded operations and why are listed
+  at the top of `tests/api/test_fuzz_api.py`; every 500 it found has a plain test in `tests/unit/test_fuzz_regressions.py`.
+- **Browser end-to-end (Playwright, Chromium):** `python -m playwright install chromium` once, then
+  `python -m pytest -q tests/e2e` (~1 min; needs Tesseract). Starts the real app on a free port with a temp data folder:
+  first-run admin, scan a photo, review/edit/approve, CSV export; a reviewer can't open Admin; J/K/A keys; no console errors.
