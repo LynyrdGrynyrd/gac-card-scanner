@@ -1,7 +1,7 @@
 """Round 23: per-field 'This is correct' with a required reason, confirmations re-checked everywhere (also old/pre-r23 ones),
 no confirmations through merges, truthful Cancel count, export default helpers, Morg4n / 7-digit phones / E*Trade /
 CoffeeCo. / ZIP, sign-out from the login page, reader memory backstop."""
-import json, os, time
+import sys, json, os, time
 from test_app import mk
 from app import ui as U, mctrade_export as MX
 
@@ -98,8 +98,17 @@ def test_reader_hard_backstop(monkeypatch):
     assert reader.backstop_mb(1200) == 4800 and reader.backstop_mb(500) == 4096
     p = os.path.join(os.path.dirname(__file__), "..", "..", "qa", "fixtures", "multipage_07_08_10.pdf"); d = open(p, "rb").read()
     assert len(reader.run_page(d, 0, 3, "m.pdf")) == 1          # normal pages are far below the backstop
-    monkeypatch.setenv("READER_BACKSTOP_MB", "40")              # a tiny backstop: the child is refused memory, the server is fine
-    # (audit 2026-10: 40, not 150 - on Windows/macOS it is enforced on resident memory, and a page can render in < 150 MB there)
+    if sys.platform.startswith("linux"):   # the kernel's hard address-space limit (RLIMIT_AS) exists only here
+        monkeypatch.setenv("READER_BACKSTOP_MB", "150")         # a tiny backstop: the child is refused memory, the server is fine
+        try: reader.run_page(d, 0, 3, "m.pdf"); assert False, "expected ReaderError"
+        except reader.ReaderError as e: assert str(e) == reader.CALM
+
+def test_reader_memory_watch_kills_the_child_on_every_platform(monkeypatch):
+    """Audit 2026-10: off Linux (no RLIMIT_AS on macOS/Windows) the cap is the resident-memory watch: a child whose memory
+    goes over the cap (or the backstop) is killed and the upload gets the calm message. Deterministic: the reading is faked."""
+    from app import reader
+    p = os.path.join(os.path.dirname(__file__), "..", "..", "qa", "fixtures", "multipage_07_08_10.pdf"); d = open(p, "rb").read()
+    monkeypatch.setattr(reader, "_rss_mb", lambda pid: 10_000)
     try: reader.run_page(d, 0, 3, "m.pdf"); assert False, "expected ReaderError"
     except reader.ReaderError as e: assert str(e) == reader.CALM
 
