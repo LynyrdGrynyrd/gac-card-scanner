@@ -11,7 +11,7 @@ def test_static_ui_scripts_are_revalidated_and_fingerprinted():
     from app.main import app
     from app import auth
     c = TestClient(app)
-    for u in ("/static/ui/login.js", "/static/ui/desktop.js", "/static/ui/ui.css"):
+    for u in ("/static/ui/main.js", "/static/ui/core/api.js", "/static/ui/views/review.js", "/static/ui/login.js", "/static/ui/desktop.js", "/static/ui/ui.css"):
         r = c.get(u); assert r.status_code == 200 and r.headers.get("cache-control") == "no-cache", (u, r.headers.get("cache-control"))
         assert r.headers.get("etag")
         assert c.get(u, headers={"If-None-Match": r.headers["etag"]}).status_code == 304

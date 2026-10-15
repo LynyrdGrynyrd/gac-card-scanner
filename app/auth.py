@@ -238,7 +238,7 @@ def versioned_html(path):
     import re as _re
     from fastapi.responses import HTMLResponse
     html = open(path, encoding="utf-8").read(); v = asset_version()
-    html = _re.sub(r'(/static/ui/(?:ui\.js|main\.js|ui\.css|login\.js|desktop\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
+    html = _re.sub(r'(/static/ui/(?:main\.js|ui\.css|login\.js|desktop\.js))(\?v=[^"\']*)?', lambda m: f"{m.group(1)}?v={v}", html)
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 @router.get("/setup")
