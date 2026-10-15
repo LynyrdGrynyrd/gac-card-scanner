@@ -1,7 +1,7 @@
 """Merge rule-based fields with local VLM output. Rules stay authoritative for regex-verifiable fields
 (emails/phones/website); the VLM wins on layout-semantic fields (name/title/company/address) when it is
 supported by OCR evidence or fills a gap. Anything VLM-only is flagged for review (confidence 0.5)."""
-import re
+import copy, re
 from difflib import SequenceMatcher
 from . import parser as P
 
@@ -44,7 +44,7 @@ def _dept_ok(vv, title, company, vtitle=""):
     return True
 
 def merge(f, v, ocr_text):
-    f = dict(f); conf = dict(f.get("confidence", {})); src = {}
+    f = copy.deepcopy(f); conf = dict(f.get("confidence") or {}); src = {}   # audit 2026-10 (F10): pure; phone dicts/list were shared with the caller
     if not isinstance(v, dict) or v.get("_error"): return f
     g = lambda k: v.get(k) if isinstance(v.get(k), str) else ""
     # ---- name (Latin + non-Latin)
