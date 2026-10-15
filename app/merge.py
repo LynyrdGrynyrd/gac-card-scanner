@@ -70,7 +70,7 @@ def merge(f, v, ocr_text):
         rs, vs = nscore(f.get("first_name"), f.get("last_name")), nscore(vf, vl)
         if _nu(vf + vl) == _nu(f.get("first_name", "") + f.get("last_name", "")) and vf: conf["name"] = 0.95
         elif vs >= rs and vs > 0:
-            f["first_name"], f["last_name"] = vf, (vl.split()[-1] if vl and vl.isascii() else vl); src["name"] = "vlm"
+            f["first_name"], f["last_name"] = vf, (P.surname(vl) if vl and vl.isascii() else vl); src["name"] = "vlm"
             conf["name"] = 0.75 if vs >= 2 else 0.5
         else: conf["name"] = min(conf.get("name") or 0.6, 0.55)
     # ---- company / title / department / address
