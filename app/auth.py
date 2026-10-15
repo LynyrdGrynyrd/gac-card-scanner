@@ -43,6 +43,7 @@ def check_pw(pw, stored):
         return hmac.compare_digest(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), int(it)).hex(), h)
     except Exception: return False
 def pw_problem(pw):
+    if not isinstance(pw, (str, type(None))): return "The password must be text."   # fuzz 2026-10: password: true was a 500
     if len(pw or "") < 10: return "Password must be at least 10 characters."
     return None
 
@@ -66,7 +67,9 @@ def _initials(display):
     return "".join(p[0] for p in display.split()[:3]).upper() or "?"
 
 def create_user(username, display, password, role="reviewer", initials=None, must_change=False):
-    username = username.strip().lower()
+    if not all(isinstance(x, (str, type(None))) for x in (username, display, initials)):   # fuzz 2026-10: username: null was a 500
+        raise ValueError("Username, name and initials must be text.")
+    username = (username or "").strip().lower()
     if not username or not username.replace(".", "").replace("-", "").replace("_", "").isalnum(): raise ValueError("Username: letters, numbers, . - _ only.")
     p = pw_problem(password)
     if p: raise ValueError(p)
@@ -281,6 +284,8 @@ def setup(request: Request, body: dict = Body(...)):
 
 @router.post("/api/auth/login")
 def login(request: Request, body: dict = Body(...)):
+    if not isinstance(body.get("username") or "", str) or not isinstance(body.get("password") or "", str):   # fuzz 2026-10: username: [..] was a 500
+        return JSONResponse({"error": "Send the username and password as text."}, 422)
     un = (body.get("username") or "").strip().lower(); ip = _client(request)
     # audit 2026-10 P1: wrong passwords are counted per (username, address) and per address. Someone else on the network
     # can no longer lock a colleague (or the admin) out by guessing at their username from another computer.
@@ -328,7 +333,7 @@ def add_user(request: Request, body: dict = Body(...)):
 @router.post("/api/admin/users/{uid}")
 def edit_user(uid: int, request: Request, body: dict = Body(...)):
     me = request.state.user
-    r = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    r = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone() if 0 < uid < 2**63 else None   # fuzz 2026-10: a huge id was a 500
     if not r: return JSONResponse({"error": "No such user."}, 404)
     # audit 2026-10 P0-7: every check BEFORE the first write. Returning from inside `with db()` COMMITS what was already
     # written (e.g. {password, active: false} on yourself reset the password and ended your sessions, then said "error").

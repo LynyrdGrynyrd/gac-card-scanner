@@ -195,6 +195,22 @@ def clean_reason(r):
     if re.match(r"^[=+\-@]", r) or re.search(r"<\s*[a-z/!]|&#|javascript:", r, re.I): return r, "The reason can't contain formulas or HTML code."
     return r, None
 
+TEXT_FIELDS = ("first_name", "last_name", "credentials", "title", "company", "department", "website", "address", "other_address")
+def fields_shape_problem(fields):
+    """Fuzz 2026-10: 'fields' must be what the review page sends (text values; emails/social lists of text; phones a list of
+    {type, number}). fields: [...], phones: true or phones: [null] crashed the save/validate code with a 500."""
+    if fields is None: return None
+    if not isinstance(fields, dict): return "fields must be an object of card values."
+    for k in TEXT_FIELDS:
+        if fields.get(k) is not None and not isinstance(fields[k], str): return f"{LABEL.get(k, k.replace('_', ' ').capitalize())} must be text."
+    for k in ("emails", "social"):
+        v = fields.get(k)
+        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)): return f"{LABEL.get(k, k)} must be a list of text values."
+    v = fields.get("phones")
+    if v is not None and not (isinstance(v, list) and all(isinstance(p, dict) and all(isinstance(p.get(x, ""), str) for x in ("type", "number")) for p in v)):
+        return "Phone numbers must be a list of {type, number} with text values."
+    return None
+
 def payload_problems(fields):
     """Shared server-side check for every endpoint that writes card values (save, approve, merge, AI accept, validate):
     only the values being sent are checked. HTML, formula text, invisible characters, impossible emails/phones."""
@@ -1517,6 +1533,8 @@ def validate_api(request: Request, body: dict = Body(...)):
     """Same checks as approval, for every field approval checks (skeptic R7-7: other_address, department, credentials, social)."""
     f = {"first_name": "", "last_name": "", "title": "", "company": "", "website": "", "address": "", "department": "",
          "credentials": "", "other_address": "", "note": "", "emails": [], "phones": [], "social": []}
+    bad = fields_shape_problem(body.get("fields"))
+    if bad: return JSONResponse({"error": bad, "need": "fix"}, 422)
     _apply_fields(f, body.get("fields") or {})
     if isinstance(body.get("note"), str): f["note"] = body["note"]
     try:   # round 21: values a reviewer confirmed as correct ('This is correct') stay confirmed while unchanged
@@ -1736,6 +1754,8 @@ def _update(cid, request, body, internal=False):
         for k_ in ("confirm_cross_batch", "confirm_redecide"):   # round 11 (skeptic R10-2)
             if k_ in body: body[k_] = body[k_] is True
     if not isinstance(body, dict): return JSONResponse({"error": "Send a JSON object."}, 422)
+    shape = fields_shape_problem(body.get("fields"))
+    if shape: return JSONResponse({"error": shape, "need": "fix"}, 422)
     # round 13 (skeptic r11 R11-1): ids in the body follow the same strict rule as the path
     if body.get("card_id") not in (None, ""): body["card_id"] = strict_id(body["card_id"], "card_id")
     if "merge_into" in body:
@@ -2039,6 +2059,8 @@ def merge_preview(cid: CardId, body: dict = Body(...)):
     """Read-only: what merging this card's (typed) fields into card `into` would keep, per field (same rule as the merge)."""
     t = store.get(strict_id(body.get("into") if isinstance(body, dict) else None, "into"))   # round 13: strict id
     if not t: return JSONResponse({"error": "Card to merge into was not found."}, 404)
+    shape = fields_shape_problem(body.get("fields"))
+    if shape: return JSONResponse({"error": shape, "need": "fix"}, 422)
     f = body.get("fields") or (store.get(cid) or {}).get("fields") or {}
     out = []
     for k in ("first_name", "last_name", "title", "company", "website", "address", "department"):
@@ -2315,6 +2337,7 @@ def _bulk(request, body):
 def archive(request: Request, body: dict = Body(...)):
     user = request.state.user; rv = user["initials"]; b = body.get("batch")
     if user["role"] != "admin": return JSONResponse({"error": "Only an admin can archive a batch (see the privacy note)."}, 403)
+    if not isinstance(b, str) or not b: return JSONResponse({"error": "Choose the batch to archive (batch: its name)."}, 422)   # fuzz 2026-10: batch: {} was a 500
     if b == "__all__":
         if user["role"] != "admin": return JSONResponse({"error": "Only an admin can clear all data."}, 403)
         if body.get("confirm") != "CLEAR": return JSONResponse({"error": "Type CLEAR (capital letters) to confirm archiving everything."}, 422)

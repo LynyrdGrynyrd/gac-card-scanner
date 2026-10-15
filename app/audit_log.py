@@ -1,6 +1,6 @@
 """The admin audit log (card history + sign-in log in plain words). Split out of app/ui.py (audit 2026-10 P2)."""
 import io, re, csv, json, datetime
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from . import auth
 from . import ui as U
 
@@ -64,6 +64,7 @@ def _audit_text(action, frm, to, d):
 
 @U.router.get("/api/admin/audit")
 def audit(q: str = "", limit: int = 500, fmt: str = "json"):
+    if not 0 <= limit <= 1_000_000: return JSONResponse({"error": "limit must be a number from 0 to 1000000."}, 422)   # fuzz 2026-10: 2**63 was a 500
     rows = []; want = limit
     # round 15 (manager r14 L-r14-2): WHO is always the username (initials are mapped back); the initials stay in their own column
     _ini = {}
