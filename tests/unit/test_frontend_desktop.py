@@ -71,7 +71,8 @@ def test_app_log_is_rotated_when_too_big(tmp_path):
 
 def test_desktop_js_reports_per_file_results():
     js = open(os.path.join(ROOT, "app", "static", "ui", "desktop.js"), encoding="utf-8").read()
-    ui = open(os.path.join(ROOT, "app", "static", "ui", "ui.js"), encoding="utf-8").read()
+    import glob   # audit 2026-10 P2: the page code is ES modules now
+    ui = "\n".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(ROOT, "app", "static", "ui", "**", "*.js"), recursive=True) if not f.endswith("desktop.js"))
     assert "window.gacSaveBlob" in js and "cancelled" in js and "skipped_big" in js and "gacDownload" not in js
     assert "gacSaveBlob" in ui and "Your browser is downloading" in ui
     assert "to Downloads" not in ui                          # no blanket "saved to Downloads" claim any more

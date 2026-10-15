@@ -20,7 +20,7 @@ def test_demo_pages_carry_asset_fingerprint(tmp_path):
     # v0.2.1: the demo /ui page used ui.js?v=8 while the API sent the real fingerprint, so ui.js reloaded in a loop
     from app import demo, auth
     p = os.path.join(os.path.dirname(__file__), "..", "..", "app", "static", "ui", "index.html")
-    assert f"ui.js?v={auth.asset_version()}" in demo.page(p).body.decode()
+    assert f"main.js?v={auth.asset_version()}" in demo.page(p).body.decode()   # audit 2026-10 P2: ES module entry point
 
 def test_open_url_only_opens_local_static_paths(monkeypatch):
     import importlib.util, webbrowser

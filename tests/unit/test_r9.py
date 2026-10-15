@@ -202,7 +202,7 @@ def test_update_rows_member_since_blank_and_diff(env, monkeypatch):
 def test_asset_urls_versioned(env):
     r = env["rev"].get("/ui"); assert r.status_code == 200
     import re
-    v = re.search(r"/static/ui/ui\.js\?v=([0-9a-f]{10})", r.text); assert v
+    v = re.search(r'<script type="module" src="/static/ui/main\.js\?v=([0-9a-f]{10})"', r.text); assert v   # audit 2026-10 P2: ES module entry point
     assert env["rev"].get("/api/me").headers.get("X-GAC-Asset") == v.group(1)
 
 def test_backup_same_disk_warning(tmp_path, monkeypatch):
