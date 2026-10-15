@@ -1,6 +1,6 @@
 """Local logins for the pilot: named reviewers, PBKDF2-hashed passwords, admin role, cookie sessions.
 No external identity provider; everything lives in the same SQLite DB (tables users, sessions, settings, auth_log)."""
-import os, re, time, hmac, hashlib, secrets, json
+import os, re, time, hmac, hashlib, secrets, json, threading
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from . import store, demo
@@ -12,13 +12,15 @@ PUBLIC_PREFIX = ("/static/", "/api/auth/")
 PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo"}
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
-def db():
-    c = store.db()
+def _init_auth(c):
     c.execute("""CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE, display TEXT,
       initials TEXT, role TEXT DEFAULT 'reviewer', pw TEXT, active INTEGER DEFAULT 1, created REAL, must_change INTEGER DEFAULT 0)""")
     c.execute("CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER, created REAL, expires REAL, ip TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS auth_log(id INTEGER PRIMARY KEY, ts REAL, username TEXT, event TEXT, ip TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id)")
+def db():
+    c = store.db(); store.once("auth", _init_auth)
     return c
 
 # ---------------- settings
@@ -74,6 +76,22 @@ def current_user(request: Request):
     return dict(r)
 
 def _client(request): return request.client.host if request.client else ""
+def trusted_host(request):
+    """Audit 2026-10 P0-11 (DNS rebinding): a page on attacker.example can re-point its own name at 127.0.0.1 and then talk
+    to the scanner from the user's browser; the request comes from loopback and its Origin matches its Host, so neither
+    check notices. Such a request always names the attacker's DOMAIN in Host. Anything that trusts loopback (first-admin
+    setup, the open /api/scan) therefore also needs Host to be an IP address, localhost, this computer's own name, or a
+    name listed in GAC_ALLOWED_HOSTS (comma-separated, for a reverse proxy or a fixed office name)."""
+    import ipaddress, socket
+    h = (request.headers.get("host") or "").strip().lower()
+    h = h[1:h.index("]")] if h.startswith("[") and "]" in h else h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+    if not h: return False
+    try: ipaddress.ip_address(h); return True
+    except ValueError: pass
+    me = socket.gethostname().lower()
+    extra = {x.strip().lower() for x in os.getenv("GAC_ALLOWED_HOSTS", "").split(",") if x.strip()}
+    return h in {"localhost", me, me + ".local"} | extra or h.endswith(".localhost")
+def _loopback_trusted(request): return _client(request) in LOOPBACK and trusted_host(request)
 
 SEC_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
@@ -117,7 +135,7 @@ async def middleware(request: Request, call_next):
     if request.method in UNSAFE:
         if _cross_origin(request):
             return JSONResponse({"error": "Cross-site request refused."}, 403, headers=SEC_HEADERS)
-        if _no_origin(request) and not (p == "/api/scan" and _client(request) in LOOPBACK):
+        if _no_origin(request) and not (p == "/api/scan" and _loopback_trusted(request)):
             return JSONResponse({"error": "Request refused. Reload the page and try again."}, 403, headers=SEC_HEADERS)
         tok = request.cookies.get(COOKIE)
         if tok and p not in CSRF_EXEMPT and not hmac.compare_digest(request.headers.get(CSRF_HEADER, ""), csrf_for(tok)):
@@ -140,7 +158,7 @@ async def _route(request: Request, call_next):
     if p in PUBLIC or p.startswith(PUBLIC_PREFIX):
         return await call_next(request)
     # machine API kept open on loopback only (benchmarks / scripts on the same computer)
-    if p == "/api/scan" and _client(request) in LOOPBACK:
+    if p == "/api/scan" and _loopback_trusted(request):
         return await call_next(request)
     u = current_user(request)
     if not u:
@@ -205,11 +223,13 @@ def policy(): return {"image_retention_days": get_setting("image_retention_days"
 @router.get("/api/auth/state")
 def state(request: Request):
     u = current_user(request)
-    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "setup_allowed": _client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1"}
+    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "setup_allowed": trusted_host(request) and (_client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1")}
 
 @router.post("/api/auth/setup")
 def setup(request: Request, body: dict = Body(...)):
     if user_count() > 0: return JSONResponse({"error": "Setup was already done. Please sign in."}, 409)
+    if not trusted_host(request):
+        return JSONResponse({"error": "First-time setup must be opened by address (http://localhost:8765 or the computer's IP address), not through another site's name."}, 403)
     if _client(request) not in LOOPBACK and os.getenv("GAC_ALLOW_REMOTE_SETUP") != "1":
         return JSONResponse({"error": "Do first-time setup on the computer that runs the scanner."}, 403)
     try: uid = create_user(body.get("username", ""), body.get("display", ""), body.get("password", ""), "admin", body.get("initials"))
@@ -264,19 +284,23 @@ def edit_user(uid: int, request: Request, body: dict = Body(...)):
     me = request.state.user
     r = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     if not r: return JSONResponse({"error": "No such user."}, 404)
+    # audit 2026-10 P0-7: every check BEFORE the first write. Returning from inside `with db()` COMMITS what was already
+    # written (e.g. {password, active: false} on yourself reset the password and ended your sessions, then said "error").
+    if "password" in body:
+        p = pw_problem(body["password"])
+        if p: return JSONResponse({"error": p}, 422)
+    if "active" in body and uid == me["id"] and not body["active"]: return JSONResponse({"error": "You can't deactivate yourself."}, 422)
+    if "role" in body and body["role"] in ("admin", "reviewer") and uid == me["id"] and body["role"] != "admin":
+        return JSONResponse({"error": "You can't remove your own admin role."}, 422)
     with db() as c:
         if "password" in body:
-            p = pw_problem(body["password"])
-            if p: return JSONResponse({"error": p}, 422)
             c.execute("UPDATE users SET pw=?, must_change=1 WHERE id=?", (hash_pw(body["password"]), uid))
             c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
             _fails.pop(r["username"], None)   # a reset by an admin also lifts the wrong-password lock
         if "active" in body:
-            if uid == me["id"] and not body["active"]: return JSONResponse({"error": "You can't deactivate yourself."}, 422)
             c.execute("UPDATE users SET active=? WHERE id=?", (int(bool(body["active"])), uid))
             if not body["active"]: c.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
         if "role" in body and body["role"] in ("admin", "reviewer"):
-            if uid == me["id"] and body["role"] != "admin": return JSONResponse({"error": "You can't remove your own admin role."}, 422)
             c.execute("UPDATE users SET role=? WHERE id=?", (body["role"], uid))
     what = []
     if "active" in body:   # its own audit row, so "deactivated" can't be misread as "activated"
@@ -305,6 +329,9 @@ def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled
 
 @router.post("/api/admin/settings")
 def save_settings(request: Request, body: dict = Body(...)):
+    with _SETTINGS_LOCK: return _save_settings(request, body)   # two admins saving at once: check-then-write is one step
+_SETTINGS_LOCK = threading.Lock()
+def _save_settings(request, body):
     before = get_settings()
     # round 15 (manager r14 H-r14-1): optimistic locking. The Settings page sends "_seen" = the values it showed. A setting the
     # person did not touch is left as it is now (never reset to the old value on screen); a setting they changed that ANOTHER
@@ -327,6 +354,9 @@ def save_settings(request: Request, body: dict = Body(...)):
                                  " after you opened this page. Nothing was saved: reload Admin → Settings, check their change, then try again.",
                                  "need": "stale_admin", "thing": "settings", "keys": clash, "now": {k: before[k] for k in clash}}, 409)
         body = {k: v for k, v in body.items() if not (k in DEFAULTS and k in seen and str(v).strip() == str(seen[k]))}
+    # audit 2026-10 P0-7: validate EVERY value first, then write them all in one transaction (a bad value used to return
+    # 422 after the earlier settings had already been saved, with no audit row)
+    new = {}
     for k in DEFAULTS:
         if k in body:
             v = str(body[k]).strip()
@@ -334,7 +364,9 @@ def save_settings(request: Request, body: dict = Body(...)):
             if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
             if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Choose a phone format from the list."}, 422)
             if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
-            set_setting(k, v)
+            new[k] = v
+    with db() as c:
+        for k, v in new.items(): c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, v))
     if get_setting("phone_mode_allowed") != "1":
         from . import phone; phone.revoke_all()      # turning phone mode off closes the LAN listener at once
     after = get_settings(); diff = [k for k in DEFAULTS if before[k] != after[k]]

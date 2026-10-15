@@ -96,5 +96,5 @@ See `audits/` (SECURITY, ACCESSIBILITY, PRIVACY, CODE-QUALITY, ACCURACY-PHASE6),
 - Reliability: uploads persist in `data/inbox/` and are re-queued after a crash or restart; job results in `data/jobs_done/` (24 h); AI checks in flight are re-queued.
 - Privacy: admin "Delete permanently" (`POST /api/admin/cards/{id}/delete`, secure_delete + VACUUM); undo snapshots cleared after 2 days; orphan photos purged.
 - New modules and endpoints: `app/consistency.py`; `/api/validate`, `/api/cards/{id}/ai-decide`, `/api/cards/{id}/back`; settings `corrections_enabled`; env `VLM_TIMEOUT` (90 s), `CORRECTIONS_DIR`, `CONSISTENCY`.
-- Tests: `tests/unit/` (pytest, run from a copy), `qa/e2e_r2.py`, `audits/scripts/*` (security probe, axe, load/crash, retention). `qa/e2e_ui.py` honours `GAC_BASE`.
+- Tests: `tests/unit/` (pytest; all data goes to a temporary folder, see conftest.py), `qa/e2e_r2.py`, `audits/scripts/*` (security probe, axe, load/crash, retention). `qa/e2e_ui.py` honours `GAC_BASE`.
 - **Restart the 8765 server to pick up these changes** (it was left running on the old code for the testers).

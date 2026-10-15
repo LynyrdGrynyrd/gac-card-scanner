@@ -13,7 +13,7 @@ Everything stays **on the one office computer that runs the scanner**, in its `d
 
 ## Who can see it
 Only Chamber staff with their own scanner login:
-- **Reviewers** scan, check and approve cards, and export approved cards.
+- **Reviewers** scan, check and approve cards, and export approved cards. They can see every card in the review queue (all batches, archived ones too), because they review each other's batches.
 - **Admins** can also manage logins, change the privacy settings, archive batches, export unreviewed cards, read the audit log, and permanently delete a card.
 
 Each person should use their own login and their own browser (or browser profile). The scanner warns you if your browser was signed in as someone else.

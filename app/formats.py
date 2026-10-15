@@ -140,12 +140,18 @@ def shrink(im, max_pixels=PHOTO_MAX_PIXELS):
     return im.resize((max(1, int(w * s)), max(1, int(h * s))), 1)   # LANCZOS
 
 
+RASTER = ["JPEG", "PNG", "WEBP", "GIF", "BMP", "TIFF", "MPO"]   # same allowlist as ui.FORMATS (no EPS & co., which shell out)
+DECODE_MAX_PIXELS = 60_000_000                                     # same cap as ui.MAX_PIXELS
+
+
 def prepare_for_ocr(data: bytes) -> bytes:
-    """Round 20: a photo above PHOTO_MAX_PIXELS is re-saved smaller (OCR memory grows with pixels)."""
+    """Round 20: a photo above PHOTO_MAX_PIXELS is re-saved smaller (OCR memory grows with pixels).
+    Audit 2026-10 C2: this runs in the web server, so only plain raster formats are opened, and a picture above the
+    decode cap is left as it is (ui._check_image then refuses it) instead of being decoded and shrunk past that cap."""
     from PIL import Image
     try:
-        im = Image.open(io.BytesIO(data))
-        if im.size[0] * im.size[1] <= PHOTO_MAX_PIXELS: return data
+        im = Image.open(io.BytesIO(data), formats=RASTER)
+        if im.size[0] * im.size[1] <= PHOTO_MAX_PIXELS or im.size[0] * im.size[1] > DECODE_MAX_PIXELS: return data
         from PIL import ImageOps
         im = ImageOps.exif_transpose(im)
         return to_jpeg(shrink(im))
@@ -303,8 +309,8 @@ def _split_photo(data, stem, on):
     if not on: return None
     from PIL import Image
     try:
-        im = Image.open(io.BytesIO(data))
-        if im.size[0] * im.size[1] > 60_000_000: return None
+        im = Image.open(io.BytesIO(data), formats=RASTER)
+        if im.size[0] * im.size[1] > DECODE_MAX_PIXELS: return None
         im.load()
         from PIL import ImageOps
         im = ImageOps.exif_transpose(im)

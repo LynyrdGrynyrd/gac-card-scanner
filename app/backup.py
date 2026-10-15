@@ -17,8 +17,12 @@ import os, sys, io, json, time, sqlite3, tarfile, hashlib, shutil, datetime, thr
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 KEEP = int(os.environ.get("BACKUP_KEEP", "7"))
-SKIP_DIRS = {"thumbs", "inbox", "jobs_done", "__pycache__"}
-def _skip(name): return name.startswith("mctrade_contacts.") or name.startswith(".workers") or name.endswith((".db-wal", ".db-shm", ".db-journal"))
+# audit 2026-10 P0-9: never back up the AI helper (~3 GB model), the desktop window's browser profile (holds the session
+# cookie), caches, logs or lock/instance files: only the cards database, photos, stored exports and admin uploads matter
+SKIP_DIRS = {"thumbs", "inbox", "jobs_done", "__pycache__", "ai-helper", "webview", ".ruff_cache"}
+SKIP_FILES = {"app.log", "instance.json"}
+def _skip(name): return (name.startswith("mctrade_contacts.") or name.startswith(".workers") or name in SKIP_FILES
+                         or name.endswith((".db-wal", ".db-shm", ".db-journal", ".part", ".tmp")))
 
 def data_dir(): return os.environ.get("GAC_DATA_DIR") or os.path.join(ROOT, "data")
 def db_path():
@@ -27,7 +31,13 @@ def db_path():
     try:
         from . import store; return os.path.abspath(store.DB)
     except Exception: return os.path.join(data_dir(), "cards.db")
-def backup_dir(): return os.environ.get("GAC_BACKUP_DIR") or os.path.join(ROOT, "backups")
+def backup_dir():
+    """Audit 2026-10 P0-8: GAC_BACKUP_DIR if set. A packaged desktop app (GAC_DATA_DIR set) keeps them NEXT TO its data
+    folder ('<data folder> Backups'), never inside the installed program, which an upgrade replaces and may be read-only.
+    A source/developer install keeps <repo>/backups."""
+    if os.environ.get("GAC_BACKUP_DIR"): return os.environ["GAC_BACKUP_DIR"]
+    if os.environ.get("GAC_DATA_DIR"): return os.path.abspath(os.environ["GAC_DATA_DIR"]).rstrip("\\/") + " Backups"
+    return os.path.join(ROOT, "backups")
 
 def make(dest=None, data=None, db=None, keep=KEEP):
     """-> path of the new backup file."""
@@ -53,7 +63,10 @@ def make(dest=None, data=None, db=None, keep=KEEP):
                 for fn in fns:
                     p = os.path.join(dp, fn)
                     if os.path.abspath(p) == os.path.abspath(db) or _skip(fn) or fn == os.path.basename(db): continue
-                    rel = os.path.relpath(p, data); t.add(p, "data/" + rel); files.append(rel)
+                    rel = os.path.relpath(p, data)
+                    try: t.add(p, "data/" + rel)
+                    except FileNotFoundError: continue   # deleted meanwhile (retention, a removal request): not an error
+                    files.append(rel)
             sha = hashlib.sha256(open(snap, "rb").read()).hexdigest()
             man = json.dumps({"made": time.time(), "cards": n, "cards_db_sha256": sha, "files": len(files)}, indent=1).encode()
             ti = tarfile.TarInfo("MANIFEST.json"); ti.size = len(man); ti.mtime = time.time(); t.addfile(ti, io.BytesIO(man))
@@ -108,6 +121,10 @@ def restore(path, data=None, db=None):
                 target = os.path.join(data, rel)
             else: continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
+            if target == db:   # a stale write-ahead log next to the restored file would be replayed into it
+                for sfx in ("-wal", "-shm", "-journal"):
+                    try: os.remove(db + sfx)
+                    except FileNotFoundError: pass
             with t.extractfile(m) as src, open(target, "wb") as fh: shutil.copyfileobj(src, fh)
     for sub in ("uploads", "exports", "inbox", "jobs_done", "thumbs"): os.makedirs(os.path.join(data, sub), exist_ok=True)
     for f in keep_contacts:   # the contacts export is never in a backup: keep the one that was uploaded

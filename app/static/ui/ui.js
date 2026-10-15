@@ -210,12 +210,15 @@ async function confirmWho() {
 async function enqueue(files) {
   if (!files.length) { toast("Nothing was selected."); return; }
   if (!await confirmWho()) return;
-  if (!B || B.rows.every(r => ["done", "rej", "err", "cancel"].includes(r.state)) && $("#clearBatch").dataset.fresh === "1") newBatch();
   // coordinator r2 N1: a different name typed in "Name this batch", or a batch left over from hours ago, starts a NEW batch
   const typed = $("#batchName").value.replace(/\s+/g, " ").trim().toLowerCase();
-  if (B && ((typed && !(B.label || "").toLowerCase().startsWith(typed)) || (!typed && B.t0 && Date.now() / 1000 - B.t0 > 4 * 3600))) {
-    const old = B.label; newBatch(); toast(`Started a new batch “${B.label}” (the previous one was “${old}”).`, 6000);
-  }
+  const fresh = !B || B.rows.every(r => ["done", "rej", "err", "cancel"].includes(r.state)) && $("#clearBatch").dataset.fresh === "1";
+  const renamed = B && !fresh && ((typed && !(B.label || "").toLowerCase().startsWith(typed)) || (!typed && B.t0 && Date.now() / 1000 - B.t0 > 4 * 3600));
+  // audit 2026-10 P0-14: photos of the current batch still waiting to upload would be filed under the NEW batch (and no longer
+  // tracked); finish (or cancel) this batch's uploads first
+  if ((fresh || renamed) && B && (upq.length || uploading)) { toast(`Photos of “${B.label}” are still uploading. Wait until they are done (or cancel them), then start the new batch.`, 7000); return; }
+  if (fresh && B) newBatch();
+  else if (renamed) { const old = B.label; newBatch(); toast(`Started a new batch “${B.label}” (the previous one was “${old}”).`, 6000); }
   if (!B) newBatch();
   $("#clearBatch").dataset.fresh = "0";
   B.rows = B.rows.filter(r => r.state !== "cancel");   // round 21 (reviewer r20): no stale cancelled rows on the next upload
@@ -225,17 +228,19 @@ async function enqueue(files) {
     if (!isImg(f)) { row.state = "rej"; row.msg = "Can't scan this file. Use JPG, PNG, HEIC or PDF."; }
     else if (!f.size) { row.state = "rej"; row.msg = "File is empty."; }
     else { row.blob = f; row.thumb = isPdf(f) || /\.hei[cf]$/i.test(f.name) ? null : URL.createObjectURL(f); upq.push(row); }
-    B.rows.push(row);
+    ROWB.set(row, B); B.rows.push(row);
   }
   B.stopped = false; saveB(); renderBatch(); pumpUploads();
 }
 function pumpUploads() {
   while (uploading < UPCONC && upq.length) { const r = upq.shift(); uploading++; upload(r).finally(() => { uploading--; pumpUploads(); }); }
 }
+const ROWB = new WeakMap();   // audit 2026-10 P0-14: row -> the batch it was added to (not whatever batch is current at send time)
 function upload(row, allowDup = false) {
+  const bb = ROWB.get(row) || B;
   return new Promise(res => {
     const fd = new FormData(); fd.append("image", row.blob, row.file.split("/").pop());
-    fd.append("engine", $("#engine").value); fd.append("batch", B.id); fd.append("batch_label", B.label);
+    fd.append("engine", $("#engine").value); fd.append("batch", bb.id); fd.append("batch_label", bb.label);
     if (allowDup) fd.append("allow_duplicate", "1");
     if ($("#skipAi") && $("#skipAi").checked) fd.append("skip_ai", "1");   // round 23: Skip AI for this scan
     const x = new XMLHttpRequest(); row.xhr = x; x.open("POST", "/api/jobs");
@@ -246,18 +251,18 @@ function upload(row, allowDup = false) {
     x.onload = () => {
       delete row.xhr; let j = {}; try { j = JSON.parse(x.responseText); } catch {}
       conn(true);
-      if (x.status === 200 && j.pdf) { row.state = "queued"; row.job = j.job; row.pdf = true; row.pages = j.pages; if (j.batch && j.batch !== B.id) B.id = j.batch; }   // round 20: a PDF is read page by page in the background
-      else if ([200, 409, 422].includes(x.status) && j.jobs && j.jobs.length) splitRow(row, j);   // round 18: a PDF / sheet of cards came back as several cards
-      else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== B.id) B.id = j.batch; }   // round 13: the server may give this batch its own id
+      if (x.status === 200 && j.pdf) { row.state = "queued"; row.job = j.job; row.pdf = true; row.pages = j.pages; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 20: a PDF is read page by page in the background
+      else if ([200, 409, 422].includes(x.status) && j.jobs && j.jobs.length) splitRow(row, j, bb);   // round 18: a PDF / sheet of cards came back as several cards
+      else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 13: the server may give this batch its own id
       else if (x.status === 409 && j.cancelled) { row.state = "cancel"; row.msg = ""; }
       else if (x.status === 409) { row.state = "dup"; row.msg = j.error; row.dupOf = j.duplicate_of; }
       else { row.state = "rej"; row.msg = j.error || "Upload failed (" + x.status + ")."; if (x.status === 401) saveB(); }
-      if (row.stop) cancelJobs([row].concat(B.rows.filter(r => r.src === row.file)));   // round 19: Cancel pressed while this photo was uploading
+      if (row.stop) cancelJobs([row].concat(bb.rows.filter(r => r.src === row.file)));   // round 19: Cancel pressed while this photo was uploading
       saveB(); renderBatch(); poll(); res();
     };
     // round 20: the scanner restarting is not an error: the photo waits and is sent again by itself
     x.onerror = () => { conn(false); row.state = "wait"; row.msg = ""; row.tries = (row.tries || 0) + 1; saveB(); renderBatch(); res();
-      if (!row.stop) setTimeout(() => { if (row.state === "wait" && B && B.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
+      if (!row.stop) setTimeout(() => { if (row.state === "wait" && bb.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
     x.send(fd);
   });
 }
@@ -276,13 +281,13 @@ function addKids(row, job) {   // round 20: cards of a PDF appear as each page i
     job: x.job, msg: x.job ? "" : x.error, dupOf: x.duplicate_of, src: row.file}));
   const at = B.rows.indexOf(row); B.rows.splice(at, 0, ...rows);
 }
-function splitRow(row, j) {
+function splitRow(row, j, bb = B) {
   // one row per card, named after the file and page it came from ("cards.pdf (page 2 of 5, card 3 of 8)")
-  if (j.batch && j.batch !== B.id) B.id = j.batch;
+  if (j.batch && j.batch !== bb.id) bb.id = j.batch;
   const dir = row.file.includes("/") ? row.file.slice(0, row.file.lastIndexOf("/") + 1) : "";
   const rows = j.jobs.map(x => ({key: Math.random().toString(36).slice(2), file: dir + x.file, state: x.job ? "queued" : (x.status === 409 ? "dup" : "rej"),
     job: x.job, msg: x.job ? "" : x.error, dupOf: x.duplicate_of, src: row.file}));
-  B.rows.splice(B.rows.indexOf(row), 1, ...rows);
+  bb.rows.splice(bb.rows.indexOf(row), 1, ...rows);
   toast(`${row.file.split("/").pop()}: ${j.jobs.length} cards found` + (j.back_skipped ? ". Back photo not used (single cards only)." : "."), 6000);
 }
 let pollT = null;

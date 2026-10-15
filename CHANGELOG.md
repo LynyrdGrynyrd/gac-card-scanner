@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased: audit fixes, part 1 (data safety)
+From the code audit in `docs/AUDIT-2026-10-15.md` (P0 items).
+
+### Your data
+- **Changes are no longer silently undone.** A background job (AI check, export, retention) could write back an old copy of a card's settings over a reviewer's change (for example the MC Trade "create new / update existing" choice). Each writer now saves only what it changed.
+- **Exports never mark cards they didn't contain.** If someone edits or approves a card while an export is being built, or between the sign-off and the export, the export is refused ("check the sign-off again") instead of marking the changed card as exported without its latest details. The export number shown after an export is always that export's own.
+- **Card numbers are never reused** after a card is permanently deleted.
+- **Permanent delete** is now one step: the card, its history clean-up and the audit-log entry are saved together, and both sides' photos and all their thumbnails are removed.
+- **The AI double-check keeps running** after a database hiccup (it used to stop until the scanner was restarted).
+- The database waits for a busy moment to pass instead of failing ("database is locked") and lets reviewers read while someone saves.
+
+### Admin
+- **A refused settings or user change saves nothing.** Before, a bad value could leave the earlier settings saved, and changing your own password together with something refused still reset the password.
+
+### Backups
+- **Desktop app: backups are kept next to the data folder** (`GAC Card Scanner Backups`), not inside the installed program, where an upgrade deleted them. **Backups made by v0.3 or older desktop builds are inside the program folder**: copy any you want to keep before upgrading.
+- Backups no longer include the 3 GB AI helper, the app window's browser profile or log files.
+- Docker: backups go to their own `gac-backups` volume (they failed before: the folder wasn't writable).
+- A photo deleted while a backup runs no longer makes the whole backup fail.
+
+### Security
+- First-time setup, and the open scan API for scripts on the same computer, now refuse requests that come through another website's name (DNS rebinding). Open the scanner by address (`localhost`, an IP address or this computer's name); a reverse proxy or fixed office name goes in `GAC_ALLOWED_HOSTS`.
+- Upload size limits count the bytes actually received, not the size a request claims.
+- Only plain photo formats are opened inside the web server process; oversized pictures are refused before they are decoded.
+
+### Scan page
+- Starting a new batch while photos of the previous batch are still uploading is refused with a message. Before, the waiting photos were filed under the new batch.
+
+### Developers
+- The unit tests write only to a temporary folder (no more "run from a copy").
+
 ## v0.3.0 (2026-10-15)
 Brings the desktop app up to date with the pilot's review rounds 18–24.
 
