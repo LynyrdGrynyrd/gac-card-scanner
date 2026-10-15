@@ -98,7 +98,8 @@ def test_reader_hard_backstop(monkeypatch):
     assert reader.backstop_mb(1200) == 4800 and reader.backstop_mb(500) == 4096
     p = os.path.join(os.path.dirname(__file__), "..", "..", "qa", "fixtures", "multipage_07_08_10.pdf"); d = open(p, "rb").read()
     assert len(reader.run_page(d, 0, 3, "m.pdf")) == 1          # normal pages are far below the backstop
-    monkeypatch.setenv("READER_BACKSTOP_MB", "150")             # a tiny backstop: the child is refused memory, the server is fine
+    monkeypatch.setenv("READER_BACKSTOP_MB", "40")              # a tiny backstop: the child is refused memory, the server is fine
+    # (audit 2026-10: 40, not 150 - on Windows/macOS it is enforced on resident memory, and a page can render in < 150 MB there)
     try: reader.run_page(d, 0, 3, "m.pdf"); assert False, "expected ReaderError"
     except reader.ReaderError as e: assert str(e) == reader.CALM
 
