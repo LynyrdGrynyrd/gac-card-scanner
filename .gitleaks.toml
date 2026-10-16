@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake test password in history (tests/unit/test_audit_p0.py, renamed in v0.3.1)"
+commits = ["01c6939470969be30a5e0dd2959122c677af6eb1"]

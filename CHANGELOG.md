@@ -1,17 +1,19 @@
 # Changelog
 
-## Unreleased: accuracy on real cards, reading fixes, more tests
-### Reading cards
+## v0.3.1 (2026-10-15)
+
+### Accuracy on real cards, reading fixes, more tests
+#### Reading cards
 - An address line with its label in front (**"Visitors and deliveries: 47 N Main St"**, **"Mailing address: PO Box 12"**) keeps its street, and the label no longer ends up in the address. A visitors/deliveries address on a card that also has a main address goes to *Other address*; when it is the card's only address, it is the address.
 - A street number with a misread letter (**"25o8 Jonathan Terrace Ave"**) no longer loses the whole street line; **"P.0. Box"** is read as "P.O. Box".
 - A phone number on the same line as an email address (**"E: mary@jones.com | T: 330-555-0102"**) is no longer dropped.
 - Malformed requests to the scanner's API (wrong value types, ids too large) get a clear error instead of a server error.
 
-### Accuracy and testing
+#### Accuracy and testing
 - **`bench/extract_eval_set.py`** turns the pilot's approved cards into a labelled test set for `bench/eval_bench.py` and prints, per field, how often reviewers had to fix what the scan read and whether the confidence score warned about it. It reads the database only, keeps cards approved unchanged (otherwise the set holds only failures), tags bulk-approved cards as weaker labels, and writes to the same folder as "Keep corrected cards as test examples", so photo retention and delete-on-request also clean its copies.
 - New test layers: property tests for the card reader (Hypothesis), fuzzing of every API endpoint (Schemathesis) and browser tests of scan → review → approve → export (Playwright), all run by CI. `CLAUDE.md` describes the project's rules for AI coding agents.
 
-## Unreleased: audit fixes, part 3 (structure)
+### Audit fixes, part 3 (structure)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P2 items). Mostly invisible to users; it makes the code easier and safer to change.
 
 - **A save is all-or-nothing.** If something fails half-way through saving a card (an approve with a merge, a bulk action, an AI accept), nothing of it is kept, instead of half of it.
@@ -22,10 +24,10 @@ From the code audit in `docs/AUDIT-2026-10-15.md` (P2 items). Mostly invisible t
   - `ui.js` (1,500 lines) is split into ES modules under `app/static/ui/{core,ui,views}`, with no build step.
   - Dead code removed; `tests/unit/README.md` maps features to test files.
 
-## Unreleased: audit fixes, part 2 (reliability, accuracy, speed, release)
+### Audit fixes, part 2 (reliability, accuracy, speed, release)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
 
-### Reading cards
+#### Reading cards
 - **"John Smith, CEO"** keeps CEO as the title; **"Smith, John"** is read as John Smith; names with **van / de / la** and compound surnames ("van der Meer", "de la Cruz") stay whole.
 - **"P 330… / F 330…"** on one line: the second number is the fax, not a second work phone.
 - A **"3rd Floor" / "Suite" line** between the street and the city stays in the address.
@@ -34,12 +36,12 @@ From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
 - **QR codes:** escaped commas, folded lines and the address parts of a vCard are read correctly.
 - The **AI double-check** now looks at the cropped card (sharper text), its suggestions for phone types are no longer lost, and the warnings shown after it describe the AI's values.
 
-### Speed
+#### Speed
 - **The review list is much faster with a real MC Trade contacts file:** about 2 seconds instead of 16-19 seconds for a 200-card batch against 10,000 contacts. The results are the same.
 - "All batches" in the review queue loads 200 cards at a time ("Load more").
 - The upload list stays fast with hundreds of photos (small thumbnails, only changed rows redrawn).
 
-### Reliability
+#### Reliability
 - **Undo** always undoes the right change, even when two people save at the same moment.
 - **Backups:** a failed backup is retried after 10 minutes (it used to wait for the next night) and shown in Admin → Settings, with the date of the last good backup.
 - **Restoring an older backup no longer brings back cards deleted on request**; they are deleted again when the scanner starts.
@@ -49,7 +51,7 @@ From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
 - Signing in: wrong passwords typed on another computer no longer lock you out. Sessions end 7 days after sign-in at the latest.
 - Two people can no longer get the same initials (a later account gets a number, e.g. AB2); this kept their batches and uploads apart.
 
-### Scan, review and export pages
+#### Scan, review and export pages
 - **Session expired while uploading:** the photos wait instead of failing. Sign in again in a new tab and they continue. Failed photos get a **Retry** button.
 - **Desktop app:** the export message lists what was actually saved, and which files were cancelled in the Save dialog.
 - Desktop folder pick includes PDFs, skips files over 25 MB and stops at 500 files / 300 MB.
@@ -57,20 +59,20 @@ From the code audit in `docs/AUDIT-2026-10-15.md` (P1 items).
 - Screen readers are no longer flooded by the AI progress line; the Undo toast stays while you're in it.
 - Phone: the camera turns off when the page is hidden; "Use camera app (sharper photo)" is always offered; the phone page always loads its newest code.
 
-### Security
+#### Security
 - vCard exports can't be broken by a line break hidden in a phone, email or website (a phone with a line break can't be approved).
 - Public demo: no phone pairing, no cancelling other visitors' uploads, and the card cap counts uploads still being read; a wipe also clears uploads in progress.
 - The local AI helper requires a key (and keeps fewer copies of what it read).
 
-### Install and release
+#### Install and release
 - CI tests on Windows, macOS and Linux, lints, checks dependencies for known vulnerabilities, and fails when recognition accuracy drops.
 - The dependency lock file pins every package; Docker and the start scripts use it.
 - Releases: read-only permissions except for publishing, the tag must match `VERSION`, notes come from this changelog, signing runs when certificates are configured, and the Windows upgrade removes old program files.
 
-## Unreleased: audit fixes, part 1 (data safety)
+### Audit fixes, part 1 (data safety)
 From the code audit in `docs/AUDIT-2026-10-15.md` (P0 items).
 
-### Your data
+#### Your data
 - **Changes are no longer silently undone.** A background job (AI check, export, retention) could write back an old copy of a card's settings over a reviewer's change (for example the MC Trade "create new / update existing" choice). Each writer now saves only what it changed.
 - **Exports never mark cards they didn't contain.** If someone edits or approves a card while an export is being built, or between the sign-off and the export, the export is refused ("check the sign-off again") instead of marking the changed card as exported without its latest details. The export number shown after an export is always that export's own.
 - **Card numbers are never reused** after a card is permanently deleted.
@@ -78,24 +80,24 @@ From the code audit in `docs/AUDIT-2026-10-15.md` (P0 items).
 - **The AI double-check keeps running** after a database hiccup (it used to stop until the scanner was restarted).
 - The database waits for a busy moment to pass instead of failing ("database is locked") and lets reviewers read while someone saves.
 
-### Admin
+#### Admin
 - **A refused settings or user change saves nothing.** Before, a bad value could leave the earlier settings saved, and changing your own password together with something refused still reset the password.
 
-### Backups
+#### Backups
 - **Desktop app: backups are kept next to the data folder** (`GAC Card Scanner Backups`), not inside the installed program, where an upgrade deleted them. **Backups made by v0.3 or older desktop builds are inside the program folder**: copy any you want to keep before upgrading.
 - Backups no longer include the 3 GB AI helper, the app window's browser profile or log files.
 - Docker: backups go to their own `gac-backups` volume (they failed before: the folder wasn't writable).
 - A photo deleted while a backup runs no longer makes the whole backup fail.
 
-### Security
+#### Security
 - First-time setup, and the open scan API for scripts on the same computer, now refuse requests that come through another website's name (DNS rebinding). Open the scanner by address (`localhost`, an IP address or this computer's name); a reverse proxy or fixed office name goes in `GAC_ALLOWED_HOSTS`.
 - Upload size limits count the bytes actually received, not the size a request claims.
 - Only plain photo formats are opened inside the web server process; oversized pictures are refused before they are decoded.
 
-### Scan page
+#### Scan page
 - Starting a new batch while photos of the previous batch are still uploading is refused with a message. Before, the waiting photos were filed under the new batch.
 
-### Developers
+#### Developers
 - The unit tests write only to a temporary folder (no more "run from a copy").
 
 ## v0.3.0 (2026-10-15)
