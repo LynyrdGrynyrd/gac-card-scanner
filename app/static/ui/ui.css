@@ -244,7 +244,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Lato,sans
 .view:not([hidden]){animation:v04in .3s var(--ease)}#rForm.flip{animation:v04in .3s var(--ease)}
 dialog[open]{animation:v04up .35s var(--ease)}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.imgbox img{transition:none!important}}
-/* #8 dark mode (system setting, or the ◐ button) */
+/* #8 dark mode (system setting, or the light/dark button) */
 :root[data-theme=dark]{--card:#1c1c1e;--fill:#2c2c2e;--bg:#000000;--ink:#f5f5f7;--grey:#a1a1a6;--line:#38383a;--sep:#38383a;--teal:#5fb7c9;--teal-d:#7cc7d6;--orange:#ff9f5a;
  --ok:#30d158;--bad:#ff6961;--low:#3a3000;--lowb:#ffd60a;--warn:#33290a;--warnB:#ffd60a;--warnT:#ffe27a;color-scheme:dark}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--card:#1c1c1e;--fill:#2c2c2e;--bg:#000000;--ink:#f5f5f7;--grey:#a1a1a6;--line:#38383a;--sep:#38383a;--teal:#5fb7c9;--teal-d:#7cc7d6;--orange:#ff9f5a;

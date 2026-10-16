@@ -19,7 +19,7 @@ def test_static_ui_scripts_are_revalidated_and_fingerprinted():
 def test_any_script_under_static_ui_changes_the_version(tmp_path, monkeypatch):
     from app import auth
     ui = tmp_path / "ui"; (ui / "views").mkdir(parents=True)
-    for n in ("ui.css", "login.js", "desktop.js"): (ui / n).write_text(_src(os.path.join(UI, n)))
+    for n in ("ui.css", "login.js", "desktop.js"): (ui / n).write_text(_src(os.path.join(UI, n)), encoding="utf-8")
     (ui / "views" / "page.js").write_text("export const a = 1;\n")
     monkeypatch.setattr(auth, "STATIC", str(tmp_path)); monkeypatch.setattr(auth, "_AV", {})
     v = auth.asset_version(); assert v == auth.asset_version()

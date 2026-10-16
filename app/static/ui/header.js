@@ -83,7 +83,7 @@ async function updateCheck() { try { const u = await call("/api/update");
     $("#updX").onclick = () => { localStorage.setItem("gacUpdDismiss", u.latest); b.hidden = true; };
   } } catch {} }
 export {aiHeader, aiQueueTick, aiWord, doUndo, loadMe, refreshCounts, refreshUndo, updateCheck, who};
-// v0.4 #8: light/dark. Follows the system unless the person picked one with the ◐ button (kept on this computer).
+// v0.4 #8: light/dark. Follows the system unless the person picked one with the light/dark button (kept on this computer).
 { const r = document.documentElement, k = "gacTheme";
   try { const t = localStorage.getItem(k); if (t === "dark" || t === "light") r.dataset.theme = t; } catch {}
   const b = document.getElementById("themeBtn");

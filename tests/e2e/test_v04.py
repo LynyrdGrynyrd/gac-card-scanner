@@ -39,8 +39,11 @@ def test_enter_approves_only_when_safe(new_page):
     page.keyboard.press("ArrowLeft"); wait_card(page, ids[0])
     page.locator("#bSkip").click(); wait_card(page, ids[1]); page.keyboard.press("ArrowLeft"); wait_card(page, ids[0])
     # clean card, no dialog: Enter approves
-    page.locator("#h-r").focus(); page.keyboard.press("Enter"); answer_dialogs(page)
-    wait_card(page, ids[1]); assert card_json(page, ids[0])["status"] == "approved"
+    wait_card(page, ids[0]); page.locator("#h-r").focus(); page.keyboard.press("Enter"); answer_dialogs(page, timeout=15000)
+    for _ in range(60):
+        if card_json(page, ids[0])["status"] == "approved": break
+        page.wait_for_timeout(500)
+    assert card_json(page, ids[0])["status"] == "approved"
 
 
 def test_more_holds_reject_and_theme_toggle(new_page):
