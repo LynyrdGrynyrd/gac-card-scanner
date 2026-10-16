@@ -102,6 +102,4 @@ PLACEHOLDER = b"""<svg xmlns="http://www.w3.org/2000/svg" width="420" height="24
 @U.router.get("/api/me")
 def me(request: Request):
     # v0.4.2 #2 (part-timer blocker: shared sign-in): minutes without a click or key before the page signs out (0 = never)
-    try: idle = int(os.environ.get("GAC_IDLE_MINUTES") or auth.get_setting("idle_minutes") or 30)
-    except ValueError: idle = 30
-    return auth.pub(request.state.user) | {"idle_minutes": max(0, idle)}
+    return auth.pub(request.state.user) | {"idle_minutes": auth.idle_minutes()}

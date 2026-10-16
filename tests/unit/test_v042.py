@@ -56,7 +56,7 @@ def test_v042_counts_agree(env):
 # ---- #7 the lost-dot rule allows whole words before 'example'
 def test_v042_lost_dot_whole_words(env):
     ui = env["ui"]
-    he = lambda d: ui.hard_errors({"first_name": "Ann", "emails": ["x@" + d]}).get("emails")
+    he = lambda d: ui.hard_errors({"first_name": "Ann", "emails": ["x@" + d], "website": d}).get("emails")   # v0.4.3 #5: needs the website too
     for ok in ("theperfectexample.com", "bestexample.com", "counterexample.org", "simplyexample.net"): assert not he(ok), ok
     for bad in ("firestoneparkhardwexample.com", "acmecomcom.com"): assert he(bad), bad
 

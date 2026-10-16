@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.3 (2026-10-16)
+
+### Safer undo, sign-out and duplicates (from the v0.4.2 tester reports)
+- **Undo** is refused once the card was exported after that action ("Change it by hand; it is then marked for re-export"). After Undo a short "Undone: …" message shows.
+- **Idle sign-out on the server:** a session ends after the idle time even when the tab was closed. Background polling doesn't count as activity. The "Still there?" question names a card with unsaved changes and keeps them as your draft.
+- **Approve after Different** still asks once when the person was exported before. History now says "approved (marked different from N cards)".
+- **May already be in MC Trade** is treated the same everywhere: To check on the page, a "Needs review" list in the Preview, NEEDS REVIEW in the dry run, and a note in the CSV Check column. The batch list's "ready" count matches the check on first load.
+- **"…example" email domains** pass only when the card's website has the same domain (theperfectexample.com with its website passes; goodyearheightsfamexample.com is blocked).
+- **Same (merge):** the fuller address, company or department wins, and you can pick which value to keep per field. A value that isn't kept goes into the note, never dropped silently.
+- **Blocked cards:** any staff member may Confirm a red box with a reason, which is logged. No more "Ask an admin".
+- **Smaller fixes:** no uploads into another person's batch (checked by the server); batch owners matched by user id, not initials; the duplicate headline has no counts; one "AI check not finished" message, and "Wait for the AI" really waits; "Reconnecting" only on a real disconnect; no "changed" tag when nothing changed; the READ-ME "More notes" count no longer double counts; Scan shows the stored batch name; "Not you?" says it signs you out; Same isn't offered toward your own older batches unless the match is strong; reviewers see only their own export history; the signed-out help page has no app menu.
+
 ## v0.4.2 (2026-10-16)
 
 ### Who may export, who is signed in (from the v0.4.1 tester reports)

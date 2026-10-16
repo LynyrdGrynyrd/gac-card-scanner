@@ -45,7 +45,7 @@ def test_old_and_invalid_confirmations_do_not_count(env):
     assert "company" not in U.hard_errors(dict(f, confirmed_meta={"company": meta}))
     e = json.dumps(["a@firestoneparkhardwexample.com"])
     f2 = {"first_name": "Ann", "emails": ["a@firestoneparkhardwexample.com"], "confirmed_ok": {"emails": e}, "confirmed_meta": {"emails": dict(meta, value=e)}}
-    assert "emails" in U.hard_errors(f2)                                     # a reviewer can't confirm an email
+    assert "emails" not in U.hard_errors(f2)                                 # v0.4.3 #7: a reviewer's confirmation (with reason) counts
     assert "emails" not in U.hard_errors(dict(f2, confirmed_meta={"emails": dict(meta, value=e, role="admin")}))
     assert "company" in U.hard_errors(dict(f, company="Acme Gr0up2", confirmed_meta={"company": meta}))   # edited since: no longer confirmed
 

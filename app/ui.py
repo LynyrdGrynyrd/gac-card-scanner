@@ -6,7 +6,7 @@ import asyncio, copy, io, os, re, json, time, uuid, hashlib, datetime, threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import Response, JSONResponse
-from . import store, mctrade_sync, auth, crm_source
+from . import store, mctrade_sync, auth, crm_source, demo
 
 router = APIRouter()
 
@@ -61,6 +61,7 @@ def _init_ui(c):
         try: c.execute("ALTER TABLE exports ADD COLUMN batch_label TEXT")
         except Exception as e:
             if "duplicate column" not in str(e): raise
+    c.execute("CREATE TABLE IF NOT EXISTS batch_owners(batch TEXT PRIMARY KEY, user_id INTEGER, ts REAL)")   # v0.4.3 #8: owner by user id
     for name, ix in (("ix_hist_card", "card_history(card_id, id)"), ("ix_hist_action", "card_history(action, reviewer)"),
                      ("ix_meta_batch", "card_meta(batch)"), ("ix_meta_sha", "card_meta(sha256)"),
                      ("ix_actions_user", "actions(user_id, undone)"), ("ix_exports_file", "exports(filename)")):
@@ -299,13 +300,14 @@ def garbled_errors(f):
     for e in ems:   # round 22 (datamanager r21 M2): a lost dot is caught with no website too ('…hardwexample.com', '…comcom.com')
         ed = str(e).lower().rsplit("@", 1)[-1].strip(); sld = ed.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sld)
-        if m_ and _lost_dot(m_):   # v0.4.1 #8: 'bestexample.com' is a real name
+        wd0 = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0] if w else ""; wd0 = wd0[4:] if wd0.startswith("www.") else wd0
+        if m_ and _lost_dot(m_, ed, [wd0]):   # v0.4.1 #8: 'bestexample.com' is a real name
             err["emails"] = f"Email domain “{ed}” looks like a dot is missing. Check the photo and fix it."; break
     if w and "website" not in err:   # round 24 (datamanager r23 M1): the website gets the same lost-dot check as emails
         wd = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; wd = wd[4:] if wd.startswith("www.") else wd
         sldw = wd.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sldw)
-        if "." in wd and m_ and _lost_dot(m_):
+        if "." in wd and m_ and _lost_dot(m_, wd, [str(e).lower().rsplit("@", 1)[-1].strip() for e in ems]):
             err["website"] = f"Website “{w}” looks like a dot is missing. Check the photo and fix it."
     if "website" in err: pass
     elif w and (re.match(r"^(https?://)?(www(?![.\d])|wvw\.|vvww?\.)", w, re.I) or ".." in w or not plausible_site(w, ems)):
@@ -386,16 +388,20 @@ def valid_confirmations(f):
     return out
 
 # round 22: phones are never overridable (a letter in a phone number is never right)
-def _lost_dot(m_):
+def _lost_dot(m_, dom=None, others=()):
     """v0.4.2 #7 (reviewer L3: 'theperfectexample.com' was blocked): '…example' alone is a lost dot only when the part before
     it ends in a cut-off word ('hardw', three consonants in a row), not a whole one ('perfect', 'best', 'counter').
     A website that shows the same name with the dot is still caught by the email/website comparison."""
     pre, end = m_.group(1), m_.group(2)
     if re.search(r"(com|net|org)$", pre): return True
-    return end == "example" and len(pre) >= 8 and not re.search(r"[aeiouy]", pre[-3:])
+    if end != "example": return False
+    if len(pre) >= 8 and not re.search(r"[aeiouy]", pre[-3:]): return True
+    # v0.4.3 #5 (mctrade-admin M1: 'goodyearheightsfamexample.com' passed): a whole-word '…example' domain passes only when the
+    # card shows it twice: the email domain and the website are the same name
+    return not (dom and dom in {o for o in others if o})
 
 OVERRIDABLE = ("name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
-ADMIN_OVERRIDE = ("emails", "website", "address", "other_address")
+ADMIN_OVERRIDE = ()   # v0.4.3 #7: any staff member may Confirm with a reason (logged); was emails/website/address admin-only
 def overridable(f):
     """Fields whose hard check can be confirmed with 'This is correct': only garbled-looking values, never formula/HTML."""
     from . import mctrade_export as _mx
@@ -577,6 +583,8 @@ def _dupes(c, others, metas, crm):
         x["same_batch"] = bool(m.get("batch")) and m.get("batch") == om.get("batch")
         other_rej = (o or {}).get("status") == "rejected"
         x["blocking"] = (x["strong"] or x["same_batch"]) and not rej and not other_rej   # a rejected twin only warns
+        # v0.4.3 #8: Same (merge) toward your own OLDER batch only on a strong match (same photo, email or phone)
+        x["can_same"] = x["same_user"] and (x["same_batch"] or bool({"same photo", "email exact", "phone exact"} & set(x["why"])))
     open_q = [x for x in q if not x["kept_apart"]]
     return {"crm": crm, "queue": q, "open": open_q, "unresolved_queue": any(x["blocking"] for x in open_q), "lookalikes_elsewhere": [x["card_id"] for x in open_q if not x["blocking"]], "resolution": res, "crm_action": m.get("crm_action"), "meta": m,
             "updates_enabled": auth.get_setting("mctrade_updates_enabled") == "1"}
@@ -635,6 +643,9 @@ def merge_refusal(c, f2, tgt):
     # v0.4.2 #11 (skeptic L2): two cards with NO scan record are not "the same scanner" (None == None)
     if not sc.get(c["id"]) or sc.get(c["id"]) != sc.get(tgt["id"]):
         return {"error": f"Card #{tgt['id']} was scanned by someone else. Use Different, or ask them.", "need": "merge_other_user"}
+    hit = next((x for f_ in (c["fields"], f2) for x in dupes(c | {"fields": f_}, cs_, metas_)["queue"] if x["card_id"] == tgt["id"] and x.get("can_same")), None)
+    if not hit:   # v0.4.3 #8
+        return {"error": f"Card #{tgt['id']} is in an older batch and only looks similar. Use Different, or fix this card by hand.", "need": "merge_weak"}
     return None
 
 def _kept(m):
@@ -814,7 +825,9 @@ def enrich(c, cards, metas, full=False, names=None):
         with db() as conn:
             nexp = {x["card_id"]: conn.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='exported'", (x["card_id"],)).fetchone()[0] for x in xb}
         _kx = _kept(m)   # round 21: after 'Different person' (or for kept-apart cards) the 'already exported' warning is silent
-        out["exported_elsewhere"] = [] if (m.get("dup_resolution") == "keep_both" or c["status"] != "pending") else [x | {"times": nexp.get(x["card_id"], 1)} for x in xb if x["card_id"] not in _kx]
+        # v0.4.3 #3 (reviewer/data-manager): kept after 'Different' too, flagged, so Approve still says "exported before" once;
+        # the page box itself stays quiet for those (decided)
+        out["exported_elsewhere"] = [] if c["status"] != "pending" else [x | {"times": nexp.get(x["card_id"], 1), "kept_apart": x["card_id"] in _kx or m.get("dup_resolution") == "keep_both"} for x in xb]
         out["dup_decided"] = m.get("dup_resolution") == "keep_both"
         try:   # round 22: hard blocks + which of them 'This is correct' may confirm, so the card shows them (and the button) on open
             hard_ = hard_errors(f)   # the page hides admin-only ones (ADMIN_OVERRIDE) for reviewers; the server checks the role anyway
@@ -995,6 +1008,12 @@ async def create_job(request: Request, image: UploadFile = File(...), engine: st
                      batch_label: str = Form(""), allow_duplicate: str = Form(""), skip_ai: str = Form("")):
     t0 = time.time(); data = await image.read(); fname = image.filename or "photo"
     batch = batch_for(batch, batch_label, _who(request))
+    u_ = request.state.user
+    if batch and u_.get("role") != "admin" and not demo.enabled():   # v0.4.3 #8 (skeptic L2): no cards into another person's batch
+        oid = batch_owner_id(batch)
+        if oid is not None and oid != u_.get("id"):
+            return JSONResponse({"error": "This batch belongs to someone else. Start your own batch on Scan.", "need": "not_your_batch"}, 403)
+    claim_batch(batch, u_)
     if _cancelled_since(_who(request), batch, t0):   # round 21: landed just after Cancel -> not scanned
         return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
     return await enqueue_upload(data, fname, engine=engine, batch=batch, batch_label=batch_label, allow_duplicate=allow_duplicate, who=_who(request), t0=t0,
@@ -1006,6 +1025,22 @@ def _cancelled_since(who, batch, t0=None):
     ct = CANCELLED_BATCH.get((who, batch or ""))
     if not ct: return False
     return time.time() - ct < 8 or (t0 is not None and ct >= t0 - 0.5)
+
+def batch_owner_id(batch):
+    """v0.4.3 #8 (skeptic L2, mctrade-admin L2): who owns a batch, by user id (not initials, which can change or be reused).
+    Older batches (before the table): the user whose initials scanned the first card, if exactly one user has them."""
+    if not batch: return None
+    r = db().execute("SELECT user_id FROM batch_owners WHERE batch=?", (batch,)).fetchone()
+    if r: return r[0]
+    r = db().execute("""SELECT h.reviewer FROM card_meta m JOIN card_history h ON h.card_id=m.card_id AND h.action='scanned'
+        WHERE m.batch=? ORDER BY h.id LIMIT 1""", (batch,)).fetchone()
+    if not r or not r[0]: return None
+    us = auth.db().execute("SELECT id FROM users WHERE UPPER(initials)=UPPER(?)", (r[0],)).fetchall()
+    return us[0][0] if len(us) == 1 else None
+
+def claim_batch(batch, user):
+    if batch and user and user.get("id"):
+        with db() as c_: c_.execute("INSERT OR IGNORE INTO batch_owners(batch,user_id,ts) VALUES(?,?,?)", (batch, user["id"], time.time()))
 
 BATCH_OWNER = {}; _BATCH_LOCK = threading.Lock()
 
@@ -1092,7 +1127,7 @@ async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", a
                 jobs.append(_part_result(label, await run_in_threadpool(_enqueue_one, pdata, label, engine, batch, batch_label, allow_duplicate, who, None, t0, skip_ai)))
             ok = [j for j in jobs if j.get("job")]
             if not ok: return JSONResponse({"error": f"None of the {len(parts)} cards in this file could be added: " + jobs[0]["error"], "jobs": jobs}, 409 if all(j["status"] == 409 for j in jobs) else 422)
-            return {"job": ok[0]["job"], "jobs": jobs, "state": "queued", "ahead": ok[0]["ahead"], "batch": batch, "source": os.path.basename(fname or ""),
+            return {"job": ok[0]["job"], "jobs": jobs, "state": "queued", "ahead": ok[0]["ahead"], "batch": batch, "batch_label": batch_label, "source": os.path.basename(fname or ""),
                     "back_skipped": bool(back)}
     return await run_in_threadpool(_enqueue_one, data, fname, engine, batch, batch_label, allow_duplicate, who, back, t0, skip_ai)
 
@@ -1139,7 +1174,7 @@ def _enqueue_one(data, fname, engine, batch, batch_label, allow_duplicate, who, 
         with open(os.path.join(INBOX, jid + ".back"), "wb") as fh: fh.write(back)
     with open(os.path.join(INBOX, jid + ".json"), "w") as fh: json.dump(args, fh)
     POOL.submit(_run, jid, None, **args)
-    return {"job": jid, "state": "queued", "ahead": ahead, "batch": batch}
+    return {"job": jid, "state": "queued", "ahead": ahead, "batch": batch, "batch_label": batch_label}   # v0.4.3 #8: the page shows the stored name
 
 SPLIT_POOL = ThreadPoolExecutor(max_workers=1)   # round 20: PDFs are rendered here, one page at a time, never in a request
 CALM_POISON = "This file stopped the scanner while it was being read, so it was set aside. Save it as JPG or a smaller PDF and try again."
@@ -1157,7 +1192,7 @@ def _enqueue_pdf(data, fname, n, engine, batch, batch_label, allow_duplicate, wh
     with JLOCK: JOBS[jid] = {"id": jid, "kind": "pdf", "state": "queued", "file": fname, "batch": batch or "", "created": time.time(),
                              "who": who, "pages": n, "page": 0, "children": []}
     SPLIT_POOL.submit(_split_pdf, jid)
-    return {"job": jid, "pdf": True, "pages": n, "state": "queued", "ahead": 0, "batch": batch, "source": os.path.basename(fname or ""), "back_skipped": had_back}
+    return {"job": jid, "pdf": True, "pages": n, "state": "queued", "ahead": 0, "batch": batch, "batch_label": batch_label, "source": os.path.basename(fname or ""), "back_skipped": had_back}
 
 def _inbox_clear(jid, exts=(".bin", ".json", ".back", ".pdf", ".reading")):
     for x in exts:
@@ -1741,7 +1776,10 @@ def batches(request: Request):
     own = {r[0] for r in db().execute("""SELECT m.batch FROM card_meta m JOIN card_history h ON h.card_id=m.card_id AND h.action='scanned'
        WHERE m.batch IS NOT NULL AND h.id=(SELECT MIN(h2.id) FROM card_history h2 JOIN card_meta m2 ON m2.card_id=h2.card_id
        WHERE m2.batch=m.batch AND h2.action='scanned') AND h.reviewer=?""", (ini,))}
-    for r in out: r["mine"] = r["batch"] in mine; r["own"] = r["batch"] in own
+    uid_ = request.state.user.get("id")   # v0.4.3 #8: ownership by user id; initials only for batches nobody claimed
+    for r in out:
+        oid = batch_owner_id(r["batch"])
+        r["mine"] = r["batch"] in mine; r["own"] = oid == uid_ if oid is not None else r["batch"] in own
     # v0.4.2 #4 (reviewer: "(0 ready)" next to "2 will be exported"): 'ready' from the export's own card set, not a second SQL rule
     try:
         cs_, ms_ = _active(); rd = {}
@@ -1931,12 +1969,16 @@ def _update(cid, request, body, internal=False):
         set_meta(cid, kept_apart=json.dumps(sorted(_kept(meta(cid)) | set(ids))), dup_resolution="keep_both")
         log(cid, rv, "duplicate_kept_both", detail={"cards": ids})
     if merge_tgt:
-        tf = merge_tgt["fields"]; filled = {}; replaced = {}
+        tf = merge_tgt["fields"]; filled = {}; replaced = {}; unkept = []
+        mk_ = body.get("merge_keep") if isinstance(body.get("merge_keep"), dict) else {}   # v0.4.3 #6: the person may choose per field
         for k in ("first_name", "last_name", "title", "company", "website", "address", "department"):
             pk = merge_pick(tf, f, k)
+            if pk and mk_.get(k) in ("src", "tgt") and f.get(k): pk = mk_[k]
             if pk == "src":
                 if tf.get(k): replaced[k] = tf[k]
                 filled[k] = f[k]; tf[k] = f[k]
+            elif f.get(k) and tf.get(k) and k != "title" and _merge_ws(f[k]) != _merge_ws(tf[k]):
+                unkept.append(f"{LABEL.get(k, k.replace('_', ' ').capitalize())}: {f[k]}")   # v0.4.3 #6: never dropped silently; it goes to the note
         for k in ("emails", "social"):
             add = [x for x in f.get(k, []) if x not in tf.get(k, [])]
             if add and k == "emails":   # round 9 (part-timer r3): a misread email is REPLACED by the valid look-alike, not kept beside it
@@ -1964,6 +2006,8 @@ def _update(cid, request, body, internal=False):
             tf["phones"] = keep_p + addp; filled["phones"] = addp
         dn = (body.get("note") if body.get("note") is not None else c.get("note") or "").strip()
         if title_note and title_note not in dn: dn = (dn + " | " + title_note).strip(" |")
+        for u_ in unkept:
+            if u_ not in dn: dn = (dn + " | Also: " + u_).strip(" |")
         if dn and dn not in (merge_tgt.get("note") or ""):
             tn = ((merge_tgt.get("note") or "") + f" | From #{cid}: {dn}").strip(" |")
             with db() as conn: conn.execute("UPDATE cards SET note=? WHERE id=?", (tn, merge_tgt["id"]))
@@ -1989,7 +2033,8 @@ def _update(cid, request, body, internal=False):
         xb_ = [x["card_id"] for x in xb] if body.get("confirm_cross_batch") else [x["card_id"] for x in xb if x["card_id"] in ka_ | _kept(meta(cid) or {})]
         if xb_:
             log(cid, rv, "cross_batch_confirmed", detail={"note": "approved although an approved look-alike exists in another batch",
-                                                          "cards": xb_, "via": "confirm" if body.get("confirm_cross_batch") else "none are the same person"})
+                                                          "cards": xb_, "via": "confirm" if body.get("confirm_cross_batch") else "none are the same person",
+                                                          "kept": sorted(set(xb_) & (ka_ | _kept(meta(cid) or {})))})   # v0.4.3 #3: History tells Different apart
     if st == "approved":
         try: save_correction(cid, f)
         except Exception as e: print("correction capture failed:", e)
@@ -2108,6 +2153,8 @@ def _garbled_addr(v):
     v = str(v or "")
     return bool(re.search(r"\d[oOlI](?=[A-Za-z\d])|\d[oOlI]\b|\d{2,}[A-Za-z]{4,}", v))
 
+def _merge_ws(v): return re.sub(r"[\s,.]+", " ", str(v or "")).strip().lower()
+
 def merge_pick(tf, sf, k):
     """Which value a merge keeps for field k: 'src' (this card's), 'tgt' (the target's) or None (nothing to take).
     Round 8 (part-timer r2): the target's value wins unless it is empty, or it is flagged (validation / hint) and the other
@@ -2125,6 +2172,9 @@ def merge_pick(tf, sf, k):
     if k != "title" and _field_flagged(t2, k): return "tgt" if a else None
     if not a: return "src"
     if _field_flagged(tf, k) and not _field_flagged(t2, k): return "src"
+    if k in ("address", "company", "department") and not _field_flagged(t2, k):   # v0.4.3 #6 (coordinator/data-manager): the fuller value wins
+        wa, wb = set(re.sub(r"\W+", " ", str(a).lower()).split()), set(re.sub(r"\W+", " ", str(b).lower()).split())
+        if wa < wb: return "src"
     if k == "address" and _garbled_addr(a) and not _garbled_addr(b): return "src"   # round 14 (coordinator r6 #3): "380oEmbassy" loses to "3800 Embassy"
     # round 10 (coordinator r3 2): for the title, the fuller one wins ("VP" < "VP, Sales & Marketing"); when they say
     # different things, the target keeps its title and the other one goes into the note (see the merge code)
@@ -2155,7 +2205,7 @@ def merge_preview(cid: CardId, body: dict = Body(...)):
         if pk: out.append({"field": k, "target": t["fields"].get(k) or "", "this": f.get(k) or "", "keep": pk,
                            # round 13 (coordinator r5 N3): the real reason the other value wins
                            "why": "fails_check" if pk == "src" and t["fields"].get(k) and _field_flagged(t["fields"], k) else ("fuller" if pk == "src" and t["fields"].get(k) else ""),
-                           "to_note": k == "title" and pk == "tgt" and (f.get(k) or "").lower() not in (t["fields"].get(k) or "").lower()})
+                           "to_note": (k == "title" and (f.get(k) or "").lower() not in (t["fields"].get(k) or "").lower() or k != "title" and bool(t["fields"].get(k))) and pk == "tgt"})
     add = [x for x in f.get("emails") or [] if x not in (t["fields"].get("emails") or [])]
     keep_, rep = email_replacements(t["fields"], add, f)   # round 11 (part-timer r4): the preview says REPLACE for a misread email
     drop = [a_ for a_ in add if not any(a_ == n_ for _, n_ in rep) and (email_is_misread_copy(a_, keep_, t["fields"], f) or email_fails_check(a_, t["fields"], f))]
@@ -2460,6 +2510,13 @@ def undo(request: Request, body: dict = Body(default={})):
     # what the action wrote; a value someone changed afterwards is kept and reported as a conflict.
     CARD_COLS = ("status", "raw_text", "reviewer", "note", "decided")
     conflicts = {}; restored = {}
+    # v0.4.3 #1 (skeptic M1): a card exported AFTER this action is in an MC Trade file already; undoing it here would make
+    # the app disagree with that file silently. Refused: change it by hand (a later edit marks it for re-export).
+    xp = [s_["card"]["id"] for s_ in snap if s_.get("card") and db().execute(
+        "SELECT 1 FROM card_history WHERE card_id=? AND action='exported' AND ts>=? LIMIT 1", (s_["card"]["id"], a["ts"])).fetchone()]
+    if xp:
+        return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Change it by hand; it is then marked for re-export.",
+                             "need": "exported", "cards": xp}, 409)
     with WRITE_LOCK:
         if any("after" not in s_ for s_ in snap):
             return JSONResponse({"error": "This action can't be undone safely. Change the card by hand.", "need": "legacy_action"}, 409)

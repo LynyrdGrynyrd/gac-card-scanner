@@ -41,10 +41,13 @@ function idleStart(min) {
     const idle = (Date.now() - idleLast) / 60000;
     if (idle < min - 1 || idleWarned) return;
     idleWarned = true; const t0 = idleLast;
-    const a = await ask({title: "Still there?", html: "<p>You will be signed out in 1 minute.</p>", timeout: 60000,
+    // v0.4.3 #2 (skeptic L1): unsaved edits are named and kept as YOUR draft (restored when you open the card again)
+    const ed_ = S.dirty && S.cur && !$("#v-review").hidden ? S.cur.id : null;
+    const a = await ask({title: "Still there?", html: `<p>You will be signed out in 1 minute.</p>${ed_ ? `<p>Card #${ed_} has unsaved changes. They are kept as your draft.</p>` : ""}`, timeout: 60000,
       buttons: [{label: "Stay signed in", cls: "primary", value: 1, primary: true, focus: true}]});
     idleWarned = false;
     if (!a.timedOut || idleLast !== t0) { idleLast = Date.now(); return; }
+    if (ed_) { try { keepDraft(); } catch {} }
     S.dirty = false; window.gacIdleOut = true; $("#logout").click();
   }, 15000);
 }
@@ -53,15 +56,18 @@ $("#logout").onclick = async () => {
     const a = await ask({title: `Sign out and discard the changes to card #${S.cur.id}?`, html: "<p>Unsaved changes are lost when you sign out.</p>",
                          buttons: [{label: "Stay", cls: "primary", value: null, primary: true, focus: true}, {label: "Sign out", cls: "danger", value: 1}]});
     if (!a.value) return; S.dirty = false; }
-  S.SIGNING_OUT = true; S.dirty = false; clearTimeout(keepDraft.t); clearDrafts();   // reviewer r8/r9: drafts don't survive sign-out (shared computers)
+  S.SIGNING_OUT = true; S.dirty = false; clearTimeout(keepDraft.t);
+  if (!window.gacIdleOut) clearDrafts();   // reviewer r8/r9: drafts don't survive sign-out (shared computers); an idle sign-out keeps the person's own draft (v0.4.3 #2)
   const back = location.hash && !location.hash.startsWith("#upload") ? location.hash.replace(/^#queue\?.*$/, "#queue") : "#queue";   // reviewer r7: signing back in returns here (newcomer r9: without a remembered batch)
   ["lastBatch", "lastBatchUid", "lastBatchAt", "batchChosen", "batchChosenUid", "queueHash", "order", "draft", "batch"].forEach(k => { try { delete SS[k]; } catch {} });
   await post("/api/auth/logout", {}); location.href = "/login?next=" + encodeURIComponent("/ui" + back); };
 /* ---------- undo ---------- */
 async function refreshUndo() { try { const u = await call("/api/undo"); $("#undoBtn").hidden = !u.id; $("#undoBtn").title = u.id ? "Undo: " + u.label + " (U)" : ""; $("#undoBtn").dataset.label = u.label || ""; } catch {} }
 async function doUndo() {
-  try { const r = await post("/api/undo", {}); toast("Undone: " + r.undone + (r.notice ? ". " + r.notice : ""), r.notice ? 8000 : 4500); refreshCounts();
-    const {v, id} = parseHash(); if (v === "review" && r.cards.includes(+id)) openCard(+id); else if (v === "review" && r.cards.length) location.hash = "review/" + r.cards[0]; else if (v === "queue") loadQueue(); else if (v === "export") exportInfo();
+  try { const r = await post("/api/undo", {}); refreshCounts();
+    // v0.4.3 #8 (newcomer): a short "Undone" that survives the move to the card (a route change clears the message)
+    const msg = "Undone: " + r.undone + "." + (r.notice ? " " + r.notice : ""), show = () => toast(msg, r.notice ? 8000 : 4500);
+    const {v, id} = parseHash(); if (v === "review" && r.cards.includes(+id)) { await openCard(+id); show(); } else if (v === "review" && r.cards.length) { location.hash = "review/" + r.cards[0]; setTimeout(show, 500); } else { if (v === "queue") loadQueue(); else if (v === "export") exportInfo(); show(); }
     refreshUndo();
   } catch (e) { toast(e.message); }
 }

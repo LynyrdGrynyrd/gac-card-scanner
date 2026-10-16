@@ -215,7 +215,7 @@ def test_layout_a11y_and_zoom_rules():
     assert "grid-template-columns:minmax(0,1fr) minmax(0,1fr)" in css   # compare panel fits
     assert "word-break:keep-all;white-space:nowrap" in css              # no 'Addres/s'
     assert ".aidiff.pv" in css and 'class="aidiff pv"' in rd("views", "export.js")
-    assert "already exported `" in js                                     # space before 'Scanned twice'
+    assert "already exported `" not in js                                     # space before 'Scanned twice'
     assert 'role="region" aria-label="Same person?"' in html
     assert '"emails.0"' not in z and '"phones.0"' not in z and "focusout" in z
     assert "min-height:44px;min-width:44px" in css

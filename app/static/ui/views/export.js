@@ -42,6 +42,8 @@ async function exportInfo() {
       $("#exInfo").textContent = "Choose a batch."; $("#exDup").hidden = true; $$(".tile").forEach(t => t.disabled = true); loadExportHistory(); return {count: 0}; }
     if ($("#exBatch").value !== eb) { if (!exportInfo.depth) { exportInfo.depth = 1; try { return await exportInfo(); } finally { exportInfo.depth = 0; } } }   // selection changed meanwhile: check the batch actually shown
     const r = await call(`/api/export/check?status=${st}&batch=${encodeURIComponent(eb)}`);
+    { const o_ = $("#exBatch").selectedOptions[0];   // v0.4.3 #4 (reviewer: "0 ready" in the list next to "2 cards ready"): the check is the one count
+      if (o_ && eb && st === "approved_new" && typeof r.count === "number") o_.textContent = o_.textContent.replace(/· \d+ ready to export$/, `· ${r.count} ready to export`); }
     const bo_ = (exportInfo.list || []).find(b => b.batch === eb), notMine = eb === "" || (bo_ && !bo_.own);   // v0.4.1 #7: say whose batch it is, on the page
     // v0.4.2 #6 (reviewer: only a small chip): a full warning line, not a chip
     $("#exOwner")?.remove();
@@ -98,7 +100,10 @@ $("#exPreview").onclick = async () => {
         if (!v || !v.rows) { toast("No preview available.", 4000); return; }
         const tbl = (h, rows) => `<div style="overflow:auto;max-height:40vh"><table class="aidiff pv"><thead><tr>${h.map(x => `<th scope="col">${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map(r_ => `<tr>${r_.map(cell).join("")}</tr>`).join("") || `<tr><td colspan="${h.length}">none</td></tr>`}</tbody></table></div>`;
         const rn = v.row_notes || [], nChk = rn.filter(Boolean).length;   // v0.4.2 #3: an MC Trade look-alike is marked, not shown as a plain new profile
-        const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p><p><b>New profiles (${plural(v.rows.length, "row")})</b>${nChk ? ` <span class="flag bad">${nChk} to check</span>` : ""}</p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
+        const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p>` +
+          // v0.4.3 #4: possible MC Trade matches get their own "Needs review" list, as in the dry run and the CSV Check column
+          (Object.keys(v.mc_possible || {}).length ? `<p><b>Needs review (${Object.keys(v.mc_possible).length})</b></p><ul>${Object.entries(v.mc_possible).map(([i, w]) => `<li><a href="#review/${esc(i)}">#${esc(i)}</a> ${esc(w)}</li>`).join("")}</ul>` : "") +
+          `<p><b>New profiles (${plural(v.rows.length, "row")})</b>${nChk ? ` <span class="flag bad">${nChk} to check</span>` : ""}</p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
           `<p><b>Left out (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
           ((v.warnings || []).length ? `<details class="more"><summary>In the file, with a warning (${v.warnings.length})</summary><ul>${v.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""),

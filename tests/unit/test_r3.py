@@ -34,7 +34,7 @@ def test_reviewer_export_filters_and_downloads(env):
     assert rev.get(f"/api/exports/{eid}/download").status_code == 200
     assert rev2.get(f"/api/exports/{eid}/download").status_code == 403
     assert adm.get(f"/api/exports/{eid}/download").status_code == 200
-    assert not [e for e in rev2.get("/api/exports").json() if e["id"] == eid][0]["available"]
+    assert not [e for e in rev2.get("/api/exports").json() if e["id"] == eid]   # v0.4.3 #8: not listed for other reviewers
 
 def test_edit_or_merge_into_approved_rechecks(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]

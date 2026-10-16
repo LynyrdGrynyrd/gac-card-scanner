@@ -20,6 +20,8 @@ def _init_auth(c):
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS auth_log(id INTEGER PRIMARY KEY, ts REAL, username TEXT, event TEXT, ip TEXT)")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id)")
+    try: c.execute("ALTER TABLE sessions ADD COLUMN last_active REAL")   # v0.4.3 #2: server-side idle sign-out
+    except Exception: pass
     _dedupe_initials(c)
 def db():
     c = store.db(); store.once("auth", _init_auth)
@@ -93,18 +95,38 @@ def alog(username, event, ip=None):
     if demo.enabled(): ip = None   # public demo: no record of visitors' addresses
     with db() as c: c.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), username, event, ip))
 
+def idle_minutes():
+    """v0.4.2 #2 / v0.4.3 #2: minutes without real activity before a session ends (0 = never)."""
+    try: return max(0, int(os.environ.get("GAC_IDLE_MINUTES") or get_setting("idle_minutes") or 30))
+    except ValueError: return 30
+
+def _active_request(request):
+    """v0.4.3 #2 (skeptic M2): what counts as a person using the app. Background polling (GETs the page makes on a timer)
+    does not; a write, a page load, or a GET the page marks as user-initiated (X-User-Active: 1) does."""
+    if request.method not in ("GET", "HEAD"): return True
+    return request.url.path in ("/ui", "/ui/") or request.headers.get("X-User-Active") == "1"
+
 def current_user(request: Request):
     tok = request.cookies.get(COOKIE)
     if not tok: return None
     now = time.time(); h = hashlib.sha256(tok.encode()).hexdigest()
-    c = db(); r = c.execute("SELECT u.*, s.expires AS _s_exp FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? "
+    c = db(); r = c.execute("SELECT u.*, s.expires AS _s_exp, s.last_active AS _s_la, s.created AS _s_cr FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? "
                             "AND s.created>? AND u.active=1", (h, now, now - SESSION_MAX_HOURS * 3600)).fetchone()
     if not r: return None
+    idle = idle_minutes()
+    la = r["_s_la"] or r["_s_cr"]
+    if idle and now - la > idle * 60 and not demo.enabled():   # v0.4.3 #2: ends even when the tab was closed
+        with c: c.execute("DELETE FROM sessions WHERE token=?", (h,))
+        try: alog(r["username"], f"signed out after {idle} min idle (server)")
+        except Exception: pass
+        return None
+    if _active_request(request) and now - la > 20:
+        with c: c.execute("UPDATE sessions SET last_active=? WHERE token=?", (now, h))
     # audit 2026-10 P1: the sliding expiry is written at most every 5 minutes (it was a database write on EVERY request,
     # polling included), and a session ends SESSION_MAX_HOURS after sign-in however active it is
     if r["_s_exp"] < now + SESSION_HOURS * 3600 - 300:
         with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (now + SESSION_HOURS * 3600, h))
-    d = dict(r); d.pop("_s_exp", None); return d
+    d = dict(r); [d.pop(k_, None) for k_ in ("_s_exp", "_s_la", "_s_cr")]; return d
 
 def _client(request): return request.client.host if request.client else ""
 def trusted_host(request):

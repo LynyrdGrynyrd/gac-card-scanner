@@ -286,6 +286,7 @@ details.more[open]{background:var(--fill)}.f.err input,.f.err textarea{backgroun
 dialog#dlg.wide .aidiff th{overflow-wrap:normal;word-break:keep-all;white-space:nowrap}
 .aidiff.pv th,.aidiff.pv td{white-space:nowrap;overflow-wrap:normal!important;padding:6px 12px;font-size:14px}
 .link,figcaption a,.pager a,#rDupQ a,#rDupQ summary,details.more>summary,#rMore>summary{min-height:44px;min-width:44px;display:inline-flex;align-items:center}
+#rDupQ a{min-width:0;padding:0 3px}   /* v0.4.3: no gap after "#1" (44 px height kept) */
 .btn.small{min-height:44px}
 input[type=checkbox],input[type=radio]{min-width:24px;min-height:24px}
 label.chk{min-height:44px;display:inline-flex;align-items:center;gap:8px}

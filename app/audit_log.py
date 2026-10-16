@@ -29,6 +29,12 @@ def _audit_text(action, frm, to, d):
     if action == "hard_check_override":   # round 23: field, value and reason in plain words
         return f"confirmed {U.LABEL.get(d.get('field'), d.get('field') or 'a value')} “{_fmtv(d.get('value'))[:120]}” as correct" + (f" (reason: {d['reason']})" if d.get("reason") else " (no reason recorded)")
     if action == "cross_batch_confirmed":
+        cs_, kp_ = d.get("cards") or [], set(d.get("kept") or [])
+        if d.get("via") == "none are the same person": kp_ = set(cs_)
+        if cs_ and kp_:   # v0.4.3 #3 (reviewer): cards marked Different are not "may be the same person"
+            op_ = [i for i in cs_ if i not in kp_]
+            return (("approved although #" + ", #".join(map(str, op_)) + " may be the same person; " if op_ else "approved (")
+                    + f"marked different from {len(kp_)} card{'s' if len(kp_) != 1 else ''}" + ("" if op_ else ")"))
         return "approved although " + (("#" + ", #".join(str(i) for i in d["cards"])) if d.get("cards") else "a card in another batch") + " may be the same person"
     if action == "deleted_on_request": return f"card deleted on request (photo and details; {d.get('export_copies', 0)} stored export file(s)); its history is kept without personal data"
     if action == "redownloaded": return f"re-downloaded in export #{d.get('export_id')} ({d.get('file')})"

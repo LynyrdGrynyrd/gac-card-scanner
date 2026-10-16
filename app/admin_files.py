@@ -236,6 +236,7 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     body, comp, summ = res[0], res[3], res[4]; view = summ.pop("_view", None) or {}
     cinfo = crm_source.info(); dec = summ["decisions"]; cnt = summ["counts"]
     why = {int(i): w for i, w in view.get("left", [])}
+    mcp = summ.get("mc_possible") or {}   # v0.4.3 #4: a possible MC Trade match reads NEEDS REVIEW here as on the page, Preview and CSV
     filecheck = ""
     tmp = tempfile.mkdtemp(prefix="gac-dryrun-")
     try:
@@ -259,8 +260,9 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     order = {"review": 0, "left": 1, "update": 2, "new": 3}
     def nm(c): return _html.escape(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)")
     trs = "".join(f"<tr data-card='{c['id']}' data-decision='{dec[str(c['id'])]}' style='background:{COL[dec[str(c['id'])]]}'><td>#{c['id']}</td><td>{nm(c)}</td><td>{_html.escape(c['fields'].get('company') or '')}</td>"
-                  f"<td><b>{LBL[dec[str(c['id'])]]}</b></td><td>{_html.escape(why.get(c['id'], ''))}</td></tr>"
-                  for c in sorted(sel, key=lambda c: (order[dec[str(c['id'])]], c["id"])))
+                  f"<td><b>{'NEEDS REVIEW (in the new-profiles file)' if str(c['id']) in mcp and dec[str(c['id'])] == 'new' else LBL[dec[str(c['id'])]]}</b></td>"
+                  f"<td>{_html.escape(why.get(c['id'], '') or (mcp.get(str(c['id']), '').capitalize() if dec[str(c['id'])] == 'new' else ''))}</td></tr>"
+                  for c in sorted(sel, key=lambda c: (order['review' if str(c['id']) in mcp else dec[str(c['id'])]], c["id"])))
     left = [int(i) for i, k in dec.items() if k in ("review", "left")]
     html_ = ("<!doctype html><html><head><meta charset='utf-8'><title>MC Trade dry run: match report</title></head><body style='font:14px sans-serif;margin:16px'>"
              f"<h1>MC Trade dry run: match report (nothing was sent to MC Trade)</h1>"
@@ -268,6 +270,8 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
              + ("" if cinfo["real"] else " <b>SAMPLE DATA: this is a rehearsal; no Profile IDs are assigned.</b>")
              + f"<br><b>Cards checked:</b> {len(sel)}" + (f" · batch “{_html.escape(blabel)}”" if blabel else "")
              + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · NEEDS REVIEW {cnt['review']} · LEFT OUT {cnt['left']}</b>"
+             + (f"<br><b>NEEDS REVIEW before import: {len(mcp)} new {U._s(len(mcp), 'row')} may already be in MC Trade</b> ("
+                + ", ".join(f"#{i}" for i in list(mcp)[:50]) + ")" if mcp else "")
              + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {U._s(summ['new_rows'], 'row')}, {summ['update_rows']} update {U._s(summ['update_rows'], 'row')})"
              + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are NEEDS REVIEW, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
              + f"<br>{filecheck}</div>"

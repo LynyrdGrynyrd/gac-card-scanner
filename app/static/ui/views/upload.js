@@ -149,6 +149,8 @@ function upload(row, allowDup = false) {
     x.onload = () => {
       delete row.xhr; let j = {}; try { j = JSON.parse(x.responseText); } catch {}
       conn(true);
+      // v0.4.3 #8 (reviewer: Scan showed two batches with one name): Scan shows the name the server stored, " (2)" included
+      if (j.batch_label && j.batch_label !== bb.label && (!j.batch || j.batch === bb.id)) { bb.label = j.batch_label; if (S.B === bb) { saveB(); renderBatch(); } }
       if (x.status === 200 && j.pdf) { row.state = "queued"; row.job = j.job; row.pdf = true; row.pages = j.pages; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 20: a PDF is read page by page in the background
       else if ([200, 409, 422].includes(x.status) && j.jobs && j.jobs.length) splitRow(row, j, bb);   // round 18: a PDF / sheet of cards came back as several cards
       else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 13: the server may give this batch its own id
@@ -174,8 +176,13 @@ function upload(row, allowDup = false) {
 function conn(ok) {
   let el = $("#reconn");
   if (!el) { document.body.insertAdjacentHTML("afterbegin", `<div id="reconn" class="alert" role="status" hidden>Reconnecting… your cards are safe.</div>`); el = $("#reconn"); }
-  el.hidden = !!ok;
+  // v0.4.3 #8 (part-timer): only a REAL disconnect: two failures in a row, 4 s apart, and not while the page is closing
+  if (ok) { conn.f = 0; conn.t = 0; el.hidden = true; return; }
+  if (conn.leaving) return;
+  conn.f = (conn.f || 0) + 1; conn.t = conn.t || Date.now();
+  el.hidden = !(conn.f >= 2 && Date.now() - conn.t >= 4000);
 }
+addEventListener("pagehide", () => { conn.leaving = true; });
 function addKids(row, job) {   // round 20: cards of a PDF appear as each page is read
   row.kids = row.kids || 0;
   const dir = row.file.includes("/") ? row.file.slice(0, row.file.lastIndexOf("/") + 1) : "";

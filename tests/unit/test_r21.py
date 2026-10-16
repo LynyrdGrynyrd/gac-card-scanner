@@ -56,7 +56,7 @@ def test_confirm_correct_override_is_audited(env):
     # round 22: phones are never overridable; emails need an admin, the exact value and the version
     assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "phones"}).status_code == 400
     v0 = rev.get(f"/api/cards/{cid}").json()["version"]
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 403
+    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 422   # v0.4.3 #7: staff may, with a reason
     assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0, "reason": "printed on the card"}).status_code == 200
     v = rev.post("/api/validate", json={"fields": st.get(cid)["fields"], "card_id": cid}).json(); assert "emails" not in v["hard"]
     assert "emails" in ui.garbled_errors(st.get(cid)["fields"] | {"emails": ["sam@smithlawz.com"]})   # a changed value is checked again
@@ -73,7 +73,7 @@ def test_different_person_silences_duplicate_warnings(env):
     d = rev.get(f"/api/cards/{b}").json(); assert d["exported_elsewhere"]
     assert rev.post(f"/api/cards/{b}", json={"keep_apart": "all"}).status_code == 200
     d = rev.get(f"/api/cards/{b}").json()
-    assert d["dup_decided"] and not d["exported_elsewhere"]
+    assert d["dup_decided"] and all(x["kept_apart"] for x in d["exported_elsewhere"])   # v0.4.3 #3: kept for Approve, flagged
     assert not [x for x in d["attention"] if x["code"] in ("dup_other", "dup_queue")]
     r = rev.post("/api/cards-bulk", json={"ids": [b], "status": "approved", "dry_run": True, "versions": {str(b): d["version"]}}).json()
     assert not r["lookalikes"], r

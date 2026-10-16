@@ -7,8 +7,12 @@ import {authPause, upPending} from "../views/upload.js";
 // the app version this page was loaded with (main.js?v=…, set by the server); modules have no document.currentScript
 const ASSET_V = ((document.querySelector('script[type="module"][src*="/static/ui/main.js"]') || {}).src || "").match(/[?&]v=([0-9a-f]+)/)?.[1] || "";
 const csrf = () => (document.cookie.match(/(?:^|; )gac_csrf=([^;]*)/) || [])[1] || "";
+// v0.4.3 #2: GETs made within a minute of a click/key say so; timed polling doesn't, so it never keeps a session alive
+let LAST_INPUT = Date.now();
+["pointerdown", "keydown", "wheel", "touchstart"].forEach(e => addEventListener(e, () => { LAST_INPUT = Date.now(); }, {passive: true, capture: true}));
 async function call(u, o = {}) {
   if (o.method && o.method !== "GET") o.headers = {...(o.headers || {}), "X-CSRF-Token": csrf()};
+  else if (Date.now() - LAST_INPUT < 60000) o.headers = {...(o.headers || {}), "X-User-Active": "1"};
   const r = await fetch(u, o); let j = null; try { j = await r.json(); } catch {}
   const av = r.headers.get("X-GAC-Asset");   // round 9: the app was updated while this tab was open
   if (av && ASSET_V && av !== ASSET_V && !$("#verWarn")) {
