@@ -39,7 +39,7 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 15, 2026 · version 0.3.0. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
+<p class="draftnote">Pilot help, updated Oct 15, 2026 · version 0.3.1. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
 <h1 id="reviewer-start-here">Reviewer Start Here</h1>
 <p><em>Greater Akron Chamber · Card Scanner · for the people who scan and check cards</em></p>
 <blockquote class="callout">
@@ -65,7 +65,7 @@
 <hr />
 <h2 id="2-signing-in">2. Signing in</h2>
 <ol>
-<li>Open the scanner (the <strong>GAC Card Scanner</strong> app, or <strong>http://localhost:8765</strong> in a browser).</li>
+<li>Open the scanner (the <strong>GAC Card Scanner</strong> app, or the scanner address IT gave you in a browser).</li>
 <li>Type <strong>your own</strong> username and password, then click <strong>Sign in</strong>.</li>
 </ol>
 <figure><img alt="Sign-in page" src="/static/ui/help-img/01_sign_in.webp" loading="lazy" /><figcaption>The sign-in page.</figcaption></figure>
@@ -108,9 +108,9 @@
 </tr>
 </tbody>
 </table></div>
-<p><strong>PDFs and iPhone photos.</strong> You can add HEIC photos (iPhone) and PDFs. A PDF is read one page at a time: the list shows <em>Reading PDF: page 2 of 5…</em>, and each card appears as its page is read. A scanner sheet with several cards on one page becomes one card per card. Up to 200 pages and 400 cards per file.</p>
-<p><strong>Cancel.</strong> <strong>Cancel</strong> stops the cards that are still waiting (and the rest of a PDF). Cards already added stay, and no card is added after you press Cancel. The list then says <em>Stopped. N kept, M not scanned</em> (N = cards from this upload), and the stop is noted in the audit log.</p>
-<p><strong>Skip AI.</strong> Tick <strong>Skip AI</strong> before adding photos when the AI line is long (a busy event). Those cards are not sent to the AI double-check; you can still ask for it on a card later.</p>
+<p><strong>PDFs and iPhone photos.</strong> You can add HEIC photos (iPhone) and PDFs. A PDF is read one page at a time: the list shows <em>Reading PDF: page 2 of 5…</em>, and each card appears as its page is read. A scanner sheet with several cards on one page is split up: each card on the page becomes its own card. Up to 200 pages and 400 cards per file.</p>
+<p><strong>Cancel.</strong> <strong>Cancel</strong> stops the cards that are still waiting (and the rest of a PDF). Cards already added are kept.</p>
+<p><strong>Skip AI.</strong> Tick <strong>Skip AI</strong> before adding photos to scan faster at busy events. Those cards are not sent to the AI double-check; you can still ask for it on a card later.</p>
 <p><strong>"Reconnecting… your cards are safe."</strong> The scanner restarted or the connection dropped. Wait: it reconnects and sends waiting photos by itself.</p>
 <hr />
 <h2 id="4-the-review-queue">4. The review queue</h2>
@@ -134,16 +134,21 @@
 <ul>
 <li>The counter at the top says how many cards are left, for example <strong>"2 of 7 pending"</strong>. When you finish the last one it says <strong>"0 pending left"</strong>.</li>
 <li><strong>Saving…</strong> on a button means: wait a moment. Clicking twice does nothing extra.</li>
-<li>Keys (when you are not typing in a field; press <strong>Esc</strong> first): <strong>A</strong> approve · <strong>R</strong> reject · <strong>J</strong> next · <strong>K</strong> previous · <strong>U</strong> undo.</li>
+<li>Keys: press <strong>Esc</strong>, then <strong>A</strong> approve · <strong>R</strong> reject · <strong>J</strong> next · <strong>K</strong> previous · <strong>U</strong> undo.</li>
 </ul>
 <h3 id="when-approve-says-no">When Approve says no</h3>
 <p>A red box <strong>Fix before approving</strong> lists <strong>every</strong> problem as soon as the card opens, and the fields turn red. Fix them, Save, and click Approve again.</p>
 <figure><img alt="Validation dialog" src="/static/ui/help-img/07_validation_dialog.webp" loading="lazy" /><figcaption>A missing first name and a broken email.</figcaption></figure>
 <p>Always needed: a first name (no digits in names), a full email, and phones with an area code (e.g. 330-555-0100). For softer warnings Approve asks for a short reason.</p>
 <h3 id="this-is-correct">The card really says that? ("Confirm")</h3>
-<p>Some blocks are about values that <em>look</em> misread (a garbled company, a job title like "Acc0unt"). If the photo shows exactly that, Save, then click <strong>Confirm &lt;field&gt;</strong> in the red box: one field at a time, and type why (e.g. "printed like this on the card"). The card history and the audit log show who confirmed which value and why, and the field gets a <strong>✓ confirmed</strong> tag. Phone numbers can never be confirmed: fix them. Email, website and address can only be confirmed by an admin: the box says <strong>Ask an admin to confirm it</strong>. If you edit the value later, or merge cards, the confirmation no longer counts.</p>
+<p>Sometimes the scanner thinks a word was misread (a garbled company, a job title like "Acc0unt"). If the card really says that:</p>
+<ul>
+<li>Click <strong>Save</strong>, then <strong>Confirm</strong> next to the field, and type why (for example "printed like this on the card"). The field gets a <strong>✓ confirmed</strong> tag.</li>
+<li>Phone numbers can't be confirmed: fix them. For email, website or address, ask an admin.</li>
+<li>If you change the value later, confirm it again.</li>
+</ul>
 <h3 id="nothing-was-saved">"Nothing was saved"</h3>
-<p>If you see <strong>"Card #N changed since you opened it… Nothing was saved"</strong>, someone else (or the AI) changed the card at the same time. Your typing stays on the screen. <strong>Reload the card, check it, and save again.</strong> Nothing is ever half-saved.</p>
+<p>If you see <strong>"Card … changed since you opened it… Nothing was saved"</strong>, someone else changed this card. Your typing is still here. <strong>Reload, check, and save again.</strong></p>
 <hr />
 <h2 id="6-ai-suggestions-optional">6. AI suggestions (optional)</h2>
 <p>The top bar shows <strong>AI check: on</strong> or <strong>AI check: off</strong>. When it is on, a small AI on this computer re-reads hard cards and may <strong>suggest</strong> a fix. It never changes a card by itself.</p>
@@ -151,12 +156,17 @@
 <p>For each row choose <strong>Use AI value</strong> or <strong>Keep current</strong>, then check it against the photo. You don't have to wait for the AI: you can approve now.</p>
 <hr />
 <h2 id="7-duplicates">7. Duplicates</h2>
-<p>The scanner warns you in an <strong>orange box</strong> when a card may be a duplicate.</p>
-<p><strong>Same person twice in this batch</strong> (same email or phone): you must deal with it before approving. Click <strong>Same person (merge into #X)</strong> to add any new details to #X and drop this card, or reject one of the two cards. (<strong>Details</strong> lists every look-alike.)</p>
+<p>The scanner warns you in an <strong>orange box</strong> when a card may be a duplicate. What to do:</p>
+<div class="tw"><table>
+<thead><tr><th>The box says</th><th>What to click</th></tr></thead>
+<tbody>
+<tr><td><strong>Same person twice in this batch</strong> (same email or phone)</td><td>You must decide before approving. Click <strong>Same person</strong> to add any new details to the other card and drop this one, or reject one of the two cards.</td></tr>
+<tr><td><strong>Seen at another event</strong> (a look-alike in another batch)</td><td>Only a warning. Click <strong>Same person</strong> to combine them, or <strong>Different person</strong> if you are sure they are two people.</td></tr>
+<tr><td><strong>May already be in MC Trade</strong></td><td>Click <strong>Different person: add as new contact</strong>, or reject the card if it is the same person and tell an admin.</td></tr>
+</tbody></table></div>
+<p><strong>Details</strong> lists every look-alike.</p>
 <figure><img alt="Duplicate in the same batch" src="/static/ui/help-img/10_dup_same_batch.webp" loading="lazy" /><figcaption>Two photos of the same card in one batch.</figcaption></figure>
-<p>After one of the pair is rejected, the other card shows <strong>"May be the same person as card #N (rejected, this batch)"</strong>. That's only a hint. Check that the right card was kept, then approve.</p>
-<p><strong>Look-alike in another batch</strong> (someone you met at two events): this only warns. Choose <em>Same person…</em> to merge, or <strong>Different person … keep both</strong> if you are sure they are different people.</p>
-<p><strong>May already be in MC Trade:</strong> choose <strong>Different person: add as new contact</strong>, or reject the card if it's the same person and tell an admin.</p>
+<p>After one of the pair is rejected, the other card shows <strong>"May be the same person as card … (rejected, this batch)"</strong>. That's only a hint. Check that the right card was kept, then approve.</p>
 <figure><img alt="Look-alikes and MC Trade" src="/static/ui/help-img/11_dup_lookalikes_crm.webp" loading="lazy" /><figcaption>A person seen in other batches who may already be in MC Trade.</figcaption></figure>
 <p>If Approve says <strong>"This person was exported before"</strong>, that person was already sent to MC Trade from another batch. Open that card to compare, or <strong>Approve it anyway</strong> if you're sure. You are asked this even while the AI is still checking the card. After <strong>Different person</strong> you are not asked about MC Trade again.</p>
 <hr />

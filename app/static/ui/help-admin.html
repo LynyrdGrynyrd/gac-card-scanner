@@ -39,7 +39,7 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 15, 2026 · version 0.3.0. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 15, 2026 · version 0.3.1. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
 <p><em>Greater Akron Chamber · business-card scanner pilot · for the data team and scanner admins</em></p>
 <blockquote class="callout">
@@ -65,7 +65,7 @@
 <ol>
 <li><strong>Install Python 3</strong> from <a href="https://www.python.org/downloads/">https://www.python.org/downloads/</a>. On Windows, tick <strong>"Add python.exe to PATH"</strong> in the installer.</li>
 <li><strong>Install Tesseract</strong>, the card-reading engine:<ul>
-<li><strong>Mac:</strong> install Homebrew (<a href="https://brew.sh">https://brew.sh</a>), then type <code>brew install tesseract</code> in Terminal.</li>
+<li><strong>Mac:</strong> ask IT to install the text reader (Tesseract).</li>
 <li><strong>Windows:</strong> run the installer from <a href="https://github.com/UB-Mannheim/tesseract/wiki">https://github.com/UB-Mannheim/tesseract/wiki</a> and keep the default folder.</li>
 </ul>
 </li>
@@ -74,7 +74,7 @@
 <li>Mac: if it says the file "can't be opened", right-click it, choose <strong>Open</strong>, then <strong>Open</strong> again.</li>
 </ul>
 </li>
-<li>Your browser opens <strong>http://localhost:8765/ui</strong>. The first time it shows <strong>First-time setup</strong>: type your full name, initials, a username and a password (at least 10 characters) twice, then click <strong>Create admin and sign in</strong>.<ul>
+<li>Your browser opens the scanner page. The first time it shows <strong>First-time setup</strong>: type your full name, initials, a username and a password (at least 10 characters) twice, then click <strong>Create admin and sign in</strong>.<ul>
 <li>First-time setup only works on the scanner computer itself, not from another computer or a phone.</li>
 </ul>
 </li>
@@ -87,7 +87,7 @@
 <ol>
 <li>Double-click <strong><code>start.command</code></strong> / <strong><code>start.bat</code></strong>. It takes about 10 seconds. If the scanner is already running, it just opens the browser.</li>
 <li><strong>Keep the black window open</strong> while anyone is working. Closing it stops the scanner for everyone.</li>
-<li>The address is <strong>http://localhost:8765</strong> on the scanner computer.</li>
+<li>IT gives you the scanner address to open in a browser.</li>
 </ol>
 <blockquote class="callout">
 <p><strong>Note:</strong> the black window says whether the AI double-check is online. If it says <strong>"AI checker OFFLINE"</strong>, scanning still works; section 7.5.</p>
@@ -96,7 +96,7 @@
 <p>The AI double-check needs extra model files (about 3 GB). They are <strong>not</strong> in the zip and <strong>not</strong> in the Windows/Mac installers.</p>
 <ul>
 <li><strong>Desktop app (installer):</strong> an admin opens <strong>Admin → Settings → AI helper</strong> and clicks <strong>Download AI helper (3 GB)</strong>. A progress bar shows the download; then <strong>Start AI helper</strong> / <strong>Stop AI helper</strong> / <strong>Remove AI helper</strong>. It runs only on this computer. Skip it if the computer is short of disk space or memory: scanning works without it.</li>
-<li><strong>Zip / server version:</strong> if IT has set up the model files, double-click <strong><code>start-ai-checker.command</code></strong> in a second window and leave it open too. Without it, cards are only read the fast way and nothing else changes.</li>
+<li><strong>Zip / server version:</strong> if IT has set up the model files, double-click <strong>start-ai-checker</strong> in a second window and leave it open too. Without it, cards are only read the fast way and nothing else changes.</li>
 </ul>
 <h3 id="24-optional-phone-access">2.4 Optional: phone access</h3>
 <p>Phones can scan cards with their camera over the office Wi-Fi. Nothing needs to be set up first:</p>
@@ -105,12 +105,12 @@
 <li>Scan it with the phone (same office Wi-Fi). The phone opens a page for this batch only; the link works once and expires after 15 minutes.</li>
 <li>Windows may ask about the firewall the first time: allow <strong>Private networks</strong> only (port 8766).</li>
 </ol>
-<p>The old <code>enable-phone-access</code> scripts are retired. Phone mode does <strong>not</strong> work when the scanner runs in Docker as shipped (the phone port isn't published and the container's address isn't the computer's); use the normal start scripts for phone scanning.</p>
+<p>Phone scanning does not work in the Docker set-up; use the normal app.</p>
 <h3 id="25-stopping-and-backing-up">2.5 Stopping and backing up</h3>
 <ul>
 <li><strong>Stop:</strong> close the black window.</li>
-<li><strong>Automatic backup:</strong> while it runs, the scanner makes a backup <strong>every night at 02:30</strong> (or soon after it starts, if the computer was off at night) and <strong>keeps the last 7</strong>. Each backup is one file, <code>gac-backup-&lt;date&gt;-&lt;time&gt;.tgz</code> (desktop app: in the folder <em>GAC Card Scanner Backups</em> next to the data folder; source install: <code>backups/</code>; Docker: the <code>gac-backups</code> volume), with the database (copied safely while running), card photos, stored exports and the template. The MC Trade contacts export is <strong>never</strong> in a backup. To keep backups on another disk (recommended: a USB drive or a synced folder), start the scanner with <code>GAC_BACKUP_DIR</code> set to that folder. Make one now with <code>scripts/backup.sh</code>.</li>
-<li><strong>Restore:</strong> stop the scanner, then run <code>scripts/restore_backup.sh</code> to list the backups and <code>scripts/restore_backup.sh backups/gac-backup-….tgz</code> to restore one (type YES). The backup is checked first; the current <code>data</code> folder is moved aside to <code>data.before-restore-&lt;time&gt;</code> (nothing is deleted) and the uploaded MC Trade contacts file is kept. Start the scanner again afterwards.</li>
+<li><strong>Automatic backup:</strong> while it runs, the scanner makes a backup <strong>every night at 02:30</strong> (or soon after it starts, if the computer was off at night) and <strong>keeps the last 7</strong>. Each backup is one file in the backups folder, with the database (copied safely while running), card photos, stored exports and the template. The MC Trade contacts export is <strong>never</strong> in a backup. To keep backups on another disk (recommended: a USB drive or a synced folder), ask IT to point the backups at that folder. IT can also make a backup right away.</li>
+<li><strong>Restore:</strong> ask IT to restore a backup. Nothing is deleted: the current data is set aside first, and the uploaded MC Trade contacts file is kept.</li>
 <li>Keep backups no longer than 30 days and store them as securely as the computer itself.</li>
 </ul>
 <hr />
@@ -120,7 +120,7 @@
 </blockquote>
 <h3 id="71-what-it-is">7.1 What it is</h3>
 <blockquote class="callout">
-<p><strong>Two separate steps (round 15).</strong> 1) <strong>Reading the photos</strong>: the progress on the <em>Scan cards</em> page ("about N min left"). When a card shows "Added", it is already in the Review queue. 2) <strong>The AI double-check</strong>: the optional, later spelling check. The header badge <strong>"AI: N cards · all done in ~M min"</strong> counts <em>everyone's</em> cards waiting for this second step. You don't need to wait for it: review and approve now (approving cancels a card's waiting check). Hover the badge for this explanation. When no card is waiting, the badge says <strong>AI check: on</strong>, <strong>AI check: off</strong> or <strong>AI check: on, but not running</strong>, for everyone including reviewers (hover it for what that means; only an admin can switch it, in Admin → Settings).</p>
+<p><strong>Two separate steps.</strong> 1) <strong>Reading the photos</strong>: the progress on the <em>Scan cards</em> page ("about N min left"). When a card shows "Added", it is already in the Review queue. 2) <strong>The AI double-check</strong>: the optional, later spelling check. The header badge <strong>"AI: N cards · all done in ~M min"</strong> counts <em>everyone's</em> cards waiting for this second step. You don't need to wait for it: review and approve now (approving cancels a card's waiting check). Hover the badge for this explanation. When no card is waiting, the badge says <strong>AI check: on</strong>, <strong>AI check: off</strong> or <strong>AI check: on, but not running</strong>, for everyone including reviewers (hover it for what that means; only an admin can switch it, in Admin → Settings).</p>
 </blockquote>
 <p>When a card was hard to read, a small AI model running <strong>on the scanner computer</strong> re-reads it in the background. It <strong>never changes the card by itself</strong>. It offers <strong>suggestions</strong> you accept or ignore. Cards a person has already edited or decided are never changed. Nothing leaves the computer.</p>
 <h3 id="72-what-you-see">7.2 What you see</h3>
@@ -174,7 +174,7 @@
 <p><strong>At events, switch it off</strong> unless the AI checker runs on its <strong>own, dedicated machine</strong>. It checks one card at a time, at about 45–170 seconds per card on the scanner computer, and it slows the scanner down while it works. Scanning, review and export don't need it. Its suggestions are advisory only.</p>
 <p>When it is on, the line is shared fairly: each person's cards take turns, and within one person's cards the oldest goes first. Approving or rejecting a card cancels only that card's own waiting check.</p>
 <h3 id="75-if-the-ai-checker-is-offline">7.5 If the AI checker is offline</h3>
-<p>The scanner works normally without it; cards are just read the fast way. Signs that it's offline: the black window says <strong>"AI checker OFFLINE"</strong>, and Admin → Settings says <em>"The AI model is not running right now"</em>. To start it, double-click <strong><code>start-ai-checker.command</code></strong> on the scanner computer (if IT installed the model files). If that window says <em>"No models folder found"</em> or <em>"Model file … not found"</em>, ask IT; there is nothing to fix in the scanner itself.</p>
+<p>The scanner works normally without it; cards are just read the fast way. Signs that it's offline: the black window says <strong>"AI checker OFFLINE"</strong>, and Admin → Settings says <em>"The AI model is not running right now"</em>. To start it, double-click <strong>start-ai-checker</strong> on the scanner computer (if IT installed the model files). If that window says <em>"No models folder found"</em> or <em>"Model file … not found"</em>, ask IT; there is nothing to fix in the scanner itself.</p>
 <hr />
 <h2 id="8-duplicates">8. Duplicates</h2>
 <p>The scanner looks for two kinds of possible duplicate and gives you plain-language choices in an <strong>orange box</strong> on the review screen.</p>
@@ -184,15 +184,15 @@
 <p>The same photo in <strong>another person's or another batch</strong> is only a <strong>warning</strong>: it's listed first in the look-alike box, and you decide like any other look-alike (b).</p>
 <p>Use <strong>Your decision for this card</strong> (a drop-down, grouped <em>In this batch</em> / <em>Earlier batches</em> / <em>Not the same person</em>), then click <strong>Save decision</strong>:</p>
 <ul>
-<li>Choose <strong>Same person as #X …: add any new details to #X and drop this card</strong>. Any extra email or phone is copied into card #X, and this card is rejected as a duplicate. <strong>or</strong></li>
+<li>Choose <strong>Same person as card … : add any new details to that card and drop this one</strong>. Any extra email or phone is copied into the other card, and this card is rejected as a duplicate. <strong>or</strong></li>
 <li>Reject one of the two cards.</li>
 </ul>
-<p><strong>After a reject:</strong> once one of the two cards is rejected (for example with <em>Reject selected</em>), the other no longer blocks. It still shows the hint <strong>"May be the same person as card #N (rejected, this batch): a hint only, it doesn't block"</strong>, in the queue and under <em>Why this card needs checking</em>, so you can check that the right card was kept. Look-alikes in other batches are on their own line, <em>"Looks like card … (another batch)"</em>. Long lists show the first 10, then <em>"…and N more"</em>.</p>
+<p><strong>After a reject:</strong> once one of the two cards is rejected (for example with <em>Reject selected</em>), the other no longer blocks. It still shows the hint <strong>"May be the same person as card … (rejected, this batch): a hint only, it doesn't block"</strong>, in the queue and under <em>Why this card needs checking</em>, so you can check that the right card was kept. Look-alikes in other batches are on their own line, <em>"Looks like card … (another batch)"</em>. Long lists show the first 10, then <em>"…and N more"</em>.</p>
 <figure><img alt="Duplicate in the same batch" src="/static/ui/help-img/10_dup_same_batch.webp" loading="lazy" /><figcaption>Two photos of Jordan Ellis's card in one batch: "Duplicate scan (same email/phone in the same batch): merge or reject one of them."</figcaption></figure>
 <p><strong>b) A look-alike in another batch</strong></p>
 <p>For example, someone gave you their card at two different events. This <strong>only warns</strong>; it doesn't stop you approving.</p>
 <ul>
-<li><strong>Same person as #X …: add any new details to #X and drop this card</strong>, or</li>
+<li><strong>Same person as card … : add any new details to that card and drop this one</strong>, or</li>
 <li><strong>Different person from all N listed cards: keep both</strong> (under <em>Not the same person</em>), which marks every listed look-alike as a different person from this card in one click (and records that you confirmed it).</li>
 </ul>
 <p>If one of the look-alikes is <strong>already approved</strong> in another batch with the same email or phone, <strong>Approve</strong> asks first: <em>"Same person already approved in another batch?"</em> with <strong>Open that card</strong>, <strong>Different person: approve this one too</strong>, or <strong>Cancel</strong>. <strong>Approve selected</strong> in the queue approves such cards too, but its summary lists each one with a warning, and lists every card it skipped and why.</p>
@@ -220,7 +220,7 @@
 <h2 id="10-exporting">10. Exporting</h2>
 <p>Click <strong>Export</strong> in the top bar. Files are saved to <strong>this computer's Downloads folder</strong>; nothing is uploaded anywhere.</p>
 <figure><img alt="Export page" src="/static/ui/help-img/19_export_page.webp" loading="lazy" /><figcaption>The Export page with one batch chosen.</figcaption></figure>
-<blockquote class="callout"><p><strong>Round 23: confirmed values.</strong> A reviewer (or, for email, website and address, an admin) can confirm ONE field at a time as "the card really says this", with a reason. Confirmations are checked again at every export: one with no author or reason (made before round 23), a phone, a formula, or a value edited or merged since, no longer counts, so that card is left out as "fix first" until it is fixed or confirmed again. A confirmed value never goes into another card's row. Each one is listed in the READ-ME as <em>Check: #N Field confirmed by XX: value (reason)</em>. The READ-ME opens with <em>Totals: N new · N updates · N to review · N left out</em>; every line that needs action starts with <strong>Check</strong>.</p></blockquote>
+<blockquote class="callout"><p><strong>Confirmed values.</strong> A reviewer (or, for email, website and address, an admin) can confirm ONE field at a time as "the card really says this", with a reason. Confirmations are checked again at every export: one with no author or reason (made in an older version), a phone, a formula, or a value edited or merged since, no longer counts, so that card is left out as "fix first" until it is fixed or confirmed again. A confirmed value never goes into another card's row. Each one is listed in the READ-ME as a line such as <em>Check: #12 Title confirmed by JS: Acc0unt (printed like this on the card)</em>. The READ-ME opens with its totals, for example <em>Totals: 6 new · 0 updates · 1 to review · 0 left out</em>; every line that needs action starts with <strong>Check</strong>.</p></blockquote>
 <h3 id="101-export-steps">10.1 Export steps</h3>
 <ol>
 <li><strong>Which cards?</strong> Keep <strong>Ready to export</strong> (approved, not yet exported). Other options: <em>All approved cards</em> (includes ones exported before); admins also see <em>All cards</em>, <em>Pending only</em> and <em>Rejected only</em>.</li>
@@ -273,18 +273,18 @@
 <li>Two cards of the <strong>same person</strong> are combined into one row (a mobile or fax from the second card is kept). Colleagues sharing info@ stay separate, and so do people you marked as different.</li>
 <li>A person's <strong>website</strong> is in the extra-columns CSV, because Website is an organisation column in MC Trade.</li>
 <li>Cards with formula-like text or HTML are left out as <strong>FIX FIRST</strong>.</li>
-<li><strong>CHECK WEBSITE before importing: card #N…</strong> in the READ-ME (and the on-screen preview): the website on that exported row doesn't match the email domain and came in through a merge, or looks like a phishing, login, short-link or IP address. It is only a warning; the row is still exported. Open the card, fix or clear the website, and export again if needed.</li>
+<li><strong>CHECK WEBSITE before importing: card ……</strong> in the READ-ME (and the on-screen preview): the website on that exported row doesn't match the email domain and came in through a merge, or looks like a phishing, login, short-link or IP address. It is only a warning; the row is still exported. Open the card, fix or clear the website, and export again if needed.</li>
 <li><strong>SAME NAME</strong> in the READ-ME: two cards, or a card and an existing MC Trade contact, have the same first and last name. Check they are really different people before importing.</li>
 <li><strong>Phone extensions</strong> stay in the same cell, written like <code>330-555-0170 x4271</code>. International numbers are written as <code>+44 20 7946 0958</code> in both the Excel and CSV files.</li>
 <li>If the READ-ME lists cards under <strong>NEEDS REVIEW</strong> (for example an uncertain MC Trade Profile ID), check those cards before importing.</li>
 <li>Admins set the <strong>affiliation code</strong> and phone style under Admin → Settings (section 12.2).</li>
-<li>Until GAC's real MC Trade template is saved on the scanner computer (as <code>data/mctrade_template.xlsx</code>), the column names are the scanner's default set; the READ-ME says the column names are <em>not checked against MC Trade</em>. Day one fixes this (section 11).</li>
+<li>Until GAC's real MC Trade template is saved on the scanner computer, the column names are the scanner's default set; the READ-ME says the column names are <em>not checked against MC Trade</em>. Day one fixes this (section 11).</li>
 </ul>
 <h3 id="103-preview-the-mc-trade-files">10.3 Preview the MC Trade files</h3>
 <p><strong>Preview the MC Trade files</strong> (link under the tiles) shows the rows on screen first and lets you download them: nothing is marked as exported, and look-alikes don't block it. The preview is noted in the account log (who looked at which batch). The file names start with <code>PREVIEW-</code> and the READ-ME starts with <em>PREVIEW ONLY</em>. Use it to look at the file before the real export. <strong>Don't import a preview</strong> without doing the real export too, or the cards will still show as "not yet exported".</p>
 <h3 id="104-spreadsheet-csv-and-contacts-vcard">10.4 Spreadsheet (CSV) and Contacts (vCard)</h3>
 <ul>
-<li><strong>Spreadsheet (CSV):</strong> opens in Excel or Google Sheets, with reviewer columns and a <code>needs_attention</code> column. Cells that a spreadsheet would run as a formula get a leading <code>'</code> (plain phone numbers like <code>+1 330-555-0181</code> stay as they are).</li>
+<li><strong>Spreadsheet (CSV):</strong> opens in Excel or Google Sheets, with reviewer columns and a "needs attention" column. Cells that a spreadsheet would run as a formula get a leading <code>'</code> (plain phone numbers like <code>+1 330-555-0181</code> stay as they are).</li>
 <li><strong>Contacts (vCard):</strong> for Outlook, Gmail or a phone's contacts.</li>
 </ul>
 <h3 id="105-export-history">10.5 Export history</h3>
@@ -295,7 +295,7 @@
 </blockquote>
 <hr />
 <h2 id="11-mc-trade-import-day-one-steps">11. MC Trade import: day-one steps</h2>
-<p><em>For the first real import. One person owns the import (an MC Trade admin) and a second person double-checks. The dry run is built in: Export page → <strong>Check against MC Trade (dry run)</strong>. The full tick-list is <code>mctrade-dryrun/DAY-ONE-CHECKLIST.md</code>.</em></p>
+<p><em>For the first real import. One person owns the import (an MC Trade admin) and a second person double-checks. The dry run is built in: Export page → <strong>Check against MC Trade (dry run)</strong>. IT has the full tick-list.</em></p>
 <p><strong>Before you start</strong></p>
 <ol>
 <li>In MC Trade, <strong>Admin → Manage Codes</strong>: create the affiliation code <strong><code>CardScan-Pilot</code></strong> (exact spelling). MC Trade refuses files that use a code it doesn't have.</li>
@@ -326,7 +326,7 @@
 </ol>
 <p><strong>Afterwards (10 minutes):</strong> write down which template columns differed, what the real export headers are, and how many NEEDS REVIEW rows were real duplicates versus false alarms. Send the notes to the developer.</p>
 <blockquote class="callout">
-<p>Nothing is sent to MC Trade automatically. Live sync needs MemberClicks API credentials and is a later, developer-led step (Part C of the checklist).</p>
+<p>Nothing is sent to MC Trade automatically. Sending straight to MC Trade is a later step for IT.</p>
 </blockquote>
 <hr />
 <h2 id="12-admin-tasks">12. Admin tasks</h2>
@@ -339,8 +339,7 @@
 <li><strong>Deactivate:</strong> for someone who left. Their past work stays in the audit log. <strong>Reactivate</strong> brings the account back.</li>
 <li><strong>Make admin / Make reviewer:</strong> change the role.</li>
 </ul>
-<p><strong>Locked out (no admin can sign in):</strong> on the scanner computer, open a terminal in the scanner folder and run
-<code>.venv/bin/python -m app.admin reset-password &lt;username&gt;</code> (Mac) or <code>.venv\Scripts\python -m app.admin reset-password &lt;username&gt;</code> (Windows). It asks for the new password twice. <code>create-admin &lt;username&gt; "Full Name"</code> makes a new admin; <code>list</code> lists the accounts. Ask IT if you're not comfortable with a terminal.</p>
+<p><strong>Locked out (no admin can sign in):</strong> on the scanner computer, open a terminal in the scanner folder and ask IT to reset the admin password (or make a new admin) on the scanner computer.</p>
 <h3 id="122-settings">12.2 Settings</h3>
 <figure><img alt="Settings" src="/static/ui/help-img/24_admin_settings.webp" loading="lazy" /><figcaption>Admin → Settings.</figcaption></figure>
 <div class="tw"><table>
@@ -406,7 +405,7 @@
 <figure><img alt="Audit log" src="/static/ui/help-img/26_admin_audit.webp" loading="lazy" /><figcaption>The audit log searched for one card.</figcaption></figure>
 <hr />
 <h2 id="13-privacy-and-removal-requests">13. Privacy and removal requests</h2>
-<p><strong>What is kept:</strong> a photo of each card, the details printed on it, any note, who scanned/edited/approved/exported it and when, and staff sign-ins (including the computer's network address). Everything stays on the scanner computer, in its <code>data</code> folder.</p>
+<p><strong>What is kept:</strong> a photo of each card, the details printed on it, any note, who scanned/edited/approved/exported it and when, and staff sign-ins (including the computer's network address). Everything stays on the scanner computer, in its data folder.</p>
 <div class="tw"><table>
 <thead>
 <tr>
@@ -487,7 +486,7 @@
 <td>3 of <em>your</em> cards are pending; 2 more of your photos are still being read. Hover it for the counts from everyone.</td>
 </tr>
 <tr>
-<td><strong>"This save didn't say which version of the card it was made from"</strong> or <strong>"Card #N changed since you opened it… Nothing was saved"</strong> (409)</td>
+<td><strong>"This save didn't say which version of the card it was made from"</strong> or <strong>"Card … changed since you opened it… Nothing was saved"</strong> (409)</td>
 <td>Someone else, another tab or the AI changed the card. Your typed values stay on the form: note them, <strong>reload the card</strong>, check it, and save again.</td>
 </tr>
 <tr>
@@ -520,7 +519,7 @@
 </tr>
 <tr>
 <td><strong>"AI checker OFFLINE"</strong> in the black window, or <em>"The AI model is not running right now"</em> in Settings</td>
-<td>Scanning still works. Start <code>start-ai-checker.command</code> if IT installed the model (section 7.5).</td>
+<td>Scanning still works. Start <strong>start-ai-checker</strong> if IT installed the model (section 7.5).</td>
 </tr>
 <tr>
 <td>A card says <strong>AI busy</strong> or <strong>AI checking…</strong> for a long time</td>
@@ -547,7 +546,7 @@
 <td>Every card in this batch has been decided. Go to Export, or pick another batch.</td>
 </tr>
 <tr>
-<td><strong>"May be the same person as card #N (rejected, this batch)"</strong></td>
+<td><strong>"May be the same person as card … (rejected, this batch)"</strong></td>
 <td>Only a hint: the twin was rejected. Check the right card was kept, then approve.</td>
 </tr>
 <tr>
@@ -631,7 +630,7 @@ On the card, choose <strong>Different person from all N listed cards: keep both<
 <p><strong>Why can't I approve a card with a formula-like value such as <code>=SUM(1)</code>?</strong>
 Spreadsheets could run it as a formula when the file is opened. Fix the field (for example remove the leading <code>=</code>).</p>
 <p><strong>Someone gave me their card at two events. What do I do?</strong>
-Open the second card, choose <strong>Same person as #X …: add any new details to #X and drop this card</strong> and click <strong>Save decision</strong>. Their new details are added to the first card.</p>
+Open the second card, choose <strong>Same person as card … : add any new details to that card and drop this one</strong> and click <strong>Save decision</strong>. Their new details are added to the first card.</p>
 <p><strong>The person is already in MC Trade. What should I choose?</strong>
 <strong>Same person: update their existing MC Trade contact.</strong> The card goes into the UPDATES file instead of creating a new profile.</p>
 <p><strong>I approved the wrong card. Can I fix it?</strong>
@@ -641,7 +640,7 @@ If details were merged into an exported card, it's marked <em>export it again</e
 <p><strong>What's the Preview link on the Export page for?</strong>
 To look at the MC Trade Excel file without marking anything as exported.</p>
 <p><strong>Which file do I import into MC Trade?</strong>
-The <code>.xlsx</code> for new profiles, and the <code>-UPDATES.xlsx</code> as a separate update import. Never the <code>-extra-columns.csv</code> or <code>-READ-ME.txt</code>. For the first real import, follow section 11.</p>
+The new-profiles spreadsheet, and the updates spreadsheet as a separate update import. Never the extra-columns file or the READ-ME. For the first real import, follow section 11.</p>
 <p><strong>Can I use the scanner on my phone?</strong>
 Yes, once phone access is turned on (section 2.4), on the office Wi-Fi only.</p>
 <p><strong>How long are card photos kept?</strong>
@@ -713,7 +712,7 @@ Click <strong>Help</strong> in the top bar (next to <em>Password</em>). It opens
 </tr>
 </tbody>
 </table></div>
-<p><em>Questions about this guide: talk to the scanner admin. Source documents: QUICKSTART.md, DATA-TEAM-GUIDE.md, PRIVACY-NOTE.md, mctrade-dryrun/DAY-ONE-CHECKLIST.md.</em></p>
+<p><em>Questions about this guide: talk to the scanner admin.</em></p>
 </main>
 <footer class="foot"><div class="wrap">Greater Akron Chamber · Card Scanner · <strong>Internal pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a></div></footer>
 <script src="/static/ui/desktop.js?v=3"></script>
