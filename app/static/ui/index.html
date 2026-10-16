@@ -117,7 +117,7 @@
     <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Next: next card (J)" aria-keyshortcuts="j">Next →</button></div>
   </div>
   <div class="review">
-    <figure class="imgbox"><img id="rImg" alt="Photo of the business card"><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
+    <figure class="imgbox"><div class="zwrap" id="rZoom"><img id="rImg" alt="Photo of the business card"><span class="zhint" id="zHint" aria-live="polite">Tap a field to zoom</span></div><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
       <div class="backbox"><a id="backLink" href="#" target="_blank" hidden>Open back</a> <label for="backFile" class="btn small">Add back…</label><input type="file" id="backFile" accept="image/*,.heic,.heif,image/heic,image/heif" capture="environment" class="sr"></div></figcaption>
       <details><summary>Text read</summary><pre id="rRaw"></pre></details>
       <details id="rHistWrap"><summary>History</summary><ol id="rHist" class="hist"></ol></details></figure>

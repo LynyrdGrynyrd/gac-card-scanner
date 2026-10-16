@@ -7,6 +7,7 @@ import {hideToast, toast} from "../ui/toast.js";
 import {ask, busy} from "../ui/dialog.js";
 import {doUndo, refreshCounts, refreshUndo, who} from "../header.js";
 import {STATUS, confBar} from "./queue.js";
+import {setBoxes, wireZoom, zoomReset} from "./zoom.js";
 
 /* ---------- review ---------- */
 const order = () => { try { return JSON.parse(SS.order || "[]"); } catch { return []; } };
@@ -33,7 +34,7 @@ async function openCard(id, opts = {}) {
   if (!S.cur || S.cur.id !== d.id) scrollTo(0, 0);
   S.cur = d; const c = d.card, f = c.fields, k = f.confidence || {};
   $("#rImg").src = $("#zImg").src = "/img/" + c.image; $("#rawLink").href = "/img/" + c.image;
-  $("#rRaw").textContent = c.raw_text || "";
+  $("#rRaw").textContent = c.raw_text || ""; setBoxes(f.boxes); wireZoom();
   $("#rImg").alt = d.image_deleted ? "Photo deleted by the retention policy" : "Photo of the business card";
   $("#rBatch").textContent = [d.batch_label ? "Batch: " + d.batch_label : "", (/ \((page \d+ of \d+|card \d+ of \d+)/.test(d.filename || "") || /\.(hei[cf]|pdf)(\.jpg)?$/i.test(d.filename || "")) ? "From: " + d.filename.replace(/\.jpg$/i, "") : ""].filter(Boolean).join(" · ");   // round 18: which file/page
   $("#h-r").textContent = `Review card #${c.id}`;
@@ -584,7 +585,8 @@ $("#prev").onclick = () => step(-1); $("#next").onclick = () => step(1);
 $("#zoom").onclick = $("#rImg").onclick = () => $("#zoomDlg").showModal();
 document.addEventListener("keydown", e => {
   if ($("#v-review").hidden || e.ctrlKey || e.metaKey || e.altKey || $("#dlg").open || $("#zoomDlg").open) return;
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { if (e.key === "Escape") { document.activeElement.blur(); zoomReset(); } return; }
+  if (e.key === "Escape") { zoomReset(); return; }
   const k = e.key.toLowerCase();
   if (k === "a") decide("approved", $("#bApprove")); else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
   e.preventDefault();

@@ -3,7 +3,7 @@ Stages: QR/vCard decode -> hybrid OCR (PP-OCR det + Tesseract rec) -> rule parse
 import os
 from . import ocr, parser, qr
 def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
-    r = ocr.run_ocr(data, engine)
+    r = ocr.run_ocr(data, engine); lines0 = r.get("lines")   # v0.4: full-frame lines (the crop pass has other coordinates)
     f = parser.from_vlm(r["structured"]) if "structured" in r else parser.parse(r["text"], r.get("lines"))
     # second pass on the perspective-cropped card (phone photos): fill fields the full-frame pass missed
     if r["engine"].startswith("ppocr") and os.getenv("CARD_CROP", "1") == "1":
@@ -45,4 +45,7 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
         for k, x in post.items():
             if k in pre and conf.get(k) == x: conf[k] = pre[k]
         consistency.apply(f); plausibility.apply(f)
+    try:
+        from . import boxes; f["boxes"] = boxes.locate(f, lines0)   # v0.4 tap-to-zoom (display only)
+    except Exception: f["boxes"] = {}
     return {"engine": r["engine"], "text": r["text"], "fields": f}

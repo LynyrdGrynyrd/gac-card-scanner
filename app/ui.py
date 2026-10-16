@@ -1704,7 +1704,7 @@ def card(cid: CardId):
 def _apply_fields(f, body_fields):
     changed = {}
     for k, v in body_fields.items():
-        if k in ("confidence", "overall_confidence", "ocr_conf", "fallback_reason", "edited", "sources"): continue
+        if k in ("confidence", "overall_confidence", "ocr_conf", "fallback_reason", "edited", "sources", "boxes"): continue   # v0.4: boxes come from OCR only
         if k in ("emails", "social"):
             v = [str(x).strip() for x in (v or []) if str(x).strip()]
         elif k == "phones":
