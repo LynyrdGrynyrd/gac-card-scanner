@@ -92,7 +92,7 @@ def test_merge_preview_shows_spacing_only(env):
     t = mk(ui, store, first_name="Sq", last_name="Coffee", company="Squarecoffee")
     a = mk(ui, store, first_name="Sq", last_name="Coffee", company="Square Coffee")
     rows = rc.post(f"/api/cards/{a}/merge-preview", json={"into": t}).json()["rows"]
-    assert any(r["field"] == "company" and r["why"] == "spacing" for r in rows), rows
+    assert any(r["field"] == "company" and r["keep"] == "src" for r in rows), rows   # v0.4.1 #5: says what the merge really keeps (this card's)
 
 def test_bulk_dry_run_changes_nothing(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]

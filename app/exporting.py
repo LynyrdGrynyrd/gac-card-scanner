@@ -100,12 +100,21 @@ def same_names(sel, contacts_from=None):
             if n in have: out.append({"name": n.title(), "cards": ids, "with": "contacts", "profiles": have[n][:5]})
     return out
 
+def _check_ids(sel, metas, status):
+    res = build_export("xlsx", sel, metas, status, "summary", "", preview=True)
+    sm = res[4] if len(res) > 4 else {}
+    dz = {str(k): v for k, v in (sm.get("decisions") or {}).items()}
+    return set(sm.get("check_ids") or []) | {x[0] for x in (sm.get("_view") or {}).get("left") or [] if dz.get(str(x[0])) == "review"}
+
 @U.router.get("/api/export/check")
 def export_check(request: Request, status: str = "approved_new", batch: str = ""):
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
     sel, metas, probs = _export_set(status, batch)
     flagged = [c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or U.validate(c["fields"])]
+    if sel and len(sel) <= 500:   # v0.4.1 #4: the same "to check" cards as the preview, the sheet and the READ-ME
+        try: flagged = sorted(set(flagged) | set(_check_ids(sel, metas, status)))
+        except Exception: pass
     ok_batches = []
     if probs and not batch:   # all batches is blocked: say which single batches can be exported right now
         for b in sorted({(metas.get(c["id"]) or {}).get("batch") or "__none__" for c in sel}):
@@ -236,6 +245,11 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                 if h["action"] == "cross_batch_confirmed":
                     d_ = h.get("detail") if isinstance(h.get("detail"), dict) else {}
                     xb_ids[c["id"]] = d_.get("cards") or []
+            # v0.4.1 #5 (datamanager #4): 'Different' reaches the export: look-alikes marked different are not a double-import risk
+            kp_ = set(U._kept(metas.get(c["id"]) or {}))
+            if c["id"] in xb_ids:
+                xb_ids[c["id"]] = [o for o in xb_ids[c["id"]] if o not in kp_ and c["id"] not in set(U._kept(metas.get(o) or {}))]
+                if not xb_ids[c["id"]] or (metas.get(c["id"]) or {}).get("dup_resolution") == "keep_both" and not kp_: xb_ids.pop(c["id"])
         tpl_real = source == "GAC template file"
         cnt_ = mx.counts(res["decisions"])   # round 22 (mctrade-admin r21 H1): ONE source for every count (README, sign-off, dry run)
         conf_ = [(c["id"], ln) for c in sel for ln in U.confirmed_lines(c["fields"])]
@@ -301,7 +315,8 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                            # doesn't hold MC Trade's current value for these, so it is shown as unknown (old=None).
                            + [{"field": h_, "old": None, "new": str(v_), "changes": None}
                               for h_, v_ in r_.items() if v_ not in (None, "") and mx.canonical(h_) in _inhdr and h_ not in ("ProfileID", "MemberSince", "OrgInd", "IndFirstName", "IndLastName", "OrgName", "IndEmail", "IndPhone")]})
-        summ = {"new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
+        summ = {"check_ids": sorted(set(_warn) | {i for i, _ in conf_} | set(ovr_) | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
+                "new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
                 "left_ids": [c["id"] for c, _ in left if c["id"] not in {x["id"] for x, _ in rows}],
                 "review": res["review"], "possible": res["possible"], "crm_real": cinfo["real"],
                 "decisions": {str(k): v[0] for k, v in res["decisions"].items()}, "counts": mx.counts(res["decisions"]),
@@ -376,14 +391,17 @@ def export_summary(request: Request, status: str = "approved_new", batch: str = 
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
     sel, metas, probs = _export_set(status, batch)
-    flagged = {c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or U.validate(c["fields"])}
-    out = {"count": len(sel), "new": 0, "updated": 0, "to_check": len(flagged), "left_out": 0, "blocked": bool(probs)}
+    out = {"count": len(sel), "new": 0, "updated": 0, "to_check": 0, "left_out": 0, "blocked": bool(probs)}
     if sel:
         res = build_export("xlsx", sel, metas, status, "summary", "", preview=True)
-        view = (res[4].get("_view") if len(res) > 4 else None) or {}
-        dz = view.get("decisions") or {}; left = view.get("left") or []
-        rv = {x[0] for x in left if dz.get(x[0]) == "review"}
-        out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": len(flagged | rv), "left_out": len(left) - len(rv)}
+        sm = res[4] if len(res) > 4 else {}
+        view = sm.get("_view") or {}
+        # v0.4.1 #4 (mctrade-admin H1): the view's decisions have STRING keys ('647'); the left-out ids are numbers
+        dz = {str(k): v for k, v in (sm.get("decisions") or view.get("decisions") or {}).items()}; left = view.get("left") or []
+        rv = {x[0] for x in left if dz.get(str(x[0])) == "review"}
+        chk = set(sm.get("check_ids") or [])
+        out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": len(chk | rv), "left_out": len(left) - len(rv),
+                "need_decision": len(rv), "check_ids": sorted(chk | rv)}
     return out
 
 MT = {"csv": "text/csv", "vcf": "text/vcard", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}

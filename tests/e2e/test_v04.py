@@ -28,7 +28,7 @@ def test_enter_approves_only_when_safe(new_page):
     expect(page.locator("#rKeys")).to_contain_text("Approve")
     # unsaved edits: Enter does nothing to the card
     page.locator("#title").fill("Chief Enter Tester"); page.keyboard.press("Enter")
-    expect(page.locator("#toast")).to_contain_text("Unsaved edits"); assert card_json(page, ids[0])["status"] == "pending"
+    expect(page.locator("#toast")).to_contain_text("Unsaved"); assert card_json(page, ids[0])["status"] == "pending"
     page.locator("#bDiscard").click(); page.locator("#dlg[open]").get_by_role("button", name="Discard my edits").click()
     wait_card(page, ids[0]); expect(page.locator("#rDirty")).to_be_hidden()
     # a dialog is open: Enter belongs to the dialog, never approves the card behind it
@@ -39,7 +39,7 @@ def test_enter_approves_only_when_safe(new_page):
     page.keyboard.press("ArrowLeft"); wait_card(page, ids[0])
     page.locator("#bSkip").click(); wait_card(page, ids[1]); page.keyboard.press("ArrowLeft"); wait_card(page, ids[0])
     # clean card, no dialog: Enter approves
-    wait_card(page, ids[0]); page.locator("#h-r").focus(); page.keyboard.press("Enter"); answer_dialogs(page, timeout=15000)
+    wait_card(page, ids[0]); page.wait_for_timeout(700); page.locator("#h-r").focus(); page.keyboard.press("Enter"); answer_dialogs(page, timeout=15000)
     for _ in range(60):
         if card_json(page, ids[0])["status"] == "approved": break
         page.wait_for_timeout(500)
@@ -50,7 +50,7 @@ def test_more_holds_reject_and_theme_toggle(new_page):
     page = signed_in_admin(new_page)
     scan(page, "card3_dark.jpg", batch="E2E more")
     cid = _open_first(page)
-    expect(page.locator("#bReject")).to_be_hidden(); page.locator("#rMore > summary").click(); expect(page.locator("#bReject")).to_be_visible()
+    expect(page.locator("#bReject")).to_be_visible(); expect(page.locator("#bSave")).to_be_visible()   # v0.4.1 #8: on the bar, not under More
     before = page.evaluate("getComputedStyle(document.body).backgroundColor")
     page.locator("#themeBtn").click(); after = page.evaluate("getComputedStyle(document.body).backgroundColor")
     assert before != after and page.evaluate("document.documentElement.dataset.theme") in ("dark", "light")

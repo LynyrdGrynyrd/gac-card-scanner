@@ -42,9 +42,9 @@
       <label for="batchName">Batch name <small>(optional)</small></label>
       <input id="batchName" maxlength="60" placeholder="e.g. Oct 13 After Hours">
       <div class="btns">
-        <button type="button" class="btn" id="bFolder">Choose a folder</button>
+        <button type="button" class="btn" id="bFolder" aria-label="Choose a folder">Choose a folder</button>
         <button type="button" class="btn mobile-only" id="bCam">Take a photo</button>
-        <button type="button" class="btn" id="bPhone" hidden>📱 Scan with phone</button>
+        <button type="button" class="btn" id="bPhone" aria-label="Scan with phone" hidden><span aria-hidden="true">📱</span> Scan with phone</button>
       </div>
       <label class="small chk"><input type="checkbox" id="skipAi"> Skip the AI double-check (faster at busy events)</label>
       <label for="engine">Scan quality</label>
@@ -116,13 +116,13 @@
     <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Skip: next card (J)" aria-keyshortcuts="j">Skip →</button></div>
   </div>
   <div class="review">
-    <figure class="imgbox"><div class="zwrap" id="rZoom"><img id="rImg" alt="Photo of the business card"><span class="zhint" id="zHint" aria-live="polite">Tap a field to zoom</span></div><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
+    <figure class="imgbox"><div class="zwrap" id="rZoom"><img id="rImg" alt="Photo of the business card"><span class="zhint" id="zHint" aria-live="polite">Tap a field to zoom</span></div><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank" aria-label="Open the original photo">Open original</a> · <span id="rBatch"></span>
       <div class="backbox"><a id="backLink" href="#" target="_blank" hidden>Open back</a> <label for="backFile" class="btn small">Add back…</label><input type="file" id="backFile" accept="image/*,.heic,.heif,image/heic,image/heif" capture="environment" class="sr"></div></figcaption>
 </figure>
     <form id="rForm" class="panel loading" autocomplete="off" novalidate inert>
       <div class="row between"><span id="rStatus" class="pill"></span><span id="rConf"></span></div>
       <div id="rDecided" class="small"></div>
-      <div id="rDupBox" class="alert warn" role="status" hidden><div id="rExported" hidden></div><div id="rDupQ" hidden></div><div id="rDupC" hidden></div></div>
+      <div id="rDupBox" class="alert warn" role="region" aria-label="Same person?" hidden><div id="rExported" hidden></div><div id="rDupQ" hidden></div><div id="rDupC" hidden></div></div>
       <div id="rErr" class="alert bad" role="alert" hidden></div>
       <div id="rRisk" class="alert" role="status" hidden></div>
       <div id="rWarn" class="alert info" hidden></div>
@@ -140,18 +140,17 @@
         <div class="f wide" id="addrBox"><label for="address">Address</label><input id="address" data-c="address"></div>
         <div class="f wide"><label for="note">Note <small>(optional)</small></label><input id="note"></div>
       </div>
-      <p class="legend small" id="srcLegend">No tag means read from the printed text. Tags show other sources.</p>
-      <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = hard to read. Check the photo.</p>
+      <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = check the photo.</p>
       <div class="btns actions">
         <button type="button" class="btn" id="bSkip" aria-keyshortcuts="j">Skip</button>
         <button type="button" class="btn ghost" id="bDiscard" hidden>Discard edits</button>
         <button type="button" class="btn ghost" id="bPending">Reopen (set to pending)</button>
-        <button type="button" class="btn ok lg" id="bApprove">Approve</button>
+        <button type="button" class="btn" id="bSave">Save</button>
+        <button type="button" class="btn danger" id="bReject" aria-keyshortcuts="r">Reject</button>
+        <button type="button" class="btn ok lg" id="bApprove" aria-keyshortcuts="Enter">Approve</button>
       </div>
       <details class="more" id="rMore"><summary>More</summary>
         <div class="btns">
-          <button type="button" class="btn" id="bSave">Save</button>
-          <button type="button" class="btn danger" id="bReject">Reject</button>
           <button type="button" class="btn ghost" id="bDelete" hidden>Delete…</button>
         </div>
         <div id="rAIWrap"><div id="rAI" class="alert info" hidden></div></div>
@@ -179,7 +178,7 @@
     <label class="chk"><input type="radio" name="exKind" value="xlsx" checked> MC Trade import (Excel)</label>
     <label class="chk"><input type="radio" name="exKind" value="csv"> Spreadsheet (CSV)</label>
     <label class="chk"><input type="radio" name="exKind" value="vcf"> Contacts (vCard)</label></details>
-  <p class="small"><button type="button" class="link" id="exPreview" title="Nothing is marked as exported">Preview MC Trade files</button> ·
+  <p class="small"><button type="button" class="btn" id="exPreview" title="Nothing is marked as exported">Preview</button>
     <button type="button" class="link" id="exDryrun" title="Match report. Nothing is sent.">Look up in MC Trade</button></p>
   <details class="more small"><summary>What's in the download?</summary>The import file, a READ-ME and a CSV (plus an UPDATES file when cards update existing contacts). "Look up in MC Trade" shows what each card would do, offline.</details>
   <div id="exDone" class="alert ok" role="status" hidden></div>

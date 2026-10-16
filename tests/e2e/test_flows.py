@@ -103,6 +103,7 @@ def test_keyboard_review_queue(new_page):
     wait_card(page, ids[0]); page.keyboard.press("Escape")
     page.keyboard.press("j"); wait_card(page, ids[1])   # J: next card
     page.keyboard.press("k"); wait_card(page, ids[0])   # K: previous card
+    page.wait_for_timeout(700)   # v0.4.1: keys don't approve in the first 600 ms after a card loads
     page.keyboard.press("a"); answer_dialogs(page)        # A: approve; the next pending card of the batch opens
     wait_card(page, ids[1])
     assert card_json(page, ids[0])["status"] == "approved" and card_json(page, ids[1])["status"] == "pending"

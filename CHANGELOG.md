@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.1 (2026-10-16)
+
+### Safer review (from the v0.4.0 tester reports)
+- **Enter:** a held key no longer approves card after card. There's a short pause after the next card loads. Enter never approves while you're typing in a field ("Esc, then Enter to approve") or while "Same person?" is unanswered. "Exported before" now defaults to **Cancel**.
+- **Same person?** compares the best match (same scanner and batch first, then name, email and phone). The server refuses to merge unrelated cards or another reviewer's cards.
+- **Phones:** look-alike letters (O, I, l) next to digits are read as digits. Digits are never dropped without a mark, and numbers that look off are flagged. "changed" now shows for every automatic change, including website and company.
+- **Counts:** "To check", "Ready to save" and the export preview now agree, and "To check" lists the card numbers.
+- **Merge:** the Same preview matches the result, Different carries into the export, a merged card no longer shows a red box, and each duplicate is asked about only once.
+- **Reject** asks first and keeps an unsaved note.
+- **Export:** your current batch is selected by default, the screen names the batch owner, and batch names stay unique.
+- **Checks:** bestexample.com is no longer blocked; the "Morg4n" warning is back; Save and Reject are back on the bar; Confirm buttons stay after Save; a company that only looks misread can be confirmed.
+- **Layout:** the side-by-side panel fits at 1280 px, the wrapping and spacing bugs are fixed, the preview table is roomier, the Same box and the links have names for screen readers, and tap targets are 44 px. Zoom shows nothing for a field that has no box.
+- **Docs:** the guides, in-app help and demo video were remade from this version. They now say the same thing about Enter, Same/Different and who may export.
+
 ## v0.4.0 (2026-10-16)
 
 ### Calmer, faster review (Apple-style screens)

@@ -50,9 +50,9 @@ def test_enter_never_approves_in_dialog_or_with_edits():
 def test_review_layout_one_primary_and_more():
     idx = rd("index.html"); rv = idx[idx.index('id="v-review"'):idx.index('id="v-export"')]
     acts = rv[rv.index('class="btns actions"'):rv.index('id="rMore"')]
-    assert 'id="bApprove"' in acts and 'id="bSkip" aria-keyshortcuts="j">Skip<' in acts and 'id="bReject"' not in acts and 'id="bSave"' not in acts
+    assert 'id="bApprove"' in acts and 'id="bSkip" aria-keyshortcuts="j">Skip<' in acts and 'id="bReject"' in acts and 'id="bSave"' in acts   # v0.4.1 #8: Save and Reject on the bar
     more = rv[rv.index('id="rMore"'):]
-    for i in ('id="bReject"', 'id="bSave"', 'id="rAI"', 'id="rHist"', 'id="rRaw"'): assert i in more, i
+    for i in ('id="rAI"', 'id="rHist"', 'id="rRaw"'): assert i in more, i
     assert rv.count("btn ok lg") == 1
 
 

@@ -102,8 +102,19 @@ def _tc(s):
 def _strip_label(l):
     return re.sub(r"^(?:e-?mail|email|web|website|url|www:)\s*:?\s*", "", l, flags=re.I)
 
+_LOOK = re.compile(r"(?<![A-Za-z])[\(\d][\dOoIl|()\-. ]{6,}\d(?![A-Za-z])")
+def fix_phone_lookalikes(ln):
+    """v0.4.1 #3 (datamanager H1): 'T (33O) 555-0178' / '555-O102': a letter O, l or I inside a phone number is a misread
+    digit. It is turned into the digit so no digit is dropped (the field is then marked changed and flagged for a check)."""
+    def f(m):
+        t = m.group(0)
+        if sum(c.isdigit() for c in t) < 5 or not re.search(r"[OoIl|]", t): return t
+        return re.sub(r"(?<=[\d(\-])[OoIl|](?=[\d)\-]|[OoIl|]\d)|(?<=\d)[OoIl|]|[OoIl|](?=\d)", lambda x: x.group(0).translate(str.maketrans("OoIl|", "00111")), t)
+    return _LOOK.sub(f, ln)
+
 def _phones(lines, used):
     out, seen = [], set()
+    lines = [ln if "@" in ln or re.search(r"www|https?:", ln, re.I) else fix_phone_lookalikes(ln) for ln in lines]
     def add(i, num, start, end, ln):
         d = re.sub(r"\D", "", num)
         if len(d) < 5 or d in seen or any(d in s or s in d for s in seen if len(s) >= 7 and len(d) >= 7): return

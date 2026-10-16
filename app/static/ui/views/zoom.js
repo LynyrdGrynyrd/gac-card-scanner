@@ -5,12 +5,12 @@ let BOXES = {};
 function setBoxes(b) { BOXES = b && typeof b === "object" ? b : {}; zoomReset(); }
 function keyFor(el) {
   if (!el || !el.id) return null;
-  if (el.id === "emails") { const i = el.value.slice(0, el.selectionStart ?? 0).split(",").length - 1; return BOXES["emails." + i] ? "emails." + i : "emails.0"; }
-  if (el.id === "phones") { const i = el.value.slice(0, el.selectionStart ?? 0).split("\n").length - 1; return BOXES["phones." + i] ? "phones." + i : "phones.0"; }
+  if (el.id === "emails") { const i = el.value.slice(0, el.selectionStart ?? 0).split(",").length - 1; return "emails." + i; }   // v0.4.1 #9: no fallback to the first line
+  if (el.id === "phones") { const i = el.value.slice(0, el.selectionStart ?? 0).split("\n").length - 1; return "phones." + i; }
   return KEY[el.id] || null;
 }
 function zoomTo(el) {
-  const img = $("#rImg"), hint = $("#zHint"), k = keyFor(el), b = k && BOXES[k];
+  const img = $("#rImg"), hint = $("#zHint"), k = keyFor(el), moved = el && ["emails", "phones"].includes(el.id) && el.closest(".f.unsaved"), b = k && !moved && BOXES[k];   // edited lists: the saved boxes may point at another line
   if (!img) return;
   if (!b) { zoomReset(el ? "Not found on the photo" : null); return; }
   const [x, y, w, h] = b, ar = (img.naturalWidth || 1) / (img.naturalHeight || 1);
@@ -29,6 +29,7 @@ function wireZoom() {
   const fs = $("#fields"); if (!fs || fs._zoom) return; fs._zoom = 1;
   fs.addEventListener("focusin", e => zoomTo(e.target));
   fs.addEventListener("click", e => { if (e.target.matches("input, textarea")) zoomTo(e.target); });
+  fs.addEventListener("focusout", e => { if (!e.relatedTarget || !fs.contains(e.relatedTarget)) zoomReset(); });   // v0.4.1 #9: no old zoom left behind
   fs.addEventListener("keyup", e => { if (["emails", "phones"].includes(e.target.id) && /Arrow|Home|End/.test(e.key)) zoomTo(e.target); });
 }
 export {setBoxes, wireZoom, zoomReset, zoomTo};

@@ -280,3 +280,13 @@ details.more[open]{background:var(--fill)}.f.err input,.f.err textarea{backgroun
 #exGo{display:inline-flex;flex-direction:row;justify-content:center;align-items:center;border:0;padding:0 56px;margin-top:12px;color:#fff;background:var(--teal-d)}#exGo:disabled{opacity:.45}
 #v-upload:has(#toQueue:not([hidden])) #bPhotos{background:var(--card);color:var(--teal-d)}   /* one primary: Review batch, once a batch is read */
 @media (max-width:480px){.pager{flex-wrap:wrap;gap:6px}.pager .btn{padding:8px 10px}.drop{padding:24px 8px;min-height:260px}.btn.lg{padding:0 24px}main{overflow-wrap:anywhere}}
+/* v0.4.1 #9: layout and tap targets */
+.dupgrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.dupgrid .mini{min-width:0;overflow-wrap:anywhere}
+#rDupBox{max-width:100%;overflow:hidden}
+dialog#dlg.wide .aidiff th{overflow-wrap:normal;word-break:keep-all;white-space:nowrap}
+.aidiff.pv th,.aidiff.pv td{white-space:nowrap;overflow-wrap:normal!important;padding:6px 12px;font-size:14px}
+.link,figcaption a,.pager a,#rDupQ a,#rDupQ summary,details.more>summary,#rMore>summary{min-height:44px;min-width:44px;display:inline-flex;align-items:center}
+.btn.small{min-height:44px}
+input[type=checkbox],input[type=radio]{min-width:24px;min-height:24px}
+label.chk{min-height:44px;display:inline-flex;align-items:center;gap:8px}
+#v-review summary{min-height:44px;display:flex;align-items:center;cursor:pointer}

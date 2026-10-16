@@ -299,13 +299,13 @@ def garbled_errors(f):
     for e in ems:   # round 22 (datamanager r21 M2): a lost dot is caught with no website too ('…hardwexample.com', '…comcom.com')
         ed = str(e).lower().rsplit("@", 1)[-1].strip(); sld = ed.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sld)
-        if m_ and (m_.group(2) == "example" or re.search(r"(com|net|org)$", m_.group(1))):
+        if m_ and (m_.group(2) == "example" and len(m_.group(1)) >= 8 or re.search(r"(com|net|org)$", m_.group(1))):   # v0.4.1 #8: 'bestexample.com' is a real name
             err["emails"] = f"Email domain “{ed}” looks like a dot is missing. Check the photo and fix it."; break
     if w and "website" not in err:   # round 24 (datamanager r23 M1): the website gets the same lost-dot check as emails
         wd = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; wd = wd[4:] if wd.startswith("www.") else wd
         sldw = wd.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sldw)
-        if "." in wd and m_ and (m_.group(2) == "example" or re.search(r"(com|net|org)$", m_.group(1))):
+        if "." in wd and m_ and (m_.group(2) == "example" and len(m_.group(1)) >= 8 or re.search(r"(com|net|org)$", m_.group(1))):
             err["website"] = f"Website “{w}” looks like a dot is missing. Check the photo and fix it."
     if "website" in err: pass
     elif w and (re.match(r"^(https?://)?(www(?![.\d])|wvw\.|vvww?\.)", w, re.I) or ".." in w or not plausible_site(w, ems)):
@@ -351,6 +351,16 @@ def company_gibberish(c):
         if w_ in _pl.CAMEL_OK or w_ in ("QuickBooks", "LinkedIn", "HubSpot", "PayPal", "DoorDash", "SoundCloud", "GitHub", "DropBox", "MailChimp"): continue   # round 24 (mctrade-admin r23 M1)
         m_ = re.search(r"[a-z]{3,}([A-Z][a-z]?)$", w_)
         if m_ and m_.group(1).capitalize() not in _CO_TAIL: return w_
+    return None
+
+def company_soft_hint(f):
+    """v0.4.1 #8: the soft 'Company … looks misread' suggestion (not a block), or None."""
+    try:
+        from . import plausibility, mctrade_export as _mx
+        if _mx.content_problems({"company": f.get("company")}): return None
+        for sg in plausibility.check(json.loads(json.dumps(f))):
+            if sg.get("field") == "company": return sg.get("text") or "looks misread"
+    except Exception: return None
     return None
 
 CONFIRM_FIELDS = ("first_name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
@@ -547,8 +557,10 @@ def _dupes(c, others, metas, crm):
     q.sort(key=lambda d: ("same photo" not in d["why"], -d["score"], d["card_id"]))   # one order everywhere (newcomer r7 F4)
     res = m.get("dup_resolution")
     # round 14: a rejected card keeps its look-alikes as hints (never blocking, see below) so it does not read "Looks good"
+    _sc = scanners([c["id"]] + [x["card_id"] for x in q]) if q else {}
     for x in q:
         o = next((o for o in others if o["id"] == x["card_id"]), None)
+        x["same_user"] = bool(_sc.get(c["id"])) and _sc.get(c["id"]) == _sc.get(x["card_id"]); x["match"] = match_score(x)
         x["strong"] = is_true_duplicate(x, m, metas.get(x["card_id"]) or {})
         x["kept_apart"] = (not x["strong"]) and (x["card_id"] in _kept(m) or c["id"] in _kept(metas.get(x["card_id"]) or {})
                                                  or (res == "keep_both" and not _kept(m)))   # legacy all-matches choice
@@ -589,6 +601,32 @@ def _name_plus(d, f, rows):
     street = lambda x: key((x or "").split(",")[0])[:24]
     if f.get("address") and r.get("address") and len(street(f["address"])) >= 8 and sim(street(f["address"]), street(r["address"])) >= 0.85: return True
     return False
+
+def scanners(ids):
+    """v0.4.1 #2: who scanned each card (initials of its first 'scanned' history row)."""
+    ids = [int(i) for i in ids]
+    if not ids: return {}
+    q = ",".join("?" * len(ids))
+    return {r[0]: r[1] for r in db().execute(f"""SELECT h.card_id, h.reviewer FROM card_history h WHERE h.action='scanned' AND h.card_id IN ({q})
+        AND h.id=(SELECT MIN(h2.id) FROM card_history h2 WHERE h2.card_id=h.card_id AND h2.action='scanned')""", ids)}
+
+def match_score(x):
+    """v0.4.1 #2: how alike two cards are, from name, email and phone (0..3). Used to pick the 'Same person?' card."""
+    why = x.get("why") or []
+    nm = max([float(w[5:]) for w in why if w.startswith("name~")] + [1.0 if "name exact" in why else 0.0])
+    return round(nm + (1.0 if ("email exact" in why or "same email" in why) else 0.0) + (1.0 if ("phone exact" in why or "same phone" in why) else 0.0)
+                 + (1.0 if "same photo" in why else 0.0), 3)
+
+def merge_refusal(c, f2, tgt):
+    """v0.4.1 #2: a merge needs the target in this card's look-alike list and both cards scanned by the same person."""
+    cs_, metas_ = _active()
+    ids = {x["card_id"] for f_ in (c["fields"], f2) for x in dupes(c | {"fields": f_}, cs_, metas_)["queue"]}
+    if tgt["id"] not in ids:
+        return {"error": f"Card #{tgt['id']} doesn't look like this card, so it can't be merged into.", "need": "merge_unrelated"}
+    sc = scanners([c["id"], tgt["id"]])
+    if sc.get(c["id"]) != sc.get(tgt["id"]):
+        return {"error": f"Card #{tgt['id']} was scanned by someone else. Use Different, or ask them.", "need": "merge_other_user"}
+    return None
 
 def _kept(m):
     try: return set(json.loads(m.get("kept_apart") or "[]"))
@@ -1003,6 +1041,20 @@ def unique_batch_label(label, batch, extra_taken=()):
     return f"{label} ({k})"
 
 MAX_PARTS = 400   # round 18: most cards one upload (PDF pages x cards per page) may create
+def batch_label_for(batch, label):
+    """v0.4.1 #7 (reviewer #2): batch names are unique. A batch keeps its first name; a NEW batch whose name another batch
+    already uses gets ' (2)', ' (3)' … (the server decides, so two pages or a stale list can't make twins)."""
+    if not batch or not label: return label
+    try:
+        r = db().execute("SELECT batch_label FROM card_meta WHERE batch=? AND batch_label IS NOT NULL LIMIT 1", (batch,)).fetchone()
+        if r and r[0]: return r[0]
+        used = {str(x[0]).strip().lower() for x in db().execute("SELECT DISTINCT batch_label FROM card_meta WHERE batch<>? AND batch_label IS NOT NULL", (batch,))}
+    except Exception: return label
+    if label.strip().lower() not in used: return label
+    k = 2
+    while f"{label} ({k})".lower() in used: k += 1
+    return f"{label} ({k})"
+
 async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", allow_duplicate="", who="?", back=None, _part=False, t0=None, skip_ai=False):
     """Shared by the desktop upload (/api/jobs) and phone mode (app/phone.py). back = optional back-of-card photo bytes,
     attached to the new card after it is read (same rules as "Add back of card").
@@ -1010,7 +1062,7 @@ async def enqueue_upload(data, fname, engine="auto", batch="", batch_label="", a
     holding several cards becomes one card per card (app/formats.py). Several cards answer {"job": first, "jobs": [...]}."""
     if len(data) > MAX_BYTES: return JSONResponse({"error": "File is larger than 25 MB."}, 422)
     if not data: return JSONResponse({"error": "File is empty."}, 422)
-    batch_label = clean_batch_label(batch_label)
+    batch_label = batch_label_for(batch, clean_batch_label(batch_label))
     from starlette.concurrency import run_in_threadpool
     if not _part:
         from . import formats, reader
@@ -1573,8 +1625,10 @@ def confirm_correct(cid: CardId, request: Request, body: dict = Body(...)):
         if "value" not in body or json.dumps(body.get("value"), sort_keys=True) != json.dumps(f.get(fk), sort_keys=True):
             return JSONResponse({"error": "The saved value is different from the one you checked. Reload the card and check again.", "need": "stale"}, 409)
         g = garbled_errors({**f, "confirmed_ok": {}})
+        soft_ = k == "company" and k not in g and company_soft_hint(f)   # v0.4.1 #8 (reviewer #5): a company that only LOOKS misread can be confirmed too
+        if soft_: g = dict(g, company=soft_)
         if k not in g: return JSONResponse({"error": "Nothing to confirm: save the card first, then confirm the saved value."}, 409)
-        if k not in overridable(f): return JSONResponse({"error": "This value can't be confirmed (it looks like a formula or code). Fix it."}, 400)
+        if not soft_ and k not in overridable(f): return JSONResponse({"error": "This value can't be confirmed (it looks like a formula or code). Fix it."}, 400)
         ok = dict(f.get("confirmed_ok") or {}); val = json.dumps(f.get(fk), sort_keys=True)
         cm = dict(f.get("confirmed_meta") or {})
         if ok.get(fk) == val and fk in valid_confirmations(f): return {"ok": True, "field": fk, "already": True, "version": card_version(c)}   # replay: no duplicate audit rows
@@ -1832,6 +1886,9 @@ def _update(cid, request, body, internal=False):
         return JSONResponse({"error": f"Card #{cid} can't be merged into itself. Open the OTHER card (the duplicate) and merge it into #{cid}.", "need": "merge_self"}, 422)
     merge_tgt = store.get(int(body["merge_into"])) if body.get("merge_into") else None
     if body.get("merge_into") and not merge_tgt: return JSONResponse({"error": "Card to merge into was not found.", "need": "merge_missing"}, 422)
+    if merge_tgt:   # v0.4.1 #2 (skeptic M1): only into a listed look-alike, and only between cards the same person scanned
+        refused = merge_refusal(c, f2, merge_tgt)
+        if refused: return JSONResponse(refused, 422)
     label = ({"approved": "Approve", "rejected": "Reject", "pending": "Move to pending"}.get(st, "Edit") + f" card #{cid}")
     if merge_tgt: label = f"Merge card #{cid} into #{merge_tgt['id']}"
     elif body.get("crm_action") and not st: label = f"MC Trade choice on card #{cid}"
@@ -2071,9 +2128,10 @@ def merge_preview(cid: CardId, body: dict = Body(...)):
         pk = merge_pick(t["fields"], f, k)
         _sq = lambda v: re.sub(r"\s+|(?<=\w),(?=\s)", "", str(v or "").lower())
         _ws = lambda v: " ".join(str(v or "").replace(" ,", ",").split()).lower()
-        if pk and t["fields"].get(k) and _ws(t["fields"].get(k)) == _ws(f.get(k)): continue   # round 13: only extra spaces / capitals differ
+        if pk == "tgt" and t["fields"].get(k) and _ws(t["fields"].get(k)) == _ws(f.get(k)): continue   # round 13: only extra spaces / capitals differ
         if pk and t["fields"].get(k) and _sq(t["fields"].get(k)) == _sq(f.get(k)):   # round 14 (coordinator r6): words joined/split: shown, not hidden
-            out.append({"field": k, "target": t["fields"].get(k) or "", "this": f.get(k) or "", "keep": "tgt", "why": "spacing", "to_note": False}); continue
+            # v0.4.1 #5 (datamanager #5): the row says what the merge REALLY keeps (it said "kept: #703's" while this card's was used)
+            out.append({"field": k, "target": t["fields"].get(k) or "", "this": f.get(k) or "", "keep": pk, "why": "spacing" if pk == "tgt" else "fuller", "to_note": False}); continue
         if pk: out.append({"field": k, "target": t["fields"].get(k) or "", "this": f.get(k) or "", "keep": pk,
                            # round 13 (coordinator r5 N3): the real reason the other value wins
                            "why": "fails_check" if pk == "src" and t["fields"].get(k) and _field_flagged(t["fields"], k) else ("fuller" if pk == "src" and t["fields"].get(k) else ""),

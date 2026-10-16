@@ -27,7 +27,9 @@ async function exportInfo() {
       if (!exportInfo.picked && !keepB) {
         const nw = (a, b) => (b.started || 0) - (a.started || 0), d0 = new Date(); d0.setHours(0, 0, 0, 0);
         const today = mine.filter(b => b.own && (b.started || 0) >= d0 / 1000).sort(nw);
-        const def = today[0] || mine.filter(b => b.own).sort(nw)[0]; keepB = def ? def.batch : "__choose__"; }   // round 24: the newest batch, not an older one with ready cards
+        // v0.4.1 #7 (mctrade-admin M1): the CURRENT batch (the one on the Scan page), else your own batch from today, else "Choose a batch…"
+        const curB = S.B && bs.find(b => b.batch === S.B.id);
+        const def = curB || today[0]; keepB = def ? def.batch : "__choose__"; }
       const cur_ = bs.find(b => b.batch === keepB);
       $("#exBatch").innerHTML = (keepB === "__choose__" ? `<option value="__choose__">Choose a batch…</option>` : "") +
         (showAll ? (mine.length ? `<optgroup label="Your batches">${mine.map(opt).join("")}</optgroup>` : "") + (others.length ? `<optgroup label="Other people's batches">${others.map(opt).join("")}</optgroup>` : "") + `<option value="">All batches (everyone's)</option>`
@@ -39,8 +41,9 @@ async function exportInfo() {
       $("#exInfo").textContent = "Choose a batch."; $("#exDup").hidden = true; $$(".tile").forEach(t => t.disabled = true); loadExportHistory(); return {count: 0}; }
     if ($("#exBatch").value !== eb) { if (!exportInfo.depth) { exportInfo.depth = 1; try { return await exportInfo(); } finally { exportInfo.depth = 0; } } }   // selection changed meanwhile: check the batch actually shown
     const r = await call(`/api/export/check?status=${st}&batch=${encodeURIComponent(eb)}`);
-    $("#exInfo").innerHTML = `${r.count ? `<b>${plural(r.count, "card")}</b> will be exported.` : (!$("#exDone").hidden && $("#exDone").classList.contains("ok") && $("#exDone").dataset.batch === eb) ? "All cards in this batch are exported." : "Nothing to export yet. Approve some cards first."}` +
-      (r.flagged && r.flagged.length ? ` <span class="flag bad">${r.flagged.length === 1 ? "1 card has" : r.flagged.length + " cards have"} a warning (${r.flagged.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}). See the READ-ME.</span>` : "");   // round 23: no '1 were approved'
+    const bo_ = (exportInfo.list || []).find(b => b.batch === eb), notMine = eb === "" || (bo_ && !bo_.own);   // v0.4.1 #7: say whose batch it is, on the page
+    $("#exInfo").innerHTML = (notMine && r.count ? `<span class="flag bad" id="exOwner">${eb === "" ? "Everyone's batches." : `Batch of ${esc(bo_.owner || "someone else")}.`}</span> ` : "") + `${r.count ? `<b>${plural(r.count, "card")}</b> will be exported.` : (!$("#exDone").hidden && $("#exDone").classList.contains("ok") && $("#exDone").dataset.batch === eb) ? "All cards in this batch are exported." : "Nothing to export yet. Approve some cards first."}` +
+      (r.flagged && r.flagged.length ? ` <span class="flag bad">To check: ${r.flagged.length} (${r.flagged.slice(0, 5).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}${r.flagged.length > 5 ? " …" : ""}).</span>` : "");   // v0.4.1 #4: same count as the preview and the sheet
 
     $("#exDup").hidden = !r.duplicates.length;
     // round 7: no button per pair (part-timer/newcomer: a flood of buttons that write onto other people's cards). The pairs are
@@ -89,7 +92,7 @@ $("#exPreview").onclick = async () => {
   const q = `/api/export/xlsx?preview=1&status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`;
   try { const v = await call(q + "&view=1"), cell = x => `<td>${esc(x ?? "")}</td>`;
         if (!v || !v.rows) { toast("No preview available.", 4000); return; }
-        const tbl = (h, rows) => `<div style="overflow:auto;max-height:40vh"><table class="aidiff"><thead><tr>${h.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map(r_ => `<tr>${r_.map(cell).join("")}</tr>`).join("") || `<tr><td colspan="${h.length}">none</td></tr>`}</tbody></table></div>`;
+        const tbl = (h, rows) => `<div style="overflow:auto;max-height:40vh"><table class="aidiff pv"><thead><tr>${h.map(x => `<th scope="col">${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map(r_ => `<tr>${r_.map(cell).join("")}</tr>`).join("") || `<tr><td colspan="${h.length}">none</td></tr>`}</tbody></table></div>`;
         const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p><p><b>New profiles (${plural(v.rows.length, "row")})</b></p>` + tbl(v.headers, v.rows) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
           `<p><b>Left out / to check (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
@@ -145,7 +148,7 @@ async function tileExport(t) {
         (v.updates.length ? `<li><b>${v.updates.length}</b> update${(v.updates.length) === 1 ? "" : "s"} to existing contacts: ${esc(v.updates.map(nm).join(", "))}</li>` : "") +
         ((v.update_diff || []).length ? `<li><b>What the updates change in MC Trade</b> (an import overwrites non-blank cells and can't be undone):<div style="overflow:auto;max-height:30vh"><table class="aidiff" data-updiff="1"><thead><tr><th>Card</th><th>Profile</th><th>Field</th><th>Now in MC Trade</th><th>After import</th></tr></thead><tbody>${v.update_diff.map(u => u.fields.map(x => `<tr${x.changes ? ' class="chg"' : ""}><td><a href="#review/${u.card}">#${u.card}</a></td><td>${esc(u.profile_id)}</td><td>${esc(x.field)}</td><td>${x.old === null ? "<i>not in the contacts export: check in MC Trade</i>" : esc(x.old)}</td><td>${x.changes || x.changes === null ? "<b>" + esc(x.new) + "</b>" : esc(x.new)}</td></tr>`).join("")).join("")}</tbody></table></div></li>` : "") +
         ((v.sample_email_matches || []).length ? `<li>${v.sample_email_matches.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")} may already be in MC Trade (test list).</li>` : "") +
-        (() => { const dz = v.decisions || {}, rv = v.left.filter(x => dz[x[0]] === "review"), lo = v.left.filter(x => dz[x[0]] !== "review");   // same classification as the export + dry run
+        (() => { const dz = v.decisions || {}, rv = v.left.filter(x => dz[String(x[0])] === "review"), lo = v.left.filter(x => dz[String(x[0])] !== "review");   // same classification as the export + dry run
           return (rv.length ? `<li><b>${rv.length}</b> card${(rv.length) === 1 ? "" : "s"} to review (in neither file)${shw(rv.length, rv.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : "") +
                  (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
         (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
@@ -153,7 +156,7 @@ async function tileExport(t) {
   // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
   let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
   const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
-  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updated", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) : "";
+  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) : "";
   const r = await ask({title: "Ready to save", html: sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p></details>`,
     buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
   if (!r.value) return;

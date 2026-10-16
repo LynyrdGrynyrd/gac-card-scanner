@@ -30,7 +30,7 @@ async function openCard(id, opts = {}) {
   // round 14 (LOST SAVE): what the person typed WHILE the card was loading is kept too (it used to be read before the fetch)
   if (opts.keep && S.cur && S.cur.id === id) recomputeDirty();
   const keep = opts.keep && S.cur && S.cur.id === id && S.dirty ? dirtyVals() : null;
-  $("#rForm").inert = false; $("#rForm").classList.remove("loading"); $$("#rForm [data-ro16]").forEach(el => { el.readOnly = false; delete el.dataset.ro16; }); $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = b.getAttribute("aria-busy") === "true"); S.CARD_READY = true;   // round 17 (part-timer r16 #4): never re-enabled while it still reads "Saving…"
+  $("#rForm").inert = false; $("#rForm").classList.remove("loading"); $$("#rForm [data-ro16]").forEach(el => { el.readOnly = false; delete el.dataset.ro16; }); $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = b.getAttribute("aria-busy") === "true"); S.CARD_READY = true; if (switching) S.ENTER_AFTER = Date.now() + ENTER_PAUSE;   // round 17 (part-timer r16 #4): never re-enabled while it still reads "Saving…"
   if (!S.cur || S.cur.id !== d.id) { scrollTo(0, 0); const fm = $("#rForm"); fm.classList.remove("flip"); void fm.offsetWidth; fm.classList.add("flip"); }
   S.cur = d; const c = d.card, f = c.fields, k = f.confidence || {};
   $("#rImg").src = $("#zImg").src = "/img/" + c.image; $("#rawLink").href = "/img/" + c.image;
@@ -64,7 +64,7 @@ async function openCard(id, opts = {}) {
   $$("#fields .src").forEach(x => x.remove());
   $$("#fields input[id], #fields textarea[id]").forEach(el => { const key = el.dataset.extra || SRCK[el.id]; const sv = key && d.sources[key]; if (!sv) return;
     const [kind, by] = sv.split(":"), lab = el.closest(".f")?.querySelector("label"); if (!lab) return;
-    lab.insertAdjacentHTML("beforeend", kind === "qr" ? ' <span class="src qr" title="Read from the QR code on the card: very reliable">from QR code</span>' : kind === "ai" ? ' <span class="chg" title="Corrected by the AI check. Check the photo.">changed</span>' : kind === "back" ? ' <span class="src ocr">from the back of the card</span>' : kind === "edited" ? ` <span class="src edited">edited by ${esc(by)}</span>` : ""); });   // plain "read from text" is the default: not tagged (see #srcLegend)
+    lab.insertAdjacentHTML("beforeend", kind === "qr" ? ' <span class="src qr" title="Read from the QR code on the card: very reliable">from QR code</span>' : kind === "ai" ? ' <span class="chg src" title="Corrected by the AI check. Check the photo.">changed</span>' : kind === "back" ? ' <span class="src ocr">from the back of the card</span>' : kind === "edited" ? ` <span class="src edited">edited by ${esc(by)}</span>` : ""); });   // plain "read from text" is the default: not tagged (see #srcLegend)
   { const af = f.auto_fixed || {}, AFID = {title: "title", company: "company", emails: "emails", phones: "phones", website: "website", address: "address"};   // v0.4 #9: display only, no undo
     Object.keys(af).forEach(k => { const el = AFID[k] && document.getElementById(AFID[k]), lab = el && el.closest(".f")?.querySelector("label"), sv = String(d.sources[k] || "");
       if (!lab || sv.startsWith("edited") || sv.startsWith("ai") || lab.querySelector(".chg")) return;
@@ -72,10 +72,11 @@ async function openCard(id, opts = {}) {
       lab.insertAdjacentHTML("beforeend", ` <span class="chg src" title="${esc("Fixed automatically. Read as: " + (was || "(empty)"))}">changed</span>`); }); }
   Object.entries(d.confirmed || {}).forEach(([k, c_]) => { const el = document.getElementById(k) || $(`[data-extra="${k}"]`), lab = el && el.closest(".f")?.querySelector("label");
     if (lab) lab.insertAdjacentHTML("beforeend", ` <span class="src confirmed" title="${esc(c_.reason || "")}">✓ confirmed by ${esc(c_.by || "?")}</span>`); });   // round 23 (skeptic r22 L5)
-  showErrors(Object.keys(d.hard || {}).length ? {...(d.errors || {}), ...d.hard} : d.errors, false); confirmBtn(d.overridable, d.id);   // round 22: blocks + override visible on open
+  // v0.4.1 #5: a decided card (merged, rejected or approved) shows no red "Fix before approving" box
+  showErrors(c.status !== "pending" ? null : Object.keys(d.hard || {}).length ? {...(d.errors || {}), ...d.hard} : d.errors, false); if (c.status === "pending") confirmBtn(d.overridable, d.id);   // round 22: blocks + override visible on open
   renderDupes(d);
   { const kids = ["#rExported", "#rDupQ", "#rDupC"].map(q => $(q)); if (!kids[1].hidden && !kids[0].hidden) { kids[0].hidden = true; const sb = $("#rDupQ b"); const qs = new Set((d.dupes.queue || []).map(x => x.card_id)), nx = (d.exported_elsewhere || []).filter(x => qs.has(x.card_id)).length;   // round 22: counted from the same list as '+N'
-      const ln = $("#rDupQ > a"); if (ln && nx) { const sp = document.createElement("span"); sp.className = "small"; sp.textContent = ` · ${nx} already exported`;
+      const ln = $("#rDupQ > a"); if (ln && nx) { const sp = document.createElement("span"); sp.className = "small"; sp.textContent = ` · ${nx} already exported `;   // v0.4.1 #9: no 'exportedScanned' run-together
         (ln.nextSibling && ln.nextSibling.nodeType === 3 ? ln.nextSibling : ln).after(sp); } }
     $("#rDupBox").hidden = kids.every(k => k.hidden); }
   $("#rWarn").hidden = !f.fallback_reason; $("#rWarn").textContent = f.fallback_reason ? "Note: " + f.fallback_reason : "";
@@ -157,9 +158,10 @@ function markRisks(d) {
   const rej_ = d.status === "rejected", dupQShown = !rej_ && ((d.dupes || {}).queue || []).length, dupCShown = !rej_ && ((d.dupes || {}).crm || []).length;
   // round 23 (coordinator r22): a field that already has a red block shows no extra soft line about the same thing
   const hk = Object.keys(d.hard || {}).map(k => k === "name" ? "first_name" : k), hardF = new Set(hk.concat(hk.some(k => k === "emails" || k === "website") ? ["emails", "website"] : []));
-  const items = (d.attention || []).filter(a => !(a.field && hardF.has(a.field === "name" ? "first_name" : a.field))).filter(a => !["invalid", "hard", "dup_queue", "override", "reexport"].includes(a.code) && !(a.code === "dup_other" && dupQShown && !/rejected/.test(a.text || "")) && !(a.code === "dup_crm" && dupCShown));
+  const items = d.status !== "pending" ? [] : (d.attention || []).filter(a => !(a.field && hardF.has(a.field === "name" ? "first_name" : a.field))).filter(a => !["invalid", "hard", "dup_queue", "override", "reexport"].includes(a.code) && !(a.code === "dup_other" && dupQShown && !/rejected/.test(a.text || "")) && !(a.code === "dup_crm" && dupCShown));
   items.forEach(a => { const el = a.field && document.getElementById(FID[a.field] || a.field); const box = el && el.closest(".f"); if (!box) return;
-    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}</p>`); });
+    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}${a.code === "hint" && a.field === "company" && d.status === "pending" ? ` <button type="button" class="btn small" data-softconfirm="company">Confirm</button>` : ""}</p>`); });   // v0.4.1 #8
+  $$("#fields [data-softconfirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.softconfirm, d.id));
   const r = $("#rRisk"); r.hidden = !items.length;
   r.innerHTML = items.length ? `<b>To check (${items.length}):</b><ul>${items.map(a => `<li${a.field && FID[a.field] ? ` data-f="${esc(FID[a.field])}"` : ""}>${esc(a.text)}</li>`).join("")}</ul>` : "";
 }
@@ -178,8 +180,8 @@ $("#rForm").addEventListener("input", e => {
       const n_ = $$("#rRisk li").length, b_ = $("#rRisk b"); if (!n_) $("#rRisk").hidden = true; else if (b_) b_.textContent = `To check (${n_}):`; } }
   recomputeDirty(); clearTimeout(keepDraft.t); keepDraft.t = setTimeout(keepDraft, 400); clearTimeout(vT);
   if (S.cur) { const b = $("#rAI .flag.bad"); if (b && !S.dirty) b.remove(); }
-  if (!$$("#fields .f.err").length && $("#rErr").hidden) return;      // only re-check while problems are shown
-  vT = setTimeout(async () => { try { const r = await post("/api/validate", {fields: collect(), card_id: S.cur && S.cur.id}); showErrors({...r.errors, ...r.hard}, !$("#rErr").hidden); } catch {} }, 300); });
+  // v0.4.1 #8 (newcomer #7): typing re-checks the form, so "Morg4n" in Last name warns at once (it only re-checked while a problem showed)
+  vT = setTimeout(async () => { try { const r = await post("/api/validate", {fields: collect(), card_id: S.cur && S.cur.id}); showErrors({...r.errors, ...r.hard}, !$("#rErr").hidden); if (!recomputeDirty()) confirmBtn(r.overridable, S.cur && S.cur.id, r.hard); } catch {} }, 300); });
 function renderAI(d) {
   const s = d.ai_status, x = d.ai_detail || {}, box = $("#rAI"); clearTimeout(rPoll);
   const canAsk = d.status === "pending" && !d.image_deleted && s !== "checking";   // reviewer r7: also while waiting in line (moves it up)
@@ -290,16 +292,19 @@ function confirmBtn(ov, sid, hardNow) {
   if (!mine.length && !askAdm) return;
   const lab = k => LABEL[k === "name" ? "first_name" : k] || k;
   $("#rErr").insertAdjacentHTML("beforeend", `<p class="small conf">${mine.length ? "Photo agrees? " + mine.map((k, i) => `<button type="button" class="btn small" data-confirm="${esc(k)}"${i ? "" : ' id="bConfirmOk"'}>Confirm ${esc(lab(k))}</button>`).join(" ") : ""}${askAdm ? `${mine.length ? " " : ""}<span id="askAdmin">Card really says this? Ask an admin to confirm it.</span>` : ""}</p>`);
-  $$("#rErr [data-confirm]").forEach(b => b.onclick = async () => {
+  $$("#rErr [data-confirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.confirm, sid));
+}
+async function doConfirm(k, sid) {
+    const lab = k_ => LABEL[k_ === "name" ? "first_name" : k_] || k_;
     if (recomputeDirty()) { toast("Save first, then confirm the saved value.", 4000); return; }
-    const k = b.dataset.confirm, fk = k === "name" ? "first_name" : k, v = S.cur.card.fields[fk], vs = Array.isArray(v) ? v.join(", ") : (v || "");
+    const fk = k === "name" ? "first_name" : k, v = S.cur.card.fields[fk], vs = Array.isArray(v) ? v.join(", ") : (v || "");
     const r = await ask({title: `Confirm ${lab(k)}?`, html: `<p><b>${esc(vs)}</b></p>`, input: {label: "Why is it correct? (at least 3 letters)", placeholder: "e.g. printed like this on the card", required: "A reason is needed.", max: 300},
       check: t => (t.replace(/[\u200b-\u200d\ufeff]/g, "").match(/[\p{L}\p{N}_]/gu) || []).length < 3 ? "Write a short reason (at least 3 letters)." : /^[=+\-@]/.test(t) || /<\s*[a-z\/!]|&#|javascript:/i.test(t) ? "The reason can't contain formulas or HTML code." : null,
       buttons: [{label: "Confirm", cls: "primary", value: 1, primary: true, needInput: true}, {label: "Cancel", value: null}]});
     if (!r.value) return;
     if (!(r.input || "").trim()) { toast("A reason is needed.", 4000); return; }
     try { const r1 = await post(`/api/cards/${sid}/confirm-correct`, {field: k, value: v, version: S.cur.version, reason: r.input}); S.cur.version = r1.version || S.cur.version;
-      toast(`${lab(k)} confirmed.`, 3000, true); openCard(sid, {keep: true}); } catch (x) { toast("Not changed: " + x.message, 5000); } });
+      toast(`${lab(k)} confirmed.`, 3000, true); openCard(sid, {keep: true}); } catch (x) { toast("Not changed: " + x.message, 5000); }
 }
 // round 14 (parttimer r6): a long look-alike list shows the first 3 and a count you can expand
 const capList = (items, n = 3) => items.length <= n + 1 ? items.join("") : items.slice(0, n).join("") +
@@ -322,20 +327,23 @@ function renderDupes(d) {
   $("#rDupQ").hidden = !all.length;
   if (all.length) {
     // round 22 (datamanager r21): a STABLE merge target (no #354/#127 flipping): same tiers, then the lowest card number
-    const byId = l => [...l].sort((a, b) => a.card_id - b.card_id);
-    const o = q[0] || all[0], bestQ = [...byId(q.filter(x => x.strong)), ...byId(q.filter(x => x.same_batch && !x.strong)), ...byId(q.filter(x => !x.same_batch && !x.strong))][0] || o;
+    // v0.4.1 #2 (skeptic H2): the BEST match: same scanner and batch first, then scanned twice, then the name/email/phone score; the id only breaks ties
+    const rank = x => [x.same_user && x.same_batch ? 0 : 1, x.strong ? 0 : 1, x.same_user ? 0 : 1, -(x.match || 0), x.card_id];
+    const cmp = (a, b) => { const ra = rank(a), rb = rank(b); for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] - rb[i]; return 0; };
+    const bestQ = [...q].sort(cmp)[0] || [...all].sort(cmp)[0];
+    const canSame = !!(bestQ && bestQ.same_user);   // the server refuses a merge into another person's card
     $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : `<b>Checked:</b> marked different from ${kept.length > 3 ? plural(kept.length, "look-alike") + ": " : ""}${kept.slice(0, 3).map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}${kept.length > 3 ? ` and ${kept.length - 3} more` : ""}.`)
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
       // v0.4 #7: side by side, "Same person?", Same / Different; differences highlighted (Same = the existing merge, Different = keep both)
       : `<b>Same person?</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id}</a>${q.length > 1 ? ` and ${plural(q.length - 1, "other")}` : ""}${bestQ.strong ? ` <span class="small"><b>Scanned twice</b>: keep one.</span>` : ""}` +
         `<div class="dupgrid" id="dGrid" data-with="${bestQ.card_id}"><div class="mini"><div class="tag">This card</div></div><div class="mini"><div class="tag">#${bestQ.card_id}</div><p class="small">Loading…</p></div></div>` +
-        `<div class="btns">${q.some(x => !x.strong) ? `<button type="button" class="btn" id="dDiff">Different</button> ` : ""}<button type="button" class="btn" id="dSame" aria-label="Same person: combine with #${bestQ.card_id}">Same</button></div>` +
+        `<div class="btns">${q.some(x => !x.strong) ? `<button type="button" class="btn" id="dDiff">Different</button> ` : ""}${canSame ? `<button type="button" class="btn" id="dSame" aria-label="Same person: combine with #${bestQ.card_id}">Same</button>` : `<span class="small">Scanned by someone else.</span>`}</div>` +
         `<details class="more small"><summary>Details</summary><ul>${capList(q.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id} ${esc(x.name || "(no name)")}</a>${x.organization ? ", " + esc(x.organization) : ""} (${esc(x.status || "")}): ${esc(x.why_text || x.why.join(", "))}${x.strong ? ` <span class="small"><b>Scanned twice</b> (${x.why.includes("same photo") ? "same photo" : "same email or phone in this batch"}): keep one.</span>` : ""}</li>`))}</ul>` +
       `<div class="btns"><label for="dDecide" class="small">Decision:</label> <select id="dDecide"><option value="">Choose…</option>` +
         (() => { const opt = x => `<option value="merge:${x.card_id}">Same as #${x.card_id}${x.name ? " " + esc(x.name) : ""} – ${x.same_batch ? "this batch" : "other batch" + (x.status ? ", " + esc(x.status) : "")}</option>`;
           // round 12 (coordinator r4 #5): ALWAYS grouped under headings, and every option says which batch it is in
-          const a_ = q.filter(x => x.same_batch), b_ = q.filter(x => !x.same_batch);
+          const a_ = q.filter(x => x.same_batch && x.same_user), b_ = q.filter(x => !x.same_batch && x.same_user);   // v0.4.1 #2: never into another person's card
           // round 20 (reviewer r19): the best few only (duplicate scans first), not 25-38 options
           const best = l => [...l.filter(x => x.strong), ...l.filter(x => !x.strong)].slice(0, 4);
           return (a_.length ? `<optgroup label="── In this batch ──">${best(a_).map(opt).join("")}</optgroup>` : "") +
@@ -386,7 +394,7 @@ function renderDupes(d) {
       (d.status !== "pending" ? "" : ch ? `<p>Decision: <b>${ch === "update_existing" ? "update the existing contact" : "add as a new contact"}</b>. <button type="button" class="link" id="cChange">Change</button></p>`
           : d.dup_decided ? `<div class="btns"><button type="button" class="btn small" id="cNew">Add as new</button> <button type="button" class="link" id="cChange">Change</button></div>`   // round 22: after 'Different person' one button, not a second same/different pair
           : `<div class="btns">${d.dupes.updates_enabled ? `<button type="button" class="btn small" id="cUpd">Same person: update their MC Trade contact</button>` : ""}<button type="button" class="btn small" id="cNew">Add as new contact</button></div>` +   // v0.3.2: one 'Different person' button on the page (the look-alike box has it)
-            (d.dupes.updates_enabled ? "" : `<p class="small">Same person? Reject it and tell the data team.</p>`));
+            ""   /* v0.4.1 newcomer-v040 #2: one duplicate question only (Same/Different above) */);
     const set = (v, msg) => e => act(e.currentTarget, {crm_action: v}, msg + (v === "create_new" && m.why.includes("email exact") && !m.sample ? " It is exported as a new row and listed in the READ-ME (same email as MC Trade number " + m.profile_id + ")." : v === "update_existing" && m.sample ? " (Sample data: it will be listed for checking in MC Trade, not exported.)" : ""));
     $("#cUpd") && ($("#cUpd").onclick = set("update_existing", "Will update the existing MC Trade contact."));
     $("#cNew") && ($("#cNew").onclick = set("create_new", "Will be added as a new contact."));
@@ -434,6 +442,8 @@ async function decide_(status, btn) {
     if (!await waitSaveIdle()) { await ask({title: "Not saved", html: "<p>The last save is still running. Your edits are still here. Save again in a moment.</p>", buttons: [{label: "OK", cls: "primary", value: 1, primary: true}]}); return; }
     if (!S.cur || S.cur.id !== sid) { toast(`Not saved: you moved from card #${sid} to another card.`, 6000); return; }
   }
+  // v0.4.1 #5: the duplicate question is asked ONCE, in the Same/Different box (Approve doesn't ask it again in a dialog)
+  if (status === "approved" && sameOpen()) { toast("Same person? Answer Same or Different first.", 4000); $("#rDupQ").scrollIntoView({block: "center"}); return; }
   const sent = formSnap();
   const body = {fields: collect(), status, reviewer: who(), note: $("#note").value, card_id: sid, version: S.cur.version};
   // round 13 (part-timer r5): the AI status on screen can be out of date (queued or started after the page loaded): ask the
@@ -460,18 +470,29 @@ async function decide_(status, btn) {
   // round 23 (newcomer r22): a choice already made on the card (or 'Different person' when adding as new is the only choice) is sent, so it is not asked again
   if (status === "approved" && S.cur.dupes && !body.crm_action) { if (S.cur.dupes.crm_action) body.crm_action = S.cur.dupes.crm_action; else if (S.cur.dup_decided && (S.cur.dupes.crm || []).length && !S.cur.dupes.updates_enabled) body.crm_action = "create_new"; }
   const aiBusy = (status === "approved" || status === "rejected") && ["queued", "checking"].includes(aiWas) && S.cur.status === "pending";
+  // v0.4.1 #6 (reviewer #1): Reject (button or R) asks first; unsaved edits, the note too, are saved with it, never dropped
+  if (status === "rejected" && !aiBusy) {
+    recomputeDirty(); const ed = [...dirtyIds].map(i => LABEL[i.replace(/^x_/, "")] || (i === "note" ? "Note" : i.replace(/^x_/, "")));
+    const rr = await ask({title: `Reject card #${sid}?`, html: ed.length ? `<p>Your edits (${esc(ed.join(", "))}) are saved with it.</p>` : "",
+      buttons: [{label: "Reject", cls: "danger", value: 1}, {label: "Cancel", cls: "primary", value: null, primary: true, focus: true}]});
+    if (!rr.value) { dlgStopped(rr); return; }
+    if (!S.cur || S.cur.id !== sid) return;
+  }
   if (aiBusy || (status === "approved" && xe0.length && !body.confirm_cross_batch)) {
     const bits = [];
     if (aiBusy) bits.push(`<p>${aiWas === "queued" ? "AI check not done yet. Deciding now <b>cancels</b> it." : "AI still checking. Its suggestions appear later, for information."}</p>`);
-    if (status === "approved" && xe0.length) bits.push(`<p>This person was exported before (${xe0.slice(0, 3).map(x => "#" + x.card_id).join(", ")}). Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
+    if (status === "approved" && xe0.length) bits.push(`<p>Exported before (${xe0.slice(0, 3).map(x => "#" + x.card_id).join(", ")}${xe0.length > 3 ? ` and ${xe0.length - 3} more` : ""}). Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const r0 = await ask({title: status === "rejected" ? "Reject before the AI check?" : aiBusy && xe0.length ? "Before you approve" : aiBusy ? "The AI check hasn't finished" : "Same person already exported?", html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
-      buttons: [{label: status === "approved" ? (xe0.length ? "Approve it anyway" : "Approve now") : "Reject now", cls: "primary", value: 1, primary: true}, {label: aiBusy ? "Wait for the AI" : "Cancel", value: null}]});
+      // v0.4.1 #1: when this person was exported before, Cancel is the default (Enter or a held key never approves through it)
+      buttons: xe0.length && status === "approved" ? [{label: "Approve anyway", value: 1}, {label: aiBusy ? "Wait for the AI" : "Cancel", cls: "primary", value: null, primary: true, focus: true}]
+        : [{label: status === "approved" ? "Approve now" : "Reject now", cls: "primary", value: 1, primary: true}, {label: aiBusy ? "Wait for the AI" : "Cancel", value: null}]});
     if (!r0.value) { dlgStopped(r0); return; }
     if (needWhy) { if (!(r0.input || "").trim()) { toast("A reason is needed to approve anyway.", 4000); return; } body.override_reason = r0.input; }
-    if (xe0.length && status === "approved") body.confirm_cross_batch = true;
+    if (xe0.length && status === "approved") { body.confirm_cross_batch = true;
+      if ((S.cur.dupes.crm || []).length && !S.cur.dupes.updates_enabled && !body.crm_action) body.crm_action = "create_new"; }   // v0.4.1 #5: no second "Already in MC Trade?" question
     clearTimeout(rPoll);
     try { const fr = await call("/api/cards/" + sid); if (JSON.stringify([fr.card.fields, fr.card.status, fr.card.note || ""]) === JSON.stringify([S.cur.card.fields, S.cur.card.status, S.cur.card.note || ""])) body.version = fr.version; } catch {}
   }
@@ -506,7 +527,7 @@ async function decide_(status, btn) {
           const sp = saved.save_problems || {};
           toast(saved.notice || (status === "pending" ? `Card #${sid} moved back to pending.` : Object.keys(sp).length ? "Saved, but it can't be approved yet: " + Object.values(sp).join(" ") : "Changes saved."), saved.notice || Object.keys(sp).length ? 7000 : 4500, true);
           if (S.cur && S.cur.id === sid && location.hash === "#review/" + sid) await openCard(sid, {keep: true});   // round 12; round 14: keep typing done during the save: never pull the view back to a card the person already left
-          if (Object.keys(sp).length) { showErrors(sp, true); const first = $("#fields .f.err input, #fields .f.err textarea"); first && first.focus(); }   // reviewer r7
+          if (Object.keys(sp).length) { showErrors(sp, true); if (S.cur && S.cur.id === sid) confirmBtn(S.cur.overridable, sid, S.cur.hard); /* v0.4.1 #8: the Confirm buttons stay after Save */ const first = $("#fields .f.err input, #fields .f.err textarea"); first && first.focus(); }   // reviewer r7
         }
         return;
       } catch (e) {
@@ -527,7 +548,7 @@ async function decide_(status, btn) {
         }
         if (need === "confirm_cross_batch") {
           const r = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(e.message)}</p>` + ((e.data.others || []).length > 1 ? `<p>Open: ${e.data.others.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}</p>` : "") + `<p class="small">“Approve this one too” doesn't change the other cards.</p>`,
-            buttons: [{label: (e.data.others || []).length > 1 ? `Open the first of these ${e.data.others.length} cards` : "Open that card", value: "open"}, {label: "Different person (or a deliberate update): approve this one too", cls: "primary", value: "go", primary: true}, {label: "Cancel", value: null}]});
+            buttons: [{label: (e.data.others || []).length > 1 ? `Open the first of these ${e.data.others.length} cards` : "Open that card", value: "open"}, {label: "Different person: approve this one too", value: "go"}, {label: "Cancel", cls: "primary", value: null, primary: true, focus: true}]});
           if (r.value === "open") { location.hash = "review/" + e.data.other; return; }
           if (!r.value) { dlgStopped(r); return; } body.confirm_cross_batch = true; continue;
         }
@@ -606,17 +627,24 @@ $("#zoom").onclick = $("#rImg").onclick = () => $("#zoomDlg").showModal();
 // the card loaded and pending, and focus not on a button/link/textarea (those keep their own Enter). The server still validates.
 function enterOk(e) {
   const a = document.activeElement, t = a && a.tagName;
+  if (e.repeat || !ENTER_ARMED || Date.now() < S.ENTER_AFTER) return false;   // v0.4.1 #1: no key repeat, a key-up between approvals, a pause after the next card loads
   if (document.querySelector("dialog[open]") || S.dirty || recomputeDirty() || S.SAVING || !S.CARD_READY || !S.cur || S.cur.status !== "pending") return false;
-  if (/^(BUTTON|A|TEXTAREA|SELECT|SUMMARY)$/.test(t) || (a && a.isContentEditable)) return false;
+  if (/^(BUTTON|A|TEXTAREA|SELECT|SUMMARY|INPUT)$/.test(t) || (a && a.isContentEditable)) return false;   // v0.4.1 #1: never while focus is in a field
+  if (sameOpen()) return false;   // v0.4.1 #1: Same/Different not answered yet
   if (!$("#rErr").hidden || $$("#fields .f.err").length || $("#bApprove").hidden || $("#bApprove").disabled) return false;
   return !e.shiftKey && !e.isComposing;
 }
+const sameOpen = () => { const q = $("#rDupQ"); return !!(q && !q.hidden && q.querySelector("#dSame, #dDiff")); };
+let ENTER_ARMED = true; S.ENTER_AFTER = 0;
+const ENTER_PAUSE = 600;
+document.addEventListener("keyup", e => { if (e.key === "Enter" || e.key.toLowerCase() === "a") ENTER_ARMED = true; });
 document.addEventListener("keydown", e => {
   if ($("#v-review").hidden || document.querySelector("dialog[open]")) return;
   if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    const inField = /^(INPUT)$/.test(document.activeElement.tagName);
-    if (enterOk(e)) { e.preventDefault(); decide("approved", $("#bApprove")); }
-    else if (inField && S.dirty) { e.preventDefault(); toast("Unsaved edits: use Approve or Save.", 3000); }
+    const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (enterOk(e)) { e.preventDefault(); ENTER_ARMED = false; decide("approved", $("#bApprove")); }
+    else if (!e.repeat && inField && document.activeElement.tagName === "INPUT") { e.preventDefault(); toast(S.dirty ? "Unsaved. Save first." : "Esc, then Enter to approve.", 3000); }
+    else if (!e.repeat && !inField && sameOpen() && !document.querySelector("dialog[open]")) toast("Same person? Answer Same or Different first.", 3000);
     return;
   }
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { e.preventDefault(); doUndo(); return; }
@@ -625,7 +653,9 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { zoomReset(); return; }
   if (e.key === "ArrowRight" || e.key === "ArrowLeft") { if (S.dirty) { toast("Save or discard your edits first.", 3000); return; } e.preventDefault(); step(e.key === "ArrowRight" ? 1 : -1); return; }
   const k = e.key.toLowerCase();
-  if (k === "a") decide("approved", $("#bApprove")); else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
+  if (e.repeat) { e.preventDefault(); return; }   // v0.4.1 #1: a held key acts once
+  if (k === "a" && (!ENTER_ARMED || Date.now() < S.ENTER_AFTER || sameOpen())) { e.preventDefault(); if (sameOpen()) toast("Same person? Answer Same or Different first.", 3000); return; }
+  if (k === "a") { ENTER_ARMED = false; decide("approved", $("#bApprove")); } else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
   e.preventDefault();
 });
 export {dirtyVals, openCard};
