@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.2 (2026-10-15)
+
+### Plainer screens (from the newcomer test of 0.3.1)
+- **Duplicate / MC Trade box:** one line ("Matches #9 Maria Delgado and 49 others", "Maybe in MC Trade: Maria Delgado (same email, same phone)"), details behind More, and only one **Different person** button on the card. "Merge", "+49", square brackets and "Profile ID" are gone from the box.
+- **Export sign-off:** Format, Cards and Batch on separate lines; "new contacts" instead of "new-profile rows"; "may already be in MC Trade (test list)".
+- **Fix:** right after an export the page said "Nothing to export yet. Approve some cards first."; it now says "All cards in this batch are exported."
+- The "test 2 rows first" advice shows only when there are more than 2 rows. Export history rows are short: Excel · batch, then Download · READ-ME · Extra details.
+- **READ-ME:** shorter and plain. Empty and zero lines are left out, each card gets one warning line, the columns note is said once, and the phone format moved to the Admin guide.
+- **Labels:** sign-in says just "Card Scanner"; "Skip AI" is now **More → Skip the AI double-check**; "Reading method" is "Scan quality"; "Read quality" is "Scan"; the queue badge says "4 waiting in your batches"; the review page shows the shortcut keys (A, R, J, K, U) without opening anything.
+
 ## v0.3.1 (2026-10-15)
 
 ### Accuracy on real cards, reading fixes, more tests
