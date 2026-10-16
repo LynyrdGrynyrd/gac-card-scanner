@@ -54,6 +54,10 @@ def locate(f, lines):
         d = re.sub(r"\D", "", str(num or ""))
         if len(d) < 6: continue
         # digits only: the printed line carries a label ("T", "Tel.") and other separators than the stored number
-        best = max(((SequenceMatcher(None, d[-9:], re.sub(r"\D", "", l["text"])).ratio(), l) for l in lines if re.search(r"\d{3}", l["text"])), default=(0, None), key=lambda x: x[0])
-        if best[0] >= 0.8: out[f"phones.{i}"] = best[1]["box"]
+        tail = d[-7:]; cands = [l for l in lines if re.search(r"\d{3}", l["text"])]
+        # the number's last 7 digits printed on the line beats any fuzzy match (a fax or second phone shares the area code)
+        exact = [l for l in cands if tail in re.sub(r"\D", "", l["text"])]
+        if exact: out[f"phones.{i}"] = min(exact, key=lambda l: len(re.sub(r"\D", "", l["text"])))["box"]; continue
+        best = max(((SequenceMatcher(None, d[-9:], re.sub(r"\D", "", l["text"])).ratio(), l) for l in cands), default=(0, None), key=lambda x: x[0])
+        if best[0] >= 0.85: out[f"phones.{i}"] = best[1]["box"]
     return out
