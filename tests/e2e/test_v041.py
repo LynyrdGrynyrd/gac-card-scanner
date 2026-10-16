@@ -1,5 +1,6 @@
 """v0.4.1: Enter safety (held key, key-up, field focus), Reject asks and keeps the note, layout at 1280 px, names and
 tap targets. Made-up cards only."""
+import os
 import re
 from playwright.sync_api import expect
 from test_flows import answer_dialogs, card_json, scan, signed_in_admin, wait_card
@@ -22,7 +23,7 @@ FRESH = """() => (document.activeElement || document.body).dispatchEvent(new Key
 
 def test_held_enter_approves_one_card_only(new_page):
     page = signed_in_admin(new_page)
-    scan(page, "hard3_lowres_italic.jpg", "real1_cwru.jpg", batch="E2E v041 enter")
+    scan(page, "hard3_lowres_italic.jpg", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "synth2", "s2_02_right_light.jpg"), batch="E2E v041 enter")
     ids = _ids(page); page.locator("#qBody a[href^='#review/']").first.click(); wait_card(page, ids[0])
     page.wait_for_timeout(700)
     first = card_json(page, ids[0]); clean = not first.get("hard") and not (first.get("dupes") or {}).get("queue")
