@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.0 (2026-10-16)
+
+### Calmer, faster review (Apple-style screens)
+- **Tap a field to zoom:** clicking or tabbing into a field zooms the photo to where it was read. Esc shows the whole photo. When the place isn't known, the whole photo stays.
+- **Review card:** photo left, fields right, one big **Approve** and **Skip**. Save, Reject, Delete, the AI check, the text read and the history are under **More**. Approve stays in view on long cards.
+- **Shaky fields** get a soft yellow highlight and a short "Check" tag instead of a banner. The rules that block approval are unchanged.
+- **Keys:** Enter approves, Tab goes to the next field, ←/→ change card, Ctrl+Z / ⌘Z undoes. Enter never approves while a dialog is open, while there are unsaved edits, or while an error shows.
+- **Export:** one Export button (format under Format), then a "Ready to save" sheet with New contacts / Updated / To check, counted by the same server check as the export.
+- **Scan:** one big drop area and one Scan button; batch name, folder, phone and the AI option are under More.
+- **Duplicates:** "Same person?" with both cards side by side, differences highlighted, and Same / Different.
+- **Light and dark** follow the computer's setting; the ◐ button in the header switches. Colours checked for 4.5:1 contrast.
+- **Changed mark:** fields the automatic clean-up or the AI check changed show "changed" (hover to see what was read). No undo yet.
+- Gentle motion between cards and for dialogs; none when the computer asks for reduced motion.
+
 ## v0.3.2 (2026-10-15)
 
 ### Plainer screens (from the newcomer test of 0.3.1)
