@@ -11,13 +11,13 @@ def test_export_page_after_export_says_all_exported():
 
 def test_dup_box_one_different_person_button_and_plain_words():
     js = rd("views", "review.js")
-    assert js.count(">Different person<") == 1 and "Different person: add as new contact</button>" not in js
+    assert js.count('id="dDiff">Different<') == 1 and "Different person: add as new contact</button>" not in js   # v0.4 #7: Same / Different
     assert "(merge into #" not in js and "SAMPLE data:</b>" not in js and "Updating existing contacts is off" not in js
     assert "+${q.length - 1}" not in js
 
 def test_labels():
     idx = rd("index.html")
     assert ">Read quality<" not in idx and "Reading method" not in idx and "> Skip AI</label>" not in idx
-    assert "<summary>Keys: <kbd>A</kbd>" in idx
+    assert '<kbd>↵</kbd> Approve' in idx and '<kbd>←</kbd><kbd>→</kbd> Card' in idx   # v0.4 #4: visible key hints
     assert "internal pilot" not in rd("login.html")
     assert "pending from everyone" not in rd("header.js")
