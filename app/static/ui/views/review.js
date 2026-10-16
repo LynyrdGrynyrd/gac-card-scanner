@@ -47,7 +47,7 @@ async function openCard(id, opts = {}) {
     el.hidden = !xe.length || c.status !== "pending";
     if (xe.length) el.innerHTML = `<b>Already exported:</b> ${plural(xe.length, "card")} in another batch. Merge it, or approve only if it's an update. ` +
       `<details class="more small"><summary>Show ${xe.length}</summary><ul>${xe.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id}</a> (${esc(x.why.join(", "))}; exported ${x.times}×)</li>`).join("")}</ul></details>`; }
-  $("#rConf").innerHTML = "Read quality " + confBar(d.conf ?? f.overall_confidence, d.status === "pending" && Object.keys(d.hard || {}).length > 0);   // newcomer r9 N5: same number as the queue
+  $("#rConf").innerHTML = "Scan " + confBar(d.conf ?? f.overall_confidence, d.status === "pending" && Object.keys(d.hard || {}).length > 0);   // newcomer r9 N5: same number as the queue
   ["first_name", "last_name", "title", "company", "website", "address"].forEach(x => $("#" + x).value = f[x] || "");
   $("#emails").value = (f.emails || []).join(", "); $("#social").value = (f.social || []).join(" ");
   $("#phones").value = (f.phones || []).map(p => `${p.type}: ${p.number}`).join("\n"); $("#note").value = c.note || "";
@@ -307,25 +307,25 @@ function renderDupes(d) {
     // round 22 (datamanager r21): a STABLE merge target (no #354/#127 flipping): same tiers, then the lowest card number
     const byId = l => [...l].sort((a, b) => a.card_id - b.card_id);
     const o = q[0] || all[0], bestQ = [...byId(q.filter(x => x.strong)), ...byId(q.filter(x => x.same_batch && !x.strong)), ...byId(q.filter(x => !x.same_batch && !x.strong))][0] || o;
-    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Seen before:</b> similar to ${plural(all.length, "other card")}.` : `<b>Checked:</b> marked as a different person from ${kept.length > 3 ? plural(kept.length, "card") + ": " : "card" + (kept.length > 1 ? "s " : " ")}${kept.slice(0, 3).map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}${kept.length > 3 ? ` and ${kept.length - 3} more` : ""}.`)
+    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : `<b>Checked:</b> marked different from ${kept.length > 3 ? plural(kept.length, "look-alike") + ": " : ""}${kept.slice(0, 3).map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}${kept.length > 3 ? ` and ${kept.length - 3} more` : ""}.`)
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
-      : `<b>Seen before:</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id} ${esc(bestQ.name || "(no name)")}</a>${q.length > 1 ? ` +${q.length - 1}` : ""}${bestQ.strong ? ` <span class="small"><b>Duplicate scan</b>: merge or reject one.</span>` : ""}` +
-        `<div class="btns"><button type="button" class="btn small" id="dSame">Same person (merge into #${bestQ.card_id})</button>${q.some(x => !x.strong) ? ` <button type="button" class="btn small" id="dDiff">Different person</button>` : ""}</div>` +
-        `<details class="more small"><summary>Details</summary><ul>${capList(q.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id} ${esc(x.name || "(no name)")}</a>${x.organization ? ", " + esc(x.organization) : ""} (${esc(x.status || "")}): ${esc(x.why_text || x.why.join(", "))}${x.strong ? ` <span class="small"><b>Duplicate scan</b> (${x.why.includes("same photo") ? "same photo" : "same email/phone in the same batch"}): merge or reject one of them.</span>` : ""}</li>`))}</ul>` +
+      : `<b>Matches</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id} ${esc(bestQ.name || "(no name)")}</a>${q.length > 1 ? ` and ${plural(q.length - 1, "other")}` : ""}${bestQ.strong ? ` <span class="small"><b>Scanned twice</b>: keep one.</span>` : ""}` +
+        `<div class="btns"><button type="button" class="btn small" id="dSame">Same person – combine with #${bestQ.card_id}</button>${q.some(x => !x.strong) ? ` <button type="button" class="btn small" id="dDiff">Different person</button>` : ""}</div>` +
+        `<details class="more small"><summary>Details</summary><ul>${capList(q.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id} ${esc(x.name || "(no name)")}</a>${x.organization ? ", " + esc(x.organization) : ""} (${esc(x.status || "")}): ${esc(x.why_text || x.why.join(", "))}${x.strong ? ` <span class="small"><b>Scanned twice</b> (${x.why.includes("same photo") ? "same photo" : "same email or phone in this batch"}): keep one.</span>` : ""}</li>`))}</ul>` +
       `<div class="btns"><label for="dDecide" class="small">Decision:</label> <select id="dDecide"><option value="">Choose…</option>` +
-        (() => { const opt = x => `<option value="merge:${x.card_id}">Same person as #${x.card_id}${x.name ? " (" + esc(x.name) + ")" : ""} [${x.same_batch ? "this batch" : "other batch" + (x.status ? ", " + esc(x.status) : "")}]: merge into #${x.card_id}</option>`;
+        (() => { const opt = x => `<option value="merge:${x.card_id}">Same as #${x.card_id}${x.name ? " " + esc(x.name) : ""} – ${x.same_batch ? "this batch" : "other batch" + (x.status ? ", " + esc(x.status) : "")}</option>`;
           // round 12 (coordinator r4 #5): ALWAYS grouped under headings, and every option says which batch it is in
           const a_ = q.filter(x => x.same_batch), b_ = q.filter(x => !x.same_batch);
           // round 20 (reviewer r19): the best few only (duplicate scans first), not 25-38 options
           const best = l => [...l.filter(x => x.strong), ...l.filter(x => !x.strong)].slice(0, 4);
           return (a_.length ? `<optgroup label="── In this batch ──">${best(a_).map(opt).join("")}</optgroup>` : "") +
                  (b_.length ? `<optgroup label="── Earlier batches ──">${best(b_).map(opt).join("")}</optgroup>` : ""); })() +
-        (q.some(x => !x.strong) ? `<optgroup label="── Not the same person ──"><option value="keep">Different person from ${q.filter(x => !x.strong).length === 1 ? "#" + q.find(x => !x.strong).card_id : (q.some(x => x.strong) ? "the other " : "all ") + q.filter(x => !x.strong).length + " listed cards"}${q.some(x => x.strong) ? ` (all ${q.length} except the ${plural(q.filter(x => x.strong).length, "duplicate scan")})` : ""}: keep both</option></optgroup>` : "") +
+        (q.some(x => !x.strong) ? `<optgroup label="── Not the same person ──"><option value="keep">Different person – keep both${q.filter(x => !x.strong).length > 1 ? ` (${q.filter(x => !x.strong).length} cards${q.some(x => x.strong) ? ", not the ones scanned twice" : ""})` : ""}</option></optgroup>` : "") +
         `</select> <button type="button" class="btn small" id="dApply" disabled>Save decision</button></div></details>` +
-      `<details class="more small"><summary>More</summary>Merging adds this card's new details to the other card and removes this card. Where both have a value, the other card's is kept, so some values can be dropped.` +
+      `<details class="more small"><summary>More</summary>Combining adds this card's new details to #${bestQ.card_id} and removes this card. Where both have a value, #${bestQ.card_id}'s is kept.` +
       (q.some(x => !x.blocking) ? ` Other batches don't block approval.` : "") + `</details>` +
-      (kept.length ? `<p class="small">Already marked as different people: ${kept.map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}.</p>` : "") +
+      (kept.length ? `<p class="small">Marked different: ${kept.map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}.</p>` : "") +
       `<span id="dMerge" hidden></span>`;
     const doMerge = async (btn, tid) => {   // round 7: preview what merging does (no silent drop); round 8: same pick rule as the server
       const sid = S.cur.id; if (tid === sid) { toast("A card can't be merged into itself.", 5000); return; }
@@ -361,13 +361,13 @@ function renderDupes(d) {
   $("#rDupC").hidden = !crm.length;
   if (crm.length) {
     const m = crm[0], ch = d.dupes.crm_action;
-    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "May already be in MC Trade:"}</b> <b>${esc(m.name)}</b>, ${esc(m.organization)} (profile #${esc(m.profile_id)}): ${esc(m.why_text)}.
-      ${m.sample ? `<p class="small"><b>SAMPLE data:</b> test contacts, not GAC's real MC Trade list. No Profile ID is used.</p>` : `<p class="small">Checked against GAC's uploaded MC Trade contacts export.</p>`}` +
+    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "Maybe in MC Trade:"}</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test MC Trade list</span>` : ""}` +
+      `<details class="more small"><summary>More</summary>${esc(m.name)}, ${esc(m.organization)}, MC Trade number ${esc(m.profile_id)}. ${m.sample ? "These are test contacts, not GAC's real MC Trade list, so nothing is matched to a real contact." : "Checked against GAC's MC Trade contacts."}</details>` +
       (d.status !== "pending" ? "" : ch ? `<p>Decision: <b>${ch === "update_existing" ? "update the existing contact" : "add as a new contact"}</b>. <button type="button" class="link" id="cChange">Change</button></p>`
-          : d.dup_decided ? `<div class="btns"><button type="button" class="btn small" id="cNew">Add as new contact</button> <button type="button" class="link" id="cChange">Other choice</button></div>`   // round 22: after 'Different person' one button, not a second same/different pair
-          : `<div class="btns">${d.dupes.updates_enabled ? `<button type="button" class="btn small" id="cUpd">Same person: update their existing MC Trade contact</button>` : ""}<button type="button" class="btn small" id="cNew">Different person: add as new contact</button></div>` +
-            (d.dupes.updates_enabled ? "" : `<p class="small">Updating existing contacts is off. If it's the same person, reject or leave pending and tell the data team.</p>`));
-    const set = (v, msg) => e => act(e.currentTarget, {crm_action: v}, msg + (v === "create_new" && m.why.includes("email exact") && !m.sample ? " It is exported as a new row and listed under 'possible existing member' in the READ-ME (same email as profile #" + m.profile_id + ")." : v === "update_existing" && m.sample ? " (Sample data: it will be listed for checking in MC Trade, not exported.)" : ""));
+          : d.dup_decided ? `<div class="btns"><button type="button" class="btn small" id="cNew">Add as new</button> <button type="button" class="link" id="cChange">Change</button></div>`   // round 22: after 'Different person' one button, not a second same/different pair
+          : `<div class="btns">${d.dupes.updates_enabled ? `<button type="button" class="btn small" id="cUpd">Same person: update their MC Trade contact</button>` : ""}<button type="button" class="btn small" id="cNew">Add as new contact</button></div>` +   // v0.3.2: one 'Different person' button on the page (the look-alike box has it)
+            (d.dupes.updates_enabled ? "" : `<p class="small">Same person? Reject it and tell the data team.</p>`));
+    const set = (v, msg) => e => act(e.currentTarget, {crm_action: v}, msg + (v === "create_new" && m.why.includes("email exact") && !m.sample ? " It is exported as a new row and listed in the READ-ME (same email as MC Trade number " + m.profile_id + ")." : v === "update_existing" && m.sample ? " (Sample data: it will be listed for checking in MC Trade, not exported.)" : ""));
     $("#cUpd") && ($("#cUpd").onclick = set("update_existing", "Will update the existing MC Trade contact."));
     $("#cNew") && ($("#cNew").onclick = set("create_new", "Will be added as a new contact."));
     $("#cChange") && ($("#cChange").onclick = () => { ($("#rDupC").querySelector(".btns") || $("#rDupC").querySelector("p:last-child")).outerHTML = `<div class="btns"><button type="button" class="btn small" id="cUpd">Update existing contact</button><button type="button" class="btn small" id="cNew">Add as new contact</button></div>`;
@@ -537,8 +537,8 @@ async function decide_(status, btn) {
           $("#rDupQ").scrollIntoView({block: "center"}); return;
         }
         if (need === "crm_choice") {
-          const r = await ask({title: "Already in MC Trade?", html: `<p><b>${esc(e.data.match.name)}</b>, ${esc(e.data.match.organization)} looks like this person (${esc(e.data.match.why_text || "")}).</p>` + (e.data.match.sample ? `<p class="small"><b>SAMPLE data:</b> test contacts only. The card is exported as a <b>new</b> profile.</p>` : ""),
-            buttons: [...(S.cur.dupes.updates_enabled ? [{label: "Same person: update their contact", cls: "primary", value: "update_existing", primary: true}] : []), {label: "Different person: add as new", value: "create_new", ...(S.cur.dupes.updates_enabled ? {} : {cls: "primary", primary: true})}, {label: "Cancel", value: null}]});
+          const r = await ask({title: "Already in MC Trade?", html: `<p><b>${esc(e.data.match.name)}</b>, ${esc(e.data.match.organization)} looks like this person (${esc(e.data.match.why_text || "")}).</p>` + (e.data.match.sample ? `<p class="small">Test MC Trade list: the card is exported as a <b>new</b> contact.</p>` : ""),
+            buttons: [...(S.cur.dupes.updates_enabled ? [{label: "Same person: update their contact", cls: "primary", value: "update_existing", primary: true}] : []), {label: "Add as new contact", value: "create_new", ...(S.cur.dupes.updates_enabled ? {} : {cls: "primary", primary: true})}, {label: "Cancel", value: null}]});
           if (!r.value) { dlgStopped(r); return; } body.crm_action = r.value; continue;
         }
         // round 13 (part-timer r5): never fail silently: say why in a dialog, not only a short toast

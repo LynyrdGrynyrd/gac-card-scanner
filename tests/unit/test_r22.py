@@ -67,7 +67,7 @@ def test_readme_totals_match_dry_run(env):
     _, _, _, comp, summ = ui.build_export("xlsx", sel, {c["id"]: ui.meta(c["id"]) for c in sel}, "approved", "AA", "Tot22", preview=True)
     rd = comp["readme.txt"].decode(); cnt = summ["counts"]
     assert ui.readme_totals(cnt) in rd and cnt[MX.NEW] == 2
-    assert "CROSS-BATCH lines below" not in rd and "Overrides: none." in rd
+    assert "CROSS-BATCH lines below" not in rd and "Overrides" not in rd
 
 def test_domain_checks():
     assert "emails" in H(emails=["bhollis@firestoneparkhardwexample.com"])   # no website: still caught

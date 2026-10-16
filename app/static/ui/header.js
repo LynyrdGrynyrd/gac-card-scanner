@@ -54,7 +54,7 @@ async function refreshCounts() {
     const rd = S.B && S.B.uid === (S.ME && S.ME.id) ? S.B.rows.filter(r => ["wait", "up", "queued", "reading"].includes(r.state)).length : 0;
     const pb = $("#pendingBadge"); pb.hidden = !c.mine_pending && !rd;
     pb.textContent = String(c.mine_pending) + (rd ? ` +${rd}` : "");
-    const lbl = `${c.mine_pending} pending in your batches (the batches you scanned; ${c.everyone_pending} pending from everyone)` + (rd ? `; ${rd} more of yours still being read` : "");
+    const lbl = `${c.mine_pending} waiting in your batches` + (rd ? `, ${rd} still being read` : "");
     pb.setAttribute("aria-label", lbl); pb.title = lbl;
     if ($("#v-queue").hidden) $$("#statusTabs button span").forEach(x => x.textContent = "");
     return c;

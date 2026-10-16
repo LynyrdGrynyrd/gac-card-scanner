@@ -240,50 +240,49 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         cnt_ = mx.counts(res["decisions"])   # round 22 (mctrade-admin r21 H1): ONE source for every count (README, sign-off, dry run)
         conf_ = [(c["id"], ln) for c in sel for ln in U.confirmed_lines(c["fields"])]
         ovr_ = [c["id"] for c in sel if U._ov(metas.get(c["id"]) or {})]
+        # v0.3.2 (newcomer v0.3.1): short and plain; empty/zero lines left out; ONE warning line per card
+        _warn = {}
+        for i in _smp: _warn.setdefault(i, []).append("may already be in MC Trade (test list)")
+        for i in res["possible"]:
+            if i not in _smp: _warn.setdefault(i, []).append("may already be in MC Trade")
+        for i in xb_ids: _warn.setdefault(i, []).append("may match someone approved in another batch")
+        _wl = [f"Check #{i}: {' and '.join(v)}." for i, v in sorted(_warn.items())]
+        _has_web = any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h)
         readme = "\n".join([
             *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
-            # round 22: the 5 lines that matter come first
-            "GAC Card Scanner: MC Trade import file (internal pilot)",
+            "GAC Card Scanner: MC Trade import file",
             readme_totals(cnt_),
-            "Before you import: read the lines below that start with “Check”, " + ("import this 1 row as a test first" if len(rows) + len(upd) == 1 else "import 2 rows first") + " (an import can't be undone)"
-            + (", and import new profiles and updates separately." if upd else "."),
-            (f"Overrides: {len(conf_)} confirmed, {len(ovr_)} approved anyway (see the Check column in the CSV)." if conf_ or ovr_ else "Overrides: none."),
-            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the companion CSV and this READ-ME (not for import).",
+            "Before importing: read the “Check” lines. An import can't be undone." + (" Test 2 rows first." if len(rows) + len(upd) > 2 else "")
+            + (" Import new contacts and updates separately." if upd else ""),
+            f"Created {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
+            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the CSV and this READ-ME (not for import).",
             *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
             (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
-            ("MC Trade contacts compared against: " + cinfo["source"] + "." if cinfo["real"] else
-             "Test data: no real MC Trade contacts file is loaded, so no Profile IDs were assigned."),
-            f"Created {_when(time.time())} by {who}; {len(rows)} new-profile {U._s(len(rows), 'row')} and {len(upd)} update {U._s(len(upd), 'row')} from {len(sel)} {U._s(len(sel), 'card')}, filter = {FILTERS.get(status, status)}" + (f", batch {batch_label}" if batch_label else "") + ".",
-            f"New profiles: {rfn} (one sheet; " + ("columns from GAC's template" if tpl_real else "the scanner's default column names, not checked against MC Trade") + ").",
-            (f"Updates of existing MC Trade profiles: {comp_name(rfn, '-UPDATES.xlsx')} ({len(upd)} {U._s(len(upd), 'row')}, with ProfileID). "
-             "MemberSince is left BLANK in update rows, so it can't overwrite a member's real date. Import new profiles and updates SEPARATELY."
-             if upd else "No 'update existing' cards in this export."),
-            (f"Template columns the scanner does not fill (left blank): {', '.join(res['unknown_cols'])}." if res["unknown_cols"] else
-             "Every column of GAC's template was recognised." if tpl_real else
-             "Columns not checked: upload GAC's template (Admin > Settings)."),
-            (f"Scanner fields with no column in this template (in the companion CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
+            (f"Check: {plural(len(ovr_), 'card')} approved anyway (see the CSV)." if ovr_ else ""),
+            ("Compared with MC Trade contacts: " + cinfo["source"] + "." if cinfo["real"] else
+             "Test MC Trade list: no real contacts file is loaded, so no MC Trade numbers were assigned."),
+            (f"Updates: {comp_name(rfn, '-UPDATES.xlsx')} ({plural(len(upd), 'row')}). MemberSince is left blank so it can't overwrite a member's real date."
+             if upd else ""),
+            (f"Template columns the scanner leaves blank: {', '.join(res['unknown_cols'])}." if res["unknown_cols"] else
+             "" if tpl_real else "Columns not checked against MC Trade's template."),
+            (f"Not in this template (CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
             f"Affiliation code: '{aff}' (it must already exist in MC Trade).",
-            f"Phones are written as {'+13305550181 (E.164)' if style == 'e164' else '330-555-0181 (GAC style; extensions like 330-555-0170 x4271)'}; addresses are split into street/city/state/zip.",
-            ("Website: the card's website is in the import file's " + ", ".join(h for h in hdr if mx.canonical(h) in ("Website", "IndWebsite")) + " column (and in the companion CSV)."
-             if any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h) else
-             "Website: this template has NO website column, so websites are only in the companion CSV (not imported)."),
-            f"Left out: {cnt_[mx.LEFT]} {U._s(cnt_[mx.LEFT], 'card')} (combined with another row, or values to fix first). The CSV says why.",
+            ("" if _has_web else "Websites: this template has no website column, so websites are only in the CSV."),
+            (f"Left out: {plural(cnt_[mx.LEFT], 'card')} (combined with another row, or to fix first). The CSV says why." if cnt_[mx.LEFT] else ""),
             # round 20 (mctrade-admin r19 F1): 'in this export N times' only when 2+ ROWS of the import files share the name
-            # (cards merged into one row or left out no longer count); id lists show 3 ids + 'N more'
             *[f"Check, same name: {g['name']} is on {plural(len(g['cards']), 'card')} {ids3(g['cards'])}"
               + (f" ({plural(len(g['cards']), 'row')} in this export)" if g["with"] == "export" else f" and already in MC Trade (profile {', '.join(g.get('profiles') or [])})")
               + ". MC Trade may merge people with the same name: check they are different, or merge them." for g in same_names([c for c, _ in rows] + [c for c, _ in upd], contacts_from=sel)],
             (f"Check, to review: {cnt_[mx.REVIEW]} {U._s(cnt_[mx.REVIEW], 'card')} ({ids3([k for k, v in res['decisions'].items() if v[0] == mx.REVIEW])}) "
-             "are in neither file: a person must decide (the CSV says why)." if cnt_[mx.REVIEW] else
-             ("Nothing held back for review." if cinfo["real"] else "Nothing held back for review (only test contacts loaded).") + (f" {nflag} exported {U._s(nflag, 'card')} {'has' if nflag == 1 else 'have'} a warning (see the Check column in the CSV)." if nflag else "")),
-            (f"{', '.join('#' + str(i) for i in _smp)} match test contacts. Included anyway." if _smp else ""),
-            (f"Check, maybe already in MC Trade: {ids3(res['possible'])} (counted above)." if res["possible"] else ""),
+             "are in neither file: a person must decide (the CSV says why)." if cnt_[mx.REVIEW] else ""),
+            *_wl[:10],
+            (f"… and {len(_wl) - 10} more cards to check (see the CSV)." if len(_wl) > 10 else ""),
             *(["Check, marked different but identical: " + x for x in res["conflicts"]] if len(res["conflicts"]) <= 3 else
               [f"Check, marked different but identical: {len(res['conflicts'])} cards, each exported once (the CSV says which)."]),
             *[f"Check website: #{i} has {w} ({why}). Compare it with the photo." for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))],
-            # round 21 (mctrade-admin r20 M3): ONE cross-batch line (count + the first few), the full list is in the companion CSV
-            (f"Check, also in another batch: {plural(len(xb_ids), 'card')} ({ids3(list(xb_ids))}) may match people approved in another batch." if xb_ids else ""),
-            "Extra details (reviewer, batch, notes, second emails/phones) are in the CSV, not in the import file."])
+            (f"Other warnings: see the Check column in the CSV ({plural(nflag, 'card')})." if nflag and nflag > len(_warn) else ""),
+            "Second emails and phones, notes and reviewer are in the CSV, not in the import file."])
+        readme = "\n".join(x for x in readme.split("\n") if x.strip())
         _seen = set(); readme = "\n".join(x for x in readme.split("\n") if not x.strip() or not (x in _seen or _seen.add(x)))   # round 24: each warning once
         comp = {"extra.csv": ("\ufeff" + e.getvalue()).encode(), "readme.txt": readme.encode()}
         if upd: comp["updates.xlsx"] = _book(upd)

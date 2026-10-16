@@ -25,7 +25,7 @@ def signed_in_admin(new_page):
 def scan(page, *names, batch):
     """Upload card photos on the Scan page and wait until every one is read (real OCR in the server)."""
     page.goto("/ui#upload"); expect(page.get_by_role("heading", name="Scan business cards")).to_be_visible()
-    page.get_by_label("Batch name").fill(batch); page.get_by_label("Skip AI").check()   # no AI helper in tests: don't queue cards for it
+    page.get_by_label("Batch name").fill(batch); page.locator("#v-upload .opts details > summary").click(); page.get_by_label("Skip the AI double-check").check()   # no AI helper in tests: don't queue cards for it
     page.locator("#fPhotos").set_input_files([os.path.join(CARDS, n) for n in names])
     # a session that was not signed in in THIS tab is asked who is scanning first (shared computers)
     yes = page.get_by_role("dialog", name="Who is scanning?").get_by_role("button", name=re.compile("^Yes, I am"))
@@ -42,7 +42,7 @@ def wait_card(page, cid):
 def answer_dialogs(page, timeout=5000):
     """Approving asks when the card looks like someone in the MC Trade contacts (the 5 SAMPLE contacts here, which include
     Maria Delgado): answer 'different person'. Cards with no look-alike get no question."""
-    b = page.locator("#dlg[open]").get_by_role("button", name="Different person: add as new")
+    b = page.locator("#dlg[open]").get_by_role("button", name="Add as new contact")
     try: b.wait_for(timeout=timeout)
     except PWTimeout: return
     b.click()

@@ -157,7 +157,7 @@ def test_website_in_export_when_template_has_column(env, tmp_path, monkeypatch):
     monkeypatch.setattr(M, "TEMPLATE_XLSX", str(tmp_path / "mctrade_template.xlsx"))
     open(M.TEMPLATE_XLSX, "wb").write(_tpl(["ProfileID", "IndFirstName", "IndLastName", "IndEmail", "AffCode1"]))
     rd = adm.get("/api/export/xlsx?status=approved&batch=r8web&preview=1&companion=readme.txt").text
-    assert "NO website column" in rd
+    assert "no website column" in rd
 
 def test_merge_prefers_value_that_passes_checks(env):
     ui, st = env["ui"], env["store"]

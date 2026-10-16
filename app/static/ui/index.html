@@ -46,9 +46,9 @@
   <div class="opts">
     <label for="batchName">Batch name <small>(optional)</small></label>
     <input id="batchName" maxlength="60" placeholder="e.g. Oct 13 After Hours">
-    <label class="small chk"><input type="checkbox" id="skipAi"> Skip AI</label>
-    <details><summary>Advanced</summary>
-      <label for="engine">Reading method</label>
+    <details><summary>More</summary>
+      <label class="small chk"><input type="checkbox" id="skipAi"> Skip the AI double-check (faster at busy events)</label>
+      <label for="engine">Scan quality</label>
       <select id="engine"><option value="auto">Standard (recommended)</option>
 </select>
     </details>
@@ -102,7 +102,7 @@
   <div class="tablewrap">
   <table class="q">
     <caption class="sr">Cards in the review queue</caption>
-    <thead><tr><th scope="col"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th scope="col"><span class="sr">Photo</span></th><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Read quality</th><th scope="col">Needs a look</th><th scope="col">Status</th></tr></thead>
+    <thead><tr><th scope="col"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th scope="col"><span class="sr">Photo</span></th><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Scan</th><th scope="col">Needs a look</th><th scope="col">Status</th></tr></thead>
     <tbody id="qBody"></tbody>
   </table>
   </div>
@@ -153,7 +153,7 @@
         <button type="button" class="btn ghost" id="bPending">Reopen (set to pending)</button>
         <button type="button" class="btn ghost" id="bDelete" hidden>Delete…</button>
       </div>
-      <details class="more hint"><summary>Keyboard shortcuts</summary><kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>J</kbd> next · <kbd>K</kbd> previous · <kbd>U</kbd> undo · <kbd>Esc</kbd> leave a field. Approve or reject also saves edits.</details>
+      <details class="more hint"><summary>Keys: <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>J</kbd> next · <kbd>K</kbd> previous · <kbd>U</kbd> undo</summary>Press <kbd>Esc</kbd> first to leave a field. Approve or reject also saves edits.</details>
     </form>
   </div>
 </section>
