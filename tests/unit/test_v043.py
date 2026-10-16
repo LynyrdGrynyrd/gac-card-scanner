@@ -143,8 +143,8 @@ def test_v043_frontend_small_fixes():
     rv = open("app/static/ui/views/review.js").read()
     assert "already exported `" not in rv and "AI check not finished" in rv and "waitForAI" in rv and "can_same" in rv
     up = open("app/static/ui/views/upload.js").read(); assert "conn.f >= 2" in up and "j.batch_label" in up
-    assert 'id="helpNav" hidden' in open("training/build_help.py").read()
-    assert "signs you out" in open("training/REVIEWER-GUIDE.md").read()
+    h = open("app/static/ui/help.html").read()   # built from training/ (private); the public repo has the output only
+    assert 'id="helpNav" hidden' in h and "signs you out" in h
 
 
 def test_v043_readme_more_notes_not_overcounted():
