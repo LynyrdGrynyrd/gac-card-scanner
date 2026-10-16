@@ -10,7 +10,7 @@ STATIC = os.path.join(os.path.dirname(__file__), "static")
 COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000
 SESSION_MAX_HOURS = float(os.environ.get("GAC_SESSION_MAX_HOURS", str(7 * 24)))   # absolute limit, sliding expiry or not
 PUBLIC_PREFIX = ("/static/", "/api/auth/")
-PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo"}
+PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo", "/help", "/ui/help"}   # v0.4.2 #10: public help
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 def _init_auth(c):

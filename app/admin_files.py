@@ -226,6 +226,7 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     def refuse(code, msg):
         auth.alog(user["username"], f"dry run REFUSED ({code}): {msg} [filter {U.FILTERS.get(status, status)}, batch {('“' + blabel0 + '”') if blabel0 else (batch or 'all')}]")
         return JSONResponse({"error": msg}, code)
+    if U._batch_refused(batch, user) and not U._filter_refused(status, user): return refuse(403, U.BATCH_MSG)
     if U._filter_refused(status, user) or (not batch and user.get("role") != "admin"):
         return refuse(403, "Choose your batch first (only an admin can check all batches).")
     sel, metas = sel0, metas0

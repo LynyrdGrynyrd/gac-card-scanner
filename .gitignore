@@ -83,3 +83,6 @@ bench/ocr_text_cache.json
 bench/sweep/
 backups/
 /COMMIT
+
+# v0.4.2: written by the release sync (public commit of this build)
+BUILD-INFO.json

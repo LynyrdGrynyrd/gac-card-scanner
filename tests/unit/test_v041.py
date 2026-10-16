@@ -17,8 +17,8 @@ def test_merge_unrelated_card_refused(env):
 
 def test_merge_into_other_users_card_refused(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]
-    a = mk(ui, store, first_name="Taylor", last_name="Fixture", emails=["tf@v041c.example.com"])
-    b = mk(ui, store, first_name="Taylor", last_name="Fixture", emails=["tf@v041c.example.com"])
+    a = mk(ui, store, first_name="Taylor", last_name="Fixture", emails=["tf@v041c.example.com"], by="")
+    b = mk(ui, store, first_name="Taylor", last_name="Fixture", emails=["tf@v041c.example.com"], by="")
     ui.log(a, "RR", "scanned"); ui.log(b, "QN", "scanned")
     r = _merge(rc, a, b); assert r.status_code == 422 and r.json()["need"] == "merge_other_user"
     ui.log(b, "RR", "scanned")   # only the FIRST scan row counts
@@ -203,7 +203,7 @@ def test_export_default_is_current_batch_and_owner_named():
     import os
     js = open(os.path.join(os.path.dirname(__file__), "..", "..", "app", "static", "ui", "views", "export.js"), encoding="utf-8").read()
     assert "const def = curB || today[0]" in js and "mine.filter(b => b.own).sort(nw)[0]" not in js
-    assert "Batch of ${esc(bo_.owner" in js
+    assert "Not your batch: ${esc(bo_.owner" in js   # v0.4.2 #6: a full line
 
 
 # ---- #9 layout, accessibility and zoom
@@ -219,3 +219,4 @@ def test_layout_a11y_and_zoom_rules():
     assert 'role="region" aria-label="Same person?"' in html
     assert '"emails.0"' not in z and '"phones.0"' not in z and "focusout" in z
     assert "min-height:44px;min-width:44px" in css
+

@@ -10,7 +10,16 @@ def mk(ui, store, **f):
     # cross-batch confirm, skeptic R7-4); pass phones=... to share one on purpose
     base = {"first_name": "Ann", "last_name": "Lee", "title": "CFO", "company": "Acme Inc", "emails": ["ann@acme.com"],
             "phones": [{"type": "work", "number": f"330-555-{next(_PH):04d}"}], "website": "acme.com", "address": "1 Main St, Akron, OH 44308", "social": []}
-    base.update(f); cid = store.add("test", "raw", base, ""); ui.set_meta(cid, batch="b1", batch_label="B1"); return cid
+    by = f.pop("by", None)
+    base.update(f); cid = store.add("test", "raw", base, ""); ui.set_meta(cid, batch="b1", batch_label="B1")
+    # v0.4.2 #1: a reviewer exports only their own batch (owner = first 'scanned' row), so test cards are scanned by 'rev'
+    if by is None: by = _rev_ini(ui)
+    if by: ui.log(cid, by, "scanned")
+    return cid
+
+def _rev_ini(ui):
+    from app import auth
+    r = auth.db().execute("SELECT initials FROM users WHERE username='rev'").fetchone(); return r[0] if r else ""
 
 def test_validate_rules(env):
     ui = env["ui"]

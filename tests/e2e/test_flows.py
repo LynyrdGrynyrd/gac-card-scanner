@@ -61,7 +61,7 @@ def test_first_run_scan_review_approve_export(new_page):
     page.get_by_label("Job title").fill("Head of E2E Lending")
     expect(page.locator("#rDirty")).to_be_visible()
     page.locator("#bApprove").click()
-    expect(page.get_by_role("dialog", name="Already in MC Trade?")).to_be_visible(); answer_dialogs(page)
+    expect(page.get_by_role("dialog", name="Approve as a new person?")).to_be_visible(); answer_dialogs(page)   # v0.4.2 #3: one question for exported / MC Trade look-alikes
     # the last pending card of the batch: back to the batch's queue, with an 'All done' note
     expect(page).to_have_url(re.compile(r"#queue\?s=pending"), timeout=30000); expect(page.locator("#toast")).to_contain_text("All done")
     c = card_json(page, cid); assert c["status"] == "approved" and c["card"]["fields"]["title"] == "Head of E2E Lending"

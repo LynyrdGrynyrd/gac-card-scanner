@@ -72,7 +72,7 @@ async function loadQueue(force) {
     const batches = await call("/api/batches");
     if (seq !== qSeq || $("#v-queue").hidden) return;
     // round 20 (coordinator r19): your batches first, newest first; everyone else's under their own heading
-    const bOpt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} (${b.n}${reading && b.batch === reading ? ", being read…" : ""})</option>`;
+    const bOpt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} · ${b.n}${reading && b.batch === reading ? ", being read…" : ""}</option>`;   // v0.4.2 #5: no "(2) (1)"
     const bNew = (a, b) => (b.started || 0) - (a.started || 0), bMine = batches.filter(b => b.mine || b.own).sort(bNew), bOth = batches.filter(b => !(b.mine || b.own)).sort(bNew);
     const buildB = () => { const tM = new Set(trimB(bMine, Q.batch)), tO = new Set(trimB(bOth, Q.batch)), hid = bMine.length - tM.size + bOth.length - tO.size;
     const hOpt = keep => b => keep.has(b) ? bOpt(b) : "";   // round 22: old/test batches are really left out (<option hidden> is ignored by some browsers); links and Show all still reach them

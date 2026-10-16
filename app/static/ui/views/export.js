@@ -16,8 +16,9 @@ async function exportInfo() {
       let keepB = exportInfo.picked ? $("#exBatch").value : "";   // round 22: a fresh visit picks the default below (never a stale empty batch)   // the person may have picked a batch while the list was loading (r15int: "All batches" = "" is a real pick too)
       // round 7 (part-timer r1): your own batches first, and the default is your most recent batch, not "All batches"
       const cnt = b => st === "approved_new" ? `${b.ready ?? b.n} ready to export` : st === "approved" ? `${b.approved ?? b.n} approved` : `${plural(b.n, "card")}`;
-      const opt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} (${cnt(b)})</option>`;
-      const mine = bs.filter(b => b.mine), others = bs.filter(b => !b.mine);
+      const opt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} · ${cnt(b)}</option>`;
+      // v0.4.2 #1: a reviewer can export only their own batches (the server refuses the rest); admins see everyone's
+      const adm = S.ME && S.ME.role === "admin", mine = bs.filter(b => adm ? b.mine : b.own), others = adm ? bs.filter(b => !b.mine) : [];
       // round 8 (part-timer r2): your batches first; other people's only with "Show other people's batches too"
       const showAll = ($("#exShowAll") && $("#exShowAll").checked) || exportInfo.more, othShown = showAll ? others : others.filter(b => b.batch === keepB);
       const rdy = b => (st === "approved_new" ? (b.ready ?? b.n) : st === "approved" ? (b.approved ?? b.n) : b.n) > 0;
@@ -28,13 +29,13 @@ async function exportInfo() {
         const nw = (a, b) => (b.started || 0) - (a.started || 0), d0 = new Date(); d0.setHours(0, 0, 0, 0);
         const today = mine.filter(b => b.own && (b.started || 0) >= d0 / 1000).sort(nw);
         // v0.4.1 #7 (mctrade-admin M1): the CURRENT batch (the one on the Scan page), else your own batch from today, else "Choose a batch…"
-        const curB = S.B && bs.find(b => b.batch === S.B.id);
+        const curB = S.B && S.B.t0 && new Date(S.B.t0 * 1000).toDateString() === new Date().toDateString() && bs.find(b => b.batch === S.B.id && (b.own || S.ME.role === "admin"));   // v0.4.2 #5: today's only
         const def = curB || today[0]; keepB = def ? def.batch : "__choose__"; }
       const cur_ = bs.find(b => b.batch === keepB);
       $("#exBatch").innerHTML = (keepB === "__choose__" ? `<option value="__choose__">Choose a batch…</option>` : "") +
-        (showAll ? (mine.length ? `<optgroup label="Your batches">${mine.map(opt).join("")}</optgroup>` : "") + (others.length ? `<optgroup label="Other people's batches">${others.map(opt).join("")}</optgroup>` : "") + `<option value="">All batches (everyone's)</option>`
-                 : (cur_ ? opt(cur_) : keepB === "" ? `<option value="">All batches (everyone's)</option>` : "") + `<option value="__more__">More batches…</option>`);
-      if ($("#exShowAll")) $("#exShowAll").nextElementSibling.textContent = " Show all batches";
+        (showAll ? (mine.length ? `<optgroup label="Your batches">${mine.map(opt).join("")}</optgroup>` : "") + (others.length ? `<optgroup label="Other people's batches">${others.map(opt).join("")}</optgroup>` : "") + (adm ? `<option value="">All batches (everyone's)</option>` : "")
+                 : (cur_ && (adm || cur_.own) ? opt(cur_) : keepB === "" && adm ? `<option value="">All batches (everyone's)</option>` : "") + `<option value="__more__">More batches…</option>`);
+      if ($("#exShowAll")) { $("#exShowAll").nextElementSibling.textContent = adm ? " Show all batches" : " Show all my batches"; }
       $("#exBatch").value = [...$("#exBatch").options].some(o => o.value === keepB) ? keepB : ($("#exBatch").options[0] || {}).value || ""; filterExBatch(); }
     if ($("#exBatch").value !== "__more__") exportInfo.last = $("#exBatch").value;
     if ($("#exBatch").value === "__choose__") {   // nothing chosen: nothing to export, no check
@@ -42,8 +43,11 @@ async function exportInfo() {
     if ($("#exBatch").value !== eb) { if (!exportInfo.depth) { exportInfo.depth = 1; try { return await exportInfo(); } finally { exportInfo.depth = 0; } } }   // selection changed meanwhile: check the batch actually shown
     const r = await call(`/api/export/check?status=${st}&batch=${encodeURIComponent(eb)}`);
     const bo_ = (exportInfo.list || []).find(b => b.batch === eb), notMine = eb === "" || (bo_ && !bo_.own);   // v0.4.1 #7: say whose batch it is, on the page
-    $("#exInfo").innerHTML = (notMine && r.count ? `<span class="flag bad" id="exOwner">${eb === "" ? "Everyone's batches." : `Batch of ${esc(bo_.owner || "someone else")}.`}</span> ` : "") + `${r.count ? `<b>${plural(r.count, "card")}</b> will be exported.` : (!$("#exDone").hidden && $("#exDone").classList.contains("ok") && $("#exDone").dataset.batch === eb) ? "All cards in this batch are exported." : "Nothing to export yet. Approve some cards first."}` +
-      (r.flagged && r.flagged.length ? ` <span class="flag bad">To check: ${r.flagged.length} (${r.flagged.slice(0, 5).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}${r.flagged.length > 5 ? " …" : ""}).</span>` : "");   // v0.4.1 #4: same count as the preview and the sheet
+    // v0.4.2 #6 (reviewer: only a small chip): a full warning line, not a chip
+    $("#exOwner")?.remove();
+    if (notMine && r.count) $("#exInfo").insertAdjacentHTML("beforebegin", `<p class="alert bad" id="exOwner" role="status"><b>${eb === "" ? "All batches: this includes other people's cards." : `Not your batch: ${esc(bo_.owner || "someone else")} scanned it.`}</b> You will be asked before export.</p>`);
+    $("#exInfo").innerHTML = "" + `${r.count ? "" : (!$("#exDone").hidden && $("#exDone").classList.contains("ok") && $("#exDone").dataset.batch === eb) ? "All cards in this batch are exported." : "Nothing to export yet. Approve some cards first."}` +
+      (r.flagged && r.flagged.length ? `<span class="flag bad">To check: ${r.flagged.length} (${r.flagged.slice(0, 5).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}${r.flagged.length > 5 ? " …" : ""}).</span>` : "");   // v0.4.1 #4: same count as the preview and the sheet
 
     $("#exDup").hidden = !r.duplicates.length;
     // round 7: no button per pair (part-timer/newcomer: a flood of buttons that write onto other people's cards). The pairs are
@@ -93,9 +97,10 @@ $("#exPreview").onclick = async () => {
   try { const v = await call(q + "&view=1"), cell = x => `<td>${esc(x ?? "")}</td>`;
         if (!v || !v.rows) { toast("No preview available.", 4000); return; }
         const tbl = (h, rows) => `<div style="overflow:auto;max-height:40vh"><table class="aidiff pv"><thead><tr>${h.map(x => `<th scope="col">${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map(r_ => `<tr>${r_.map(cell).join("")}</tr>`).join("") || `<tr><td colspan="${h.length}">none</td></tr>`}</tbody></table></div>`;
-        const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p><p><b>New profiles (${plural(v.rows.length, "row")})</b></p>` + tbl(v.headers, v.rows) +
+        const rn = v.row_notes || [], nChk = rn.filter(Boolean).length;   // v0.4.2 #3: an MC Trade look-alike is marked, not shown as a plain new profile
+        const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p><p><b>New profiles (${plural(v.rows.length, "row")})</b>${nChk ? ` <span class="flag bad">${nChk} to check</span>` : ""}</p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
-          `<p><b>Left out / to check (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
+          `<p><b>Left out (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
           ((v.warnings || []).length ? `<details class="more"><summary>In the file, with a warning (${v.warnings.length})</summary><ul>${v.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""),
           wide: true, buttons: [{label: "Close", cls: "primary", value: null, primary: true}, {label: "Download preview files (not for import)", value: "dl"}]});
         if (a.value !== "dl") return;
@@ -135,8 +140,8 @@ async function tileExport(t) {
   const info = await exportInfo(); if (!info || !info.count || info.duplicates.length) return;
   { const eb_ = $("#exBatch").value, bo = (S.BATCHES || []).find(b => b.batch === eb_) || (exportInfo.list || []).find(b => b.batch === eb_);   // round 24 (reviewer r23): warn before exporting someone else's batch
     if (eb_ === "" || (bo && !bo.own)) { const who_ = bo && bo.owner ? bo.owner : "other people";
-      const a_ = await ask({title: eb_ === "" ? "Export everyone's batches?" : `This batch belongs to ${who_}`, html: `<p>${eb_ === "" ? "You chose All batches: cards other people scanned are included." : `“${esc(bo.batch_label || bo.batch)}” was scanned by ${esc(who_)}, not you.`} Export it anyway?</p>`,
-        buttons: [{label: "Cancel", cls: "primary", value: null, primary: true, focus: true}, {label: "Export anyway", value: 1}]});
+      const a_ = await ask({title: eb_ === "" ? "Export everyone's cards?" : `Export ${who_}'s batch?`, html: `<p class="alert bad">${eb_ === "" ? "All batches includes cards other people scanned." : `<b>${esc(bo.batch_label || bo.batch)}</b> was scanned by <b>${esc(who_)}</b>, not you. They may still be working on it.`}</p>`,
+        buttons: [{label: "Cancel", cls: "primary", value: null, primary: true, focus: true}, {label: eb_ === "" ? "Export all" : `Export ${who_}'s batch`, value: 1}]});
       if (!a_.value) return; } }
   let so = "", seenV = info.versions || null, nUpd = 0;
   const shw = (n, html) => n ? ` <details class="more small" style="display:inline"><summary>Show</summary>${html}</details>` : "";   // round 21: a count + Show, not an id wall   // round 16: what the sign-off was made from; the export is refused if it changed
@@ -157,7 +162,8 @@ async function tileExport(t) {
   let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
   const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
   const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) : "";
-  const r = await ask({title: "Ready to save", html: sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p></details>`,
+  const bl_ = (exportInfo.list || []).find(b => b.batch === $("#exBatch").value);
+  const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> The READ-ME and CSV are for reading only.` : "You'll get one file."}</p></details>`,
     buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");

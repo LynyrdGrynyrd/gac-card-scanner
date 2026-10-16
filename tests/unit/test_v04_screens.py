@@ -60,7 +60,7 @@ def test_scan_screen_one_button_options_under_more():
     idx = rd("index.html"); up = idx[idx.index('id="v-upload"'):idx.index('id="phonePanel"')]
     assert 'id="bPhotos">Scan<' in up
     more = up[up.index('id="upMore"'):]
-    for i in ('id="batchName"', 'id="skipAi"', 'id="bFolder"', 'id="bPhone"'): assert i in more, i
+    for i in ('id="skipAi"', 'id="bFolder"', 'id="bPhone"'): assert i in more, i
 
 
 def test_export_one_button_and_sheet():

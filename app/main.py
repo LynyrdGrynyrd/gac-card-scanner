@@ -79,7 +79,7 @@ def _ai_up():
 def health():
     up = _ai_up()
     from . import updates as _up
-    return {"ok": True, "version": _up.current_version(), "commit": _up.current_commit(), "ai_checker": "online" if up else "offline",
+    return {"ok": True, "version": _up.current_version(), "commit": _up.current_commit(), **_up.build_info(), "ai_checker": "online" if up else "offline",
             **({} if up else {"ai_note": "AI check is off right now. Scanning still works.", "ai_hint": "Start it from Admin > Settings > AI helper (desktop app) or start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + ")."})}
 
 def _startup_checks():

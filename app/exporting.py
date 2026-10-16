@@ -36,6 +36,21 @@ def _filter_refused(status, user):
     if user["role"] == "admin": return status not in FILTERS and status != "rejected"
     return status not in REVIEWER_FILTERS
 
+def batch_owner(batch):
+    """Initials of whoever scanned the batch's first card ('' if unknown)."""
+    r = U.db().execute("""SELECT h.reviewer FROM card_meta m JOIN card_history h ON h.card_id=m.card_id AND h.action='scanned'
+        WHERE m.batch=? ORDER BY h.id LIMIT 1""", (batch,)).fetchone()
+    return str(r[0] or "") if r else ""
+BATCH_MSG = "You can export only your own batch. Ask an admin to export other batches or all batches."
+def _batch_refused(batch, user):
+    """v0.4.2 #1 (mctrade-admin M1): enforced here, not only in the page. A reviewer exports only a batch they started;
+    another person's batch, cards with no batch and all batches are admin-only."""
+    if user.get("role") == "admin": return False
+    from . import demo
+    if demo.enabled(): return False   # public demo: every export is a preview of fictional cards
+    if not batch or batch == "__none__": return True
+    return batch_owner(batch) != user.get("initials")
+
 PLAINNUM = re.compile(r"[+-]\d+(?:\.\d+)?"); HANDLE = re.compile(r"@[A-Za-z0-9_.]{1,40}(?:\s+@[A-Za-z0-9_.]{1,40})*")
 
 NUMBERISH = re.compile(r"[+-][\d\s().-]*\d[\d\s().-]*(?:\s*(?:x|ext\.?|extension|#)\s*\d+)?", re.I)
@@ -110,10 +125,11 @@ def _check_ids(sel, metas, status):
 def export_check(request: Request, status: str = "approved_new", batch: str = ""):
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
+    if _batch_refused(batch, request.state.user): return JSONResponse({"error": BATCH_MSG, "admin_only": True}, 403)
     sel, metas, probs = _export_set(status, batch)
     flagged = [c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or U.validate(c["fields"])]
-    if sel and len(sel) <= 500:   # v0.4.1 #4: the same "to check" cards as the preview, the sheet and the READ-ME
-        try: flagged = sorted(set(flagged) | set(_check_ids(sel, metas, status)))
+    if sel and len(sel) <= 500:   # v0.4.2 #4: ONE source: the page line uses the sheet's own "to check" list
+        try: flagged = summary_counts(sel, metas, status)["check_ids"]
         except Exception: pass
     ok_batches = []
     if probs and not batch:   # all batches is blocked: say which single batches can be exported right now
@@ -181,8 +197,14 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         if xb:
             try: oth = (json.loads(xb[0] or "{}") or {}).get("cards") or []
             except Exception: oth = []
-            out.append("Also in another batch: approved over a look-alike" + (" (" + ", ".join(f"#{o}" for o in oth) + ")" if oth else "") + ": check for a double import")
+            # v0.4.2 #3 (data-manager): look-alikes later answered 'Different' are not a double-import risk
+            kp_ = set(U._kept(m)); oth = [o for o in oth if o not in kp_ and c["id"] not in set(U._kept(metas.get(o) or {}))] if oth else oth
+            if xb_ok(c, oth): out.append("Also in another batch: approved over a look-alike" + (" (" + ", ".join(f"#{o}" for o in oth) + ")" if oth else "") + ": check for a double import")
         return " | ".join(out)
+    def xb_ok(c, oth):
+        m = metas.get(c["id"]) or {}
+        if oth: return True
+        return not (U._kept(m) or m.get("dup_resolution") == "keep_both")
     def aud(c):
         m = metas.get(c["id"]) or {}
         return [c["id"], c.get("reviewer") or "", _when(c.get("decided")), m.get("batch_label") or "",
@@ -234,6 +256,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
             w.writerow([safe_cell(x) for x in [c["id"], inimp, why.get(c["id"], ""), mx.clean(f_.get("first_name")), mx.clean(f_.get("last_name")),
                         em[1] if len(em) > 1 else "", mx.clean(f_.get("website"))] + [mx.clean(x) for x in more(c)[:5]] + [" ".join(f_.get("social") or []), mx.clean(_note(c))] + a[1:]])
         nflag = sum(1 for c in sel if aud(c)[-1])
+        _flagged = {c["id"] for c in sel if aud(c)[-1]}
         cinfo = crm_source.info()
         _smp = []   # round 9 (newcomer r9 N1): cards in the new file that match a SAMPLE contact by email (SAMPLE data only)
         if not cinfo["real"]:
@@ -294,7 +317,8 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
             *(["Check, marked different but identical: " + x for x in res["conflicts"]] if len(res["conflicts"]) <= 3 else
               [f"Check, marked different but identical: {len(res['conflicts'])} cards, each exported once (the CSV says which)."]),
             *[f"Check website: #{i} has {w} ({why}). Compare it with the photo." for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))],
-            (f"Other warnings: see the Check column in the CSV ({plural(nflag, 'card')})." if nflag and nflag > len(_warn) else ""),
+            # v0.4.2 #4 (coordinator L): plain wording; the same cards are in the sheet's "To check" count
+            (f"More notes: {plural(len(_flagged - set(_warn)), 'other card')} {'has' if len(_flagged - set(_warn)) == 1 else 'have'} a note in the CSV “Check” column. Read them before importing." if _flagged - set(_warn) else ""),
             "Second emails and phones, notes and reviewer are in the CSV, not in the import file."])
         readme = "\n".join(x for x in readme.split("\n") if x.strip())
         _seen = set(); readme = "\n".join(x for x in readme.split("\n") if not x.strip() or not (x in _seen or _seen.add(x)))   # round 24: each warning once
@@ -315,12 +339,13 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                            # doesn't hold MC Trade's current value for these, so it is shown as unknown (old=None).
                            + [{"field": h_, "old": None, "new": str(v_), "changes": None}
                               for h_, v_ in r_.items() if v_ not in (None, "") and mx.canonical(h_) in _inhdr and h_ not in ("ProfileID", "MemberSince", "OrgInd", "IndFirstName", "IndLastName", "OrgName", "IndEmail", "IndPhone")]})
-        summ = {"check_ids": sorted(set(_warn) | {i for i, _ in conf_} | set(ovr_) | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
+        summ = {"check_ids": sorted(set(_warn) | {i for i, _ in conf_} | set(ovr_) | _flagged | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
                 "new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
                 "left_ids": [c["id"] for c, _ in left if c["id"] not in {x["id"] for x, _ in rows}],
                 "review": res["review"], "possible": res["possible"], "crm_real": cinfo["real"],
                 "decisions": {str(k): v[0] for k, v in res["decisions"].items()}, "counts": mx.counts(res["decisions"]),
-                "_view": {"headers": [h for h in hdr], "rows": [mx.cells(hdr, r_) for _, r_ in rows], "updates": [mx.cells(hdr, r_) for _, r_ in upd], "update_diff": _udiff,
+                # v0.4.2 #3 (reviewer Med): the preview says which new rows may already be in MC Trade, instead of a plain "new profile"
+                "_view": {"headers": [h for h in hdr], "rows": [mx.cells(hdr, r_) for _, r_ in rows], "row_notes": ["; ".join(_warn.get(c["id"], [])) for c, _ in rows], "row_ids": [c["id"] for c, _ in rows], "updates": [mx.cells(hdr, r_) for _, r_ in upd], "update_diff": _udiff,
                           "left": [[c["id"], why_] for c, why_ in left], "source_text": f"Columns: {source}. MC Trade contacts: {cinfo['source']}.",
                           "warnings": [f"#{i}: approved although approved cards {', '.join('#' + str(o) for o in os_)} in another batch look like the same person" for i, os_ in xb_ids.items()] + [f"#{i}: check the website {w} ({why})" for i, w, why in website_warnings(sel, metas, rows + upd, res.get("merged"))]}}
         return body_x, MT["xlsx"], fn, comp, summ
@@ -390,8 +415,13 @@ def export_summary(request: Request, status: str = "approved_new", batch: str = 
     Counts only: no names, no file, nothing marked as exported."""
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
+    if _batch_refused(batch, request.state.user): return JSONResponse({"error": BATCH_MSG, "admin_only": True}, 403)
     sel, metas, probs = _export_set(status, batch)
-    out = {"count": len(sel), "new": 0, "updated": 0, "to_check": 0, "left_out": 0, "blocked": bool(probs)}
+    return {"blocked": bool(probs)} | summary_counts(sel, metas, status)
+
+def summary_counts(sel, metas, status):
+    """v0.4.2 #4: the one count source for the Export page line, the sheet, the README and the CSV Check column."""
+    out = {"count": len(sel), "new": 0, "updated": 0, "to_check": 0, "left_out": 0, "need_decision": 0, "check_ids": []}
     if sel:
         res = build_export("xlsx", sel, metas, status, "summary", "", preview=True)
         sm = res[4] if len(res) > 4 else {}
@@ -414,6 +444,7 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
     if demo.enabled(): preview = True   # public demo: every export (incl. the MC Trade Excel) is a dry-run preview
     if _filter_refused(status, request.state.user):
         return JSONResponse({"error": "Only an admin can export pending, rejected or all cards. Reviewers export approved cards."}, 403)
+    if _batch_refused(batch, request.state.user): return JSONResponse({"error": BATCH_MSG, "admin_only": True}, 403)
     if preview and not batch and request.state.user.get("role") != "admin":   # skeptic R6-1: no all-batches contact dump for reviewers
         return JSONResponse({"error": "Choose one batch under “Batch” to preview. Only admins can preview all batches."}, 403)
     sel, metas, probs = _export_set(status, batch)

@@ -44,6 +44,12 @@ def legacy_csv(status: str = "approved"): return RedirectResponse(f"/ui#export",
 def legacy_vcf(status: str = "approved"): return RedirectResponse(f"/ui#export", 307)
 @U.router.get("/export.xlsx")
 def legacy_xlsx(status: str = "approved"): return RedirectResponse(f"/ui#export", 307)
+@U.router.get("/help")
+@U.router.get("/ui/help")
+def help_page():
+    """v0.4.2 #10 (part-timer: raw {"detail":"Not Found"} when signed out): the reviewer guide, signed in or not."""
+    return RedirectResponse("/static/ui/help.html", 307)
+
 @U.router.get("/privacy")
 def privacy(): return FileResponse(os.path.join(U.STATIC, "ui", "privacy.html"), headers={"Cache-Control": "no-cache"})
 
@@ -94,4 +100,8 @@ def drop_thumbs(name):
 PLACEHOLDER = b"""<svg xmlns="http://www.w3.org/2000/svg" width="420" height="240" viewBox="0 0 420 240"><rect width="420" height="240" fill="#eee"/><text x="210" y="112" text-anchor="middle" font-family="Lato,sans-serif" font-size="18" fill="#555">Photo deleted</text><text x="210" y="140" text-anchor="middle" font-family="Lato,sans-serif" font-size="13" fill="#777">(retention policy)</text></svg>"""
 
 @U.router.get("/api/me")
-def me(request: Request): return auth.pub(request.state.user)
+def me(request: Request):
+    # v0.4.2 #2 (part-timer blocker: shared sign-in): minutes without a click or key before the page signs out (0 = never)
+    try: idle = int(os.environ.get("GAC_IDLE_MINUTES") or auth.get_setting("idle_minutes") or 30)
+    except ValueError: idle = 30
+    return auth.pub(request.state.user) | {"idle_minutes": max(0, idle)}

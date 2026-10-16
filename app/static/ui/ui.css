@@ -290,3 +290,7 @@ dialog#dlg.wide .aidiff th{overflow-wrap:normal;word-break:keep-all;white-space:
 input[type=checkbox],input[type=radio]{min-width:24px;min-height:24px}
 label.chk{min-height:44px;display:inline-flex;align-items:center;gap:8px}
 #v-review summary{min-height:44px;display:flex;align-items:center;cursor:pointer}
+/* v0.4.2 #2: who is signed in, on every screen; #5: batch name first on the Scan page */
+.youare{font-size:.95rem;padding:.35em 0;color:var(--ink)}.youare b{font-weight:700}
+.bname{margin:.4em 0}.bname input{max-width:18em}
+.dupdone{padding:.4em 0;color:var(--grey)}

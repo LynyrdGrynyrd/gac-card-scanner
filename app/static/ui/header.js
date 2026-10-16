@@ -14,7 +14,9 @@ import {exportInfo} from "./views/export.js";
 const who = () => S.ME ? S.ME.initials : "";
 async function loadMe() {
   S.ME = await call("/api/me");
-  { const w = document.getElementById("scanWho"); if (w && S.ME) w.innerHTML = `Scanning as <b>${esc(S.ME.display || S.ME.username)}</b> (${esc(S.ME.initials || "")}). Not you? <a href="/login">Sign in as yourself</a>.`; }   // round 15 (coordinator r14 #4)
+  // v0.4.2 #2 (part-timer blocker): who is signed in, on every screen
+  { const w = document.getElementById("youAre"); if (w && S.ME) { w.innerHTML = `You are: <b>${esc(S.ME.display || S.ME.username)}</b> · <button type="button" class="link" id="notMe">Not you?</button>`; $("#notMe").onclick = () => $("#logout").click(); } }
+  idleStart(S.ME.idle_minutes);
   $("#whoText").innerHTML = `<b>${esc(S.ME.display)}</b> (${esc(S.ME.initials)})`;
   $("#navAdmin").hidden = S.ME.role !== "admin"; $("#archiveAll").hidden = S.ME.role !== "admin"; $("#archiveBatch").hidden = S.ME.role !== "admin";
   if (S.ME.role !== "admin") $$("#exStatus option[value=all], #exStatus option[value=pending], #exStatus option[value=rejected]").forEach(o => o.remove());
@@ -28,6 +30,24 @@ async function changePw(reason) {
   catch (e) { await ask({title: "Password not changed", html: `<p>${esc(e.message)}</p>`, buttons: [{label: "OK", cls: "primary", value: 1, primary: true}]}); changePw(reason); }
 }
 $("#pwChange").onclick = () => changePw();
+// v0.4.2 #2: sign out after a period with no click, key or touch (a shared event computer). Photos still uploading keep you in.
+let idleT = null, idleLast = Date.now(), idleWarned = false;
+function idleStart(min) {
+  if (!min || idleT) return;
+  const bump = () => { idleLast = Date.now(); };
+  ["pointerdown", "keydown", "wheel", "touchstart"].forEach(e => addEventListener(e, bump, {passive: true, capture: true}));
+  idleT = setInterval(async () => {
+    if (window.gacBusy && window.gacBusy()) { idleLast = Date.now(); return; }
+    const idle = (Date.now() - idleLast) / 60000;
+    if (idle < min - 1 || idleWarned) return;
+    idleWarned = true; const t0 = idleLast;
+    const a = await ask({title: "Still there?", html: "<p>You will be signed out in 1 minute.</p>", timeout: 60000,
+      buttons: [{label: "Stay signed in", cls: "primary", value: 1, primary: true, focus: true}]});
+    idleWarned = false;
+    if (!a.timedOut || idleLast !== t0) { idleLast = Date.now(); return; }
+    S.dirty = false; window.gacIdleOut = true; $("#logout").click();
+  }, 15000);
+}
 $("#logout").onclick = async () => {
   if (S.dirty && S.cur && !$("#v-review").hidden) {
     const a = await ask({title: `Sign out and discard the changes to card #${S.cur.id}?`, html: "<p>Unsaved changes are lost when you sign out.</p>",

@@ -106,7 +106,7 @@ def test_sync_admin_only_and_already_scanned(env):
     b = io.BytesIO(); Image.effect_noise((900, 500), 60).convert("RGB").save(b, "JPEG")
     from app import ui
     ui.set_meta(999999, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest())  # orphan meta has no card: ignored
-    cid = mk(ui, env["store"]); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo", batch="b-expo")
+    cid = mk(ui, env["store"], by=""); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo", batch="b-expo")
     ui.log(cid, "QN", "scanned", None, "pending", {"file": "x.jpg"})
     r = rev.post("/api/jobs", data={"batch": "b-expo"}, files={"image": ("x.jpg", b.getvalue(), "image/jpeg")}); assert r.status_code == 409
     assert "by QN on" in r.json()["error"] and "Expo" in r.json()["error"]

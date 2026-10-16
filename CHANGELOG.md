@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.2 (2026-10-16)
+
+### Who may export, who is signed in (from the v0.4.1 tester reports)
+- **Export rights are enforced by the server:** a reviewer can export only their own batch. Other people's batches and **All batches** are for admins. The guides say the same.
+- **You are: NAME** shows on every screen, with **Not you?**. After 30 minutes with no clicks the app signs out (never while photos are uploading). Admins can change the time with `GAC_IDLE_MINUTES` (0 = off).
+- **Approve after Different** still asks once when the person was exported before or may already be in MC Trade. "Different" now removes the "check for a double import" note from the CSV and READ-ME. The Preview marks rows that may already be in MC Trade.
+- **One count everywhere:** the Export page, the batch list ("ready"), the Ready-to-save sheet and the READ-ME use the same list. The READ-ME's "Other warnings" line is now "More notes: N other cards have a note in the CSV Check column".
+- **Batch names** carry the date and your initials ("After Hours · Oct 16 · RR"); no more "(2) (1)". The batch name field is on the Scan page, not under More. A saved batch from another day or another person is never reused.
+- **Someone else's batch** (admins): a clear warning line on the page and a named question before export.
+- **Checks:** theperfectexample.com and similar whole-word names are no longer blocked.
+- **Duplicates:** shorter text ("Same person? #520 and 24 more", no exported count), MC Trade is one line in the same box, other people's look-alikes say "Looks like #N", the box turns plain once answered, "Blocked" is in the legend, and the nested More in Ready to save is gone.
+- **Undo** shows on screen right after Approve.
+- **Help** opens at /help even when signed out. **/health** names the public release commit. The reviewer guide cover no longer promises an AI section.
+- **Merges:** replaying a merge is refused (no doubled note); cards with no scan record are not treated as "same scanner".
+- **Upload:** a photo can no longer sit on "Waiting to upload" forever (send errors offer Retry, a stuck request times out, and a photo lost to a page reload says so).
+
 ## v0.4.1 (2026-10-16)
 
 ### Safer review (from the v0.4.0 tester reports)

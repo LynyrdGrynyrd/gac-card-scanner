@@ -39,9 +39,9 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 16, 2026 · version 0.4.1. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 16, 2026 · version 0.4.2. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.1</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.2</em></p>
 <blockquote class="callout">
 <p>For the person who runs the scanner and does the MC Trade import. Reviewing cards is in the <strong><a href="/static/ui/help.html">Reviewer Guide</a></strong>.</p>
 </blockquote>
@@ -94,20 +94,20 @@
 <tbody>
 <tr>
 <td>Reviewer</td>
-<td>Approved cards of <strong>their own</strong> batch</td>
+<td>Approved cards of <strong>their own</strong> batch only</td>
 </tr>
 <tr>
 <td>Admin</td>
-<td>Any batch, pending or rejected cards too</td>
+<td>Any batch, <strong>All batches</strong>, pending or rejected cards too</td>
 </tr>
 </tbody>
 </table></div>
-<p>Exporting someone else's batch names the owner and asks first. <strong>Cancel</strong> is the default.</p>
+<p>The server enforces this. An admin exporting someone else's batch is asked first; <strong>Cancel</strong> is the default.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
 <ol>
 <li><strong>Export</strong>. Your current batch is chosen.</li>
-<li><strong>Preview</strong>: the rows, plus <strong>To check</strong> and <strong>Left out</strong>.</li>
+<li><strong>Preview</strong> shows the rows and what's left out.</li>
 <li><strong>Export</strong> → <strong>Ready to save</strong> → <strong>Save</strong>. Other formats are under <strong>Format</strong>.</li>
 </ol>
 <figure><img alt="Export" src="/static/ui/help-img/19_export_page.webp" loading="lazy" /></figure>
@@ -195,6 +195,7 @@
 <li><strong>Add reviewer</strong>: name, username, initials, role, temporary password (10+ characters).</li>
 <li><strong>Reset password</strong> also lifts a lock.</li>
 <li><strong>Deactivate</strong> someone who left. Their history stays.</li>
+<li>Idle sign-out: after 30 minutes with no clicks. Change it with <code>GAC_IDLE_MINUTES=&lt;minutes&gt;</code> (0 = off).</li>
 </ul>
 <p>Locked out of every admin account: <code>python -m app.admin reset-password &lt;username&gt;</code> in the scanner folder.</p>
 <hr />

@@ -299,13 +299,13 @@ def garbled_errors(f):
     for e in ems:   # round 22 (datamanager r21 M2): a lost dot is caught with no website too ('…hardwexample.com', '…comcom.com')
         ed = str(e).lower().rsplit("@", 1)[-1].strip(); sld = ed.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sld)
-        if m_ and (m_.group(2) == "example" and len(m_.group(1)) >= 8 or re.search(r"(com|net|org)$", m_.group(1))):   # v0.4.1 #8: 'bestexample.com' is a real name
+        if m_ and _lost_dot(m_):   # v0.4.1 #8: 'bestexample.com' is a real name
             err["emails"] = f"Email domain “{ed}” looks like a dot is missing. Check the photo and fix it."; break
     if w and "website" not in err:   # round 24 (datamanager r23 M1): the website gets the same lost-dot check as emails
         wd = re.sub(r"^[a-z]+://", "", w.lower()).split("/")[0]; wd = wd[4:] if wd.startswith("www.") else wd
         sldw = wd.rsplit(".", 1)[0].split(".")[-1]
         m_ = re.search(r"^(.{4,}?)(example|com|net|org)$", sldw)
-        if "." in wd and m_ and (m_.group(2) == "example" and len(m_.group(1)) >= 8 or re.search(r"(com|net|org)$", m_.group(1))):
+        if "." in wd and m_ and _lost_dot(m_):
             err["website"] = f"Website “{w}” looks like a dot is missing. Check the photo and fix it."
     if "website" in err: pass
     elif w and (re.match(r"^(https?://)?(www(?![.\d])|wvw\.|vvww?\.)", w, re.I) or ".." in w or not plausible_site(w, ems)):
@@ -386,6 +386,14 @@ def valid_confirmations(f):
     return out
 
 # round 22: phones are never overridable (a letter in a phone number is never right)
+def _lost_dot(m_):
+    """v0.4.2 #7 (reviewer L3: 'theperfectexample.com' was blocked): '…example' alone is a lost dot only when the part before
+    it ends in a cut-off word ('hardw', three consonants in a row), not a whole one ('perfect', 'best', 'counter').
+    A website that shows the same name with the dot is still caught by the email/website comparison."""
+    pre, end = m_.group(1), m_.group(2)
+    if re.search(r"(com|net|org)$", pre): return True
+    return end == "example" and len(pre) >= 8 and not re.search(r"[aeiouy]", pre[-3:])
+
 OVERRIDABLE = ("name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
 ADMIN_OVERRIDE = ("emails", "website", "address", "other_address")
 def overridable(f):
@@ -624,7 +632,8 @@ def merge_refusal(c, f2, tgt):
     if tgt["id"] not in ids:
         return {"error": f"Card #{tgt['id']} doesn't look like this card, so it can't be merged into.", "need": "merge_unrelated"}
     sc = scanners([c["id"], tgt["id"]])
-    if sc.get(c["id"]) != sc.get(tgt["id"]):
+    # v0.4.2 #11 (skeptic L2): two cards with NO scan record are not "the same scanner" (None == None)
+    if not sc.get(c["id"]) or sc.get(c["id"]) != sc.get(tgt["id"]):
         return {"error": f"Card #{tgt['id']} was scanned by someone else. Use Different, or ask them.", "need": "merge_other_user"}
     return None
 
@@ -1733,6 +1742,14 @@ def batches(request: Request):
        WHERE m.batch IS NOT NULL AND h.id=(SELECT MIN(h2.id) FROM card_history h2 JOIN card_meta m2 ON m2.card_id=h2.card_id
        WHERE m2.batch=m.batch AND h2.action='scanned') AND h.reviewer=?""", (ini,))}
     for r in out: r["mine"] = r["batch"] in mine; r["own"] = r["batch"] in own
+    # v0.4.2 #4 (reviewer: "(0 ready)" next to "2 will be exported"): 'ready' from the export's own card set, not a second SQL rule
+    try:
+        cs_, ms_ = _active(); rd = {}
+        for c in cs_:
+            m = ms_.get(c["id"]) or {}
+            if c["status"] == "approved" and (not m.get("exported") or m.get("reexport")): rd[m.get("batch")] = rd.get(m.get("batch"), 0) + 1
+        for r in out: r["ready"] = rd.get(r["batch"], 0)
+    except Exception: pass
     # round 24 (reviewer r23): the owner's name, for the "this batch belongs to …" warning
     try:
         names = {u_["initials"]: (u_["display"] or u_["initials"]) for u_ in auth.db().execute("SELECT initials, display FROM users")}
@@ -1886,6 +1903,9 @@ def _update(cid, request, body, internal=False):
         return JSONResponse({"error": f"Card #{cid} can't be merged into itself. Open the OTHER card (the duplicate) and merge it into #{cid}.", "need": "merge_self"}, 422)
     merge_tgt = store.get(int(body["merge_into"])) if body.get("merge_into") else None
     if body.get("merge_into") and not merge_tgt: return JSONResponse({"error": "Card to merge into was not found.", "need": "merge_missing"}, 422)
+    if merge_tgt and c["status"] == "rejected" and (meta(cid) or {}).get("dup_resolution") == f"merged_into:{merge_tgt['id']}":
+        # v0.4.2 #11 (skeptic L1): replaying a merge added the note to the target a second time (and into the export)
+        return JSONResponse({"error": f"Card #{cid} is already merged into #{merge_tgt['id']}.", "need": "merge_done"}, 409)
     if merge_tgt:   # v0.4.1 #2 (skeptic M1): only into a listed look-alike, and only between cards the same person scanned
         refused = merge_refusal(c, f2, merge_tgt)
         if refused: return JSONResponse(refused, 422)
@@ -2578,7 +2598,7 @@ from . import exporting as _exporting  # noqa: E402,F401  (module handle, e.g. f
 from .exporting import (  # noqa: E402,F401
     ADMIN_ONLY_FILTERS, AUDIT, COMPANION, EXPORT_BUSY, FILTERS, HANDLE, MORE, MT, NUMBERISH, PLAINNUM,
     REVIEWER_FILTERS, SUSPECT_WEB, XCOLS, _EXL, _bname, _do_export_real, _export_claim, _export_release,
-    _export_set, _filter_refused, _fname, _note, _slug, _stale_export, _wdom, _when, build_export, comp_name,
+    _export_set, _filter_refused, _batch_refused, BATCH_MSG, batch_owner, _fname, _note, _slug, _stale_export, _wdom, _when, build_export, comp_name,
     crm_look, do_export, exact_email_profile, export_again, export_check, export_companion, export_history, export_summary,
     export_versions, ids3, plural, readme_totals, safe_cell, same_names, strict_profile_id, website_warnings)
 from . import audit_log as _audit_log  # noqa: E402,F401  (module handle, e.g. for tests that patch it)

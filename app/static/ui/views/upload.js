@@ -64,13 +64,13 @@ function newBatch() {
   const name = $("#batchName").value.replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   const norm = x => (x || "").replace(/\s+/g, " ").trim().toLowerCase();
   const all = S.BATCHES || [];
-  const same = name && all.find(b => b.mine && norm(b.batch_label) === norm(name) && b.started > Date.now() / 1000 - 12 * 3600);
-  if (same) { S.B = {id: same.batch, label: same.batch_label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB(); toast(`Added to your existing batch “${name}”.`); return; }
-  let label = name || ("Untitled batch, " + d.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}));
-  if (all.some(b => norm(b.batch_label) === norm(label))) {
-    let k = 2; while (all.some(b => norm(b.batch_label) === norm(`${label} (${k})`))) k++;
-    toast(`A batch called “${label}” already exists, so this one is saved as “${label} (${k})”.`, 7000); label = `${label} (${k})`;
-  }
+  // v0.4.2 #5 (reviewer/newcomer: "(2) (1)"): the name always carries the date and the owner, so it is readable and unique
+  // without a counter: "After Hours · Oct 16 · RR". Your own batch with the same name today is reused.
+  const day = d.toLocaleDateString([], {month: "short", day: "numeric"}), who = (S.ME && (S.ME.initials || S.ME.display)) || "";
+  let label = [name, day, who].filter(Boolean).join(" · ");
+  const same = all.find(b => b.own && norm(b.batch_label) === norm(label) && b.started > Date.now() / 1000 - 12 * 3600);
+  if (same) { S.B = {id: same.batch, label: same.batch_label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB(); toast(`Added to your batch “${label}”.`); return; }
+  if (!name || all.some(b => norm(b.batch_label) === norm(label))) label += " " + d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   S.B = {id, label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB();
 }
 const isImg = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(f.name) || isPdf(f);
@@ -91,7 +91,9 @@ async function enqueue(files) {
   // coordinator r2 N1: a different name typed in "Name this batch", or a batch left over from hours ago, starts a NEW batch
   const typed = $("#batchName").value.replace(/\s+/g, " ").trim().toLowerCase();
   const fresh = !S.B || S.B.rows.every(r => ["done", "rej", "err", "cancel"].includes(r.state)) && $("#clearBatch").dataset.fresh === "1";
-  const renamed = S.B && !fresh && ((typed && !(S.B.label || "").toLowerCase().startsWith(typed)) || (!typed && S.B.t0 && Date.now() / 1000 - S.B.t0 > 4 * 3600));
+  // v0.4.2 #5: a saved current batch from another day (or another person) is never reused
+  const oldDay = S.B && S.B.t0 && new Date(S.B.t0 * 1000).toDateString() !== new Date().toDateString(), notYou = S.B && S.B.uid && S.ME && S.B.uid !== S.ME.id;
+  const renamed = S.B && !fresh && (oldDay || notYou || (typed && !(S.B.label || "").toLowerCase().startsWith(typed)) || (!typed && S.B.t0 && Date.now() / 1000 - S.B.t0 > 4 * 3600));
   // audit 2026-10 P0-14: photos of the current batch still waiting to upload would be filed under the NEW batch (and no longer
   // tracked); finish (or cancel) this batch's uploads first
   if ((fresh || renamed) && S.B && (upq.length || uploading)) { toast(`Photos of “${S.B.label}” are still uploading. Wait until they are done (or cancel them), then start the new batch.`, 7000); return; }
@@ -134,7 +136,7 @@ function pumpUploads() {
 const ROWB = new WeakMap();   // audit 2026-10 P0-14: row -> the batch it was added to (not whatever batch is current at send time)
 function upload(row, allowDup = false) {
   const bb = ROWB.get(row) || S.B;
-  return new Promise(res => {
+  return new Promise(res => { try {
     const fd = new FormData(); fd.append("image", row.blob, row.file.split("/").pop());
     fd.append("engine", $("#engine").value); fd.append("batch", bb.id); fd.append("batch_label", bb.label);
     if (allowDup) fd.append("allow_duplicate", "1");
@@ -161,9 +163,12 @@ function upload(row, allowDup = false) {
     };
     // round 20: the scanner restarting is not an error: the photo waits and is sent again by itself
     x.onerror = () => { conn(false); row.state = "wait"; row.msg = ""; row.tries = (row.tries || 0) + 1; saveB(); renderBatch(); res();
-      if (!row.stop) setTimeout(() => { if (row.state === "wait" && bb.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
+      row.backoff = true; if (!row.stop) setTimeout(() => { row.backoff = false; if (row.state === "wait" && bb.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
+    x.timeout = 180000; x.ontimeout = x.onerror;   // v0.4.2 #12: a request that never answers no longer holds an upload slot forever
     x.send(fd);
-  });
+    // v0.4.2 #12 (newcomer: first upload stuck on "Waiting to upload"): anything thrown before the send left the row waiting
+    // with no request and no retry. Now it says so and offers Retry.
+  } catch (e) { delete row.xhr; row.state = "rej"; row.retry = true; row.msg = "Not sent. Press Retry."; saveB(); renderBatch(); res(); } });
 }
 // round 20 (b): one calm line while the scanner can't be reached; everything retries by itself
 function conn(ok) {
@@ -242,6 +247,7 @@ function rowHTML(r) {
 }
 function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) { const h = rowHTML(r); if (li._h !== h) { li.innerHTML = h; li._h = h; } } }
 function renderBatch() {
+  if ($("#batchCur")) $("#batchCur").textContent = S.B && S.B.rows.length ? "Now: " + S.B.label : "";   // v0.4.2 #5: the batch name first, not under More
   if (!S.B || !S.B.rows.length) { $("#batch").hidden = true; return; }
   $("#batch").hidden = false; $("#batchTitle").textContent = "Batch: " + S.B.label;
   // audit 2026-10: the list was rebuilt on every 1.2 s poll (all images, focus lost); now only changed rows are touched
@@ -298,7 +304,13 @@ $("#cancelBatch").onclick = async () => {
   toast(S.B.stopMsg, 4500);
 };
 $("#clearBatch").onclick = () => { if (S.B) S.B.rows.forEach(dropThumb); S.B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
-function restoreBatch() { renderBatch(); poll(); refreshBatchCards(); }
+function restoreBatch() {
+  // v0.4.2 #12: after a reload a photo that was still waiting is no longer in the page (its file is gone): say so, never "Waiting" forever
+  if (S.B) S.B.rows.forEach(r => { if (r.state === "wait" && !r.blob) { r.state = "rej"; r.msg = "Not sent before the page reloaded. Add this photo again."; } });
+  renderBatch(); poll(); refreshBatchCards(); }
+// v0.4.2 #12: a watchdog: a photo waiting with nothing uploading and nothing queued is sent again
+setInterval(() => { if (AUTH_PAUSED || uploading || upq.length || !S.B) return;
+  const w = S.B.rows.filter(r => r.state === "wait" && r.blob && !r.stop && !r.backoff); if (w.length) { upq.push(...w); pumpUploads(); } }, 5000);
 async function refreshBatchCards() {   // reviewer r9: the upload list shows each card's CURRENT state, not the one at scan time
   try { const rows = (S.B.rows || []).filter(r => r.state === "done" && r.card); if (!rows.length) return;
     const by = new Map((await call("/api/cards?batch=" + encodeURIComponent(S.B.id))).map(c => [c.id, c]));   // round 15: only this batch (fast)
@@ -306,4 +318,5 @@ async function refreshBatchCards() {   // reviewer r9: the upload list shows eac
     rows.forEach(r => { const c = by.get(r.card.id); if (!c) return; r.card.att = (c.attention || []).map(a => a.text); r.card.status = c.status; r.card.blocked = !!c.blocked; r.card.name = c.name || r.card.name; });
     if (JSON.stringify(rows.map(r => r.card)) !== before) { saveB(); renderBatch(); } } catch {}
 }
+window.gacBusy = upPending;   // v0.4.2 #2: no idle sign-out while photos are still uploading
 export {authPause, enqueue, refreshBatchCards, restoreBatch, upPending};
