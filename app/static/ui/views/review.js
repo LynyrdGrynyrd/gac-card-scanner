@@ -58,7 +58,7 @@ async function openCard(id, opts = {}) {
     $("#addrBox").insertAdjacentHTML("beforebegin", `<div class="f extra"><label for="x_${esc(key)}">${esc(LABEL[key] || key.replace(/_/g, " "))}</label><input id="x_${esc(key)}" data-extra="${esc(key)}" data-c="${esc(key)}" value="${esc(val)}"></div>`); });
   $$("#fields [data-c]").forEach(el => { const box = el.closest(".f"); box.querySelector(".cf")?.remove();
     const low = d.low.includes(el.dataset.c), v = k[el.dataset.c]; box.classList.toggle("low", low);
-    if (low) box.querySelector("label").insertAdjacentHTML("afterbegin", `<span class="cf">Please check${v != null ? " · " + Math.round(v * 100) + "%" : ""}</span>`); });
+    if (low) box.querySelector("label").insertAdjacentHTML("afterbegin", `<span class="cf">Check${v != null ? " · " + Math.round(v * 100) + "%" : ""}</span>`); });
   $("#legend").hidden = !d.low.length;
   const SRCK = {first_name: "first_name", last_name: "last_name", title: "title", company: "company", emails: "emails", phones: "phones", website: "website", address: "address", social: "social"};
   $$("#fields .src").forEach(x => x.remove());
@@ -330,7 +330,7 @@ function renderDupes(d) {
       // v0.4 #7: side by side, "Same person?", Same / Different; differences highlighted (Same = the existing merge, Different = keep both)
       : `<b>Same person?</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id}</a>${q.length > 1 ? ` and ${plural(q.length - 1, "other")}` : ""}${bestQ.strong ? ` <span class="small"><b>Scanned twice</b>: keep one.</span>` : ""}` +
         `<div class="dupgrid" id="dGrid" data-with="${bestQ.card_id}"><div class="mini"><div class="tag">This card</div></div><div class="mini"><div class="tag">#${bestQ.card_id}</div><p class="small">Loading…</p></div></div>` +
-        `<div class="btns">${q.some(x => !x.strong) ? `<button type="button" class="btn" id="dDiff">Different</button> ` : ""}<button type="button" class="btn primary" id="dSame" aria-label="Same person: combine with #${bestQ.card_id}">Same</button></div>` +
+        `<div class="btns">${q.some(x => !x.strong) ? `<button type="button" class="btn" id="dDiff">Different</button> ` : ""}<button type="button" class="btn" id="dSame" aria-label="Same person: combine with #${bestQ.card_id}">Same</button></div>` +
         `<details class="more small"><summary>Details</summary><ul>${capList(q.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id} ${esc(x.name || "(no name)")}</a>${x.organization ? ", " + esc(x.organization) : ""} (${esc(x.status || "")}): ${esc(x.why_text || x.why.join(", "))}${x.strong ? ` <span class="small"><b>Scanned twice</b> (${x.why.includes("same photo") ? "same photo" : "same email or phone in this batch"}): keep one.</span>` : ""}</li>`))}</ul>` +
       `<div class="btns"><label for="dDecide" class="small">Decision:</label> <select id="dDecide"><option value="">Choose…</option>` +
         (() => { const opt = x => `<option value="merge:${x.card_id}">Same as #${x.card_id}${x.name ? " " + esc(x.name) : ""} – ${x.same_batch ? "this batch" : "other batch" + (x.status ? ", " + esc(x.status) : "")}</option>`;

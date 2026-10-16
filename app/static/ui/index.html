@@ -113,7 +113,7 @@
 <section id="v-review" class="view" aria-labelledby="h-r" hidden>
   <div class="row between">
     <h1 id="h-r">Review card</h1> <span id="rDirty" class="pill dirty" role="status" hidden>Unsaved</span>
-    <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Next: next card (J)" aria-keyshortcuts="j">Next →</button></div>
+    <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Skip: next card (J)" aria-keyshortcuts="j">Skip →</button></div>
   </div>
   <div class="review">
     <figure class="imgbox"><div class="zwrap" id="rZoom"><img id="rImg" alt="Photo of the business card"><span class="zhint" id="zHint" aria-live="polite">Tap a field to zoom</span></div><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
@@ -143,7 +143,7 @@
       <p class="legend small" id="srcLegend">No tag means read from the printed text. Tags show other sources.</p>
       <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = hard to read. Check the photo.</p>
       <div class="btns actions">
-        <button type="button" class="btn" id="bSkip">Skip</button>
+        <button type="button" class="btn" id="bSkip" aria-keyshortcuts="j">Skip</button>
         <button type="button" class="btn ghost" id="bDiscard" hidden>Discard edits</button>
         <button type="button" class="btn ghost" id="bPending">Reopen (set to pending)</button>
         <button type="button" class="btn ok lg" id="bApprove">Approve</button>

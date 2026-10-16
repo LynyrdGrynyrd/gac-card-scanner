@@ -254,7 +254,7 @@ dialog[open]{animation:v04up .35s var(--ease)}
 .q th,pre,.zwrap{background:var(--fill);color:var(--ink)}
 .btn.primary{background:var(--teal-d);color:var(--card)}.btn.ok{background:var(--ok);border-color:var(--ok);color:var(--card)}
 .btn.danger{color:var(--bad);border-color:var(--bad)}.btn.ghost{background:transparent}
-.btn:hover,.q tbody tr:hover,nav a:hover{background-color:var(--fill)}.btn.primary:hover{background:var(--teal)}
+.btn:not(.primary):not(.ok):hover,.q tbody tr:hover,nav a:not([aria-current=page]):hover{background-color:var(--fill)}.btn.ok:hover{filter:brightness(1.08)}.btn.primary:hover{background:var(--teal)}
 nav a{color:var(--ink)}nav a[aria-current=page]{background:var(--teal-d);color:var(--card)}
 .alert{background:var(--card);color:var(--ink)}.alert.info{background:var(--fill)}
 .foot{background:#1a1a26;color:#ddd}
@@ -267,3 +267,15 @@ nav a{color:var(--ink)}nav a[aria-current=page]{background:var(--teal-d);color:v
  :root:not([data-theme=light]) .pill.rejected,:root:not([data-theme=light]) .flag.bad{background:#4a1512;color:#ffb4ab}
  :root:not([data-theme=light]) .stat .w{color:#ffd60a}:root:not([data-theme=light]) .brand img{background:#fff;border-radius:6px;padding:2px}}
 @media (max-width:760px){.dupgrid{grid-template-columns:1fr}}
+details.more[open]{background:var(--fill)}.f.err input,.f.err textarea{background:var(--card)}
+#toast{background:var(--ink);color:var(--card)}
+/* #2: the one main action stays in view on a long card */
+.review .actions{position:sticky;bottom:0;background:var(--card);z-index:2;padding-bottom:10px;margin-bottom:0}
+.btn.danger{background:var(--card)}
+:root[data-theme=dark] .badge{color:#1a1a26}:root[data-theme=dark] .chip.low{color:#ffe27a}
+:root[data-theme=dark] .alert.bad{background:#3a1311}:root[data-theme=dark] .alert.ok{background:#0f2e18}:root[data-theme=dark] .alert.warn{background:#33290a}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .badge{color:#1a1a26}:root:not([data-theme=light]) .chip.low{color:#ffe27a}
+ :root:not([data-theme=light]) .alert.bad{background:#3a1311}:root:not([data-theme=light]) .alert.ok{background:#0f2e18}:root:not([data-theme=light]) .alert.warn{background:#33290a}}
+#rForm input,#rForm textarea{scroll-margin-bottom:96px}
+#exGo{display:inline-flex;flex-direction:row;justify-content:center;align-items:center;border:0;padding:0 56px;margin-top:12px;color:#fff;background:var(--teal-d)}#exGo:disabled{opacity:.45}
+#v-upload:has(#toQueue:not([hidden])) #bPhotos{background:var(--card);color:var(--teal-d)}   /* one primary: Review batch, once a batch is read */
