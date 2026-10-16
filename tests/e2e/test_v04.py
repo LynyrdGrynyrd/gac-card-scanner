@@ -22,7 +22,7 @@ def test_tap_field_zooms_photo(new_page):
 
 def test_enter_approves_only_when_safe(new_page):
     page = signed_in_admin(new_page)
-    scan(page, "card2_center.jpg", "card5_left.jpg", batch="E2E enter")
+    scan(page, "hard1_twocol.jpg", "hard2_photo.jpg", batch="E2E enter")   # cards no other e2e test scans (a look-alike would block Enter)
     ids = [int(a.get_attribute("href").split("/")[-1]) for a in page.locator("#qBody a[href^='#review/']").all()]
     page.locator("#qBody a[href^='#review/']").first.click(); wait_card(page, ids[0])
     expect(page.locator("#rKeys")).to_contain_text("Approve")
