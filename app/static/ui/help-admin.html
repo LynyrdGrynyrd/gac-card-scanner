@@ -30,19 +30,14 @@
 <header class="top">
   <div class="wrap bar">
     <a href="/ui#upload" class="brand"><img src="/static/brand/GAC_logo.png" alt="Greater Akron Chamber"><span>Card Scanner</span></a>
-    <nav aria-label="Main" id="helpNav" hidden>
-      <a href="/ui#upload">Scan cards</a>
-      <a href="/ui#queue">Review queue</a>
-      <a href="/ui#export">Export</a>
-      <a href="/static/ui/help.html" aria-current="page">Help</a>
-    </nav>
+    <span id="helpNavSlot"></span>
     <div class="who"><a class="btn small" href="/ui" id="helpBack">Sign in</a></div>
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 16, 2026 · version 0.4.3. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 16, 2026 · version <span data-ver>0.4.4</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.2</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.4</em></p>
 <blockquote class="callout">
 <p>For the person who runs the scanner and does the MC Trade import. Reviewing cards is in the <strong><a href="/static/ui/help.html">Reviewer Guide</a></strong>.</p>
 </blockquote>
@@ -104,6 +99,7 @@
 </tbody>
 </table></div>
 <p>The server enforces this. An admin exporting someone else's batch is asked first; <strong>Cancel</strong> is the default.</p>
+<p>Only admins may <strong>Confirm</strong> a blocked email, website or address. Open the card, compare with the photo, click <strong>Confirm</strong> and give a reason. The reason is logged.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
 <ol>

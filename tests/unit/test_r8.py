@@ -119,9 +119,9 @@ def test_dryrun_audit_counts_and_left_out(env, monkeypatch):
     for c in (a, b): ui.set_meta(c, batch="r8aud", batch_label="R8 audit batch"); _approve(env, c, "")
     assert adm.get("/api/export/dryrun?status=approved&batch=r8aud").status_code == 200
     row = next(x for x in adm.get("/api/admin/audit?q=R8+audit+batch").json() if x["what"].startswith("dry run: ran"))
-    assert "UPDATE 0, CREATE 1, NEEDS REVIEW 1, LEFT OUT 0" in row["what"], row["what"]
+    assert "UPDATE 0, CREATE 1, TO CHECK 1, LEFT OUT 0" in row["what"], row["what"]
     seg = row["what"].split("not in either file")[1].split("; cards checked")[0]   # round 9 (manager-r9 L-r9-1/2)
-    assert f"1 (NEEDS REVIEW + LEFT OUT): #{b}" in seg and f"#{a}" not in seg and f"#{a}" in row["what"].split("cards checked")[1]
+    assert f"1 (TO CHECK in neither file + LEFT OUT): #{b}" in seg and f"#{a}" not in seg and f"#{a}" in row["what"].split("cards checked")[1]
     r = adm.get("/api/export/dryrun?status=approved&batch=r8nope")
     assert r.status_code == 404
     auth.set_setting("mctrade_updates_enabled", "1")

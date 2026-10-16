@@ -7,7 +7,7 @@ import {toast} from "./ui/toast.js";
 import {ask} from "./ui/dialog.js";
 import {parseHash} from "./router.js";
 import {Q, loadQueue} from "./views/queue.js";
-import {openCard} from "./views/review.js";
+import {dirtyVals, openCard} from "./views/review.js";
 import {exportInfo} from "./views/export.js";
 
 /* ---------- signed-in user ---------- */
@@ -47,7 +47,8 @@ function idleStart(min) {
       buttons: [{label: "Stay signed in", cls: "primary", value: 1, primary: true, focus: true}]});
     idleWarned = false;
     if (!a.timedOut || idleLast !== t0) { idleLast = Date.now(); return; }
-    if (ed_) { try { keepDraft(); } catch {} }
+    // v0.4.4 #10 (skeptic L3): the draft goes to the SERVER (yours only); the browser copy is cleared at sign-out
+    if (ed_) { try { await post(`/api/cards/${ed_}/draft`, {vals: dirtyVals(), version: S.cur.version}); } catch {} }
     S.dirty = false; window.gacIdleOut = true; $("#logout").click();
   }, 15000);
 }
@@ -57,7 +58,7 @@ $("#logout").onclick = async () => {
                          buttons: [{label: "Stay", cls: "primary", value: null, primary: true, focus: true}, {label: "Sign out", cls: "danger", value: 1}]});
     if (!a.value) return; S.dirty = false; }
   S.SIGNING_OUT = true; S.dirty = false; clearTimeout(keepDraft.t);
-  if (!window.gacIdleOut) clearDrafts();   // reviewer r8/r9: drafts don't survive sign-out (shared computers); an idle sign-out keeps the person's own draft (v0.4.3 #2)
+  clearDrafts();   // reviewer r8/r9, v0.4.4 #10: no draft stays in the browser after any sign-out (an idle one keeps it on the server)
   const back = location.hash && !location.hash.startsWith("#upload") ? location.hash.replace(/^#queue\?.*$/, "#queue") : "#queue";   // reviewer r7: signing back in returns here (newcomer r9: without a remembered batch)
   ["lastBatch", "lastBatchUid", "lastBatchAt", "batchChosen", "batchChosenUid", "queueHash", "order", "draft", "batch"].forEach(k => { try { delete SS[k]; } catch {} });
   await post("/api/auth/logout", {}); location.href = "/login?next=" + encodeURIComponent("/ui" + back); };
@@ -69,7 +70,7 @@ async function doUndo() {
     const msg = "Undone: " + r.undone + "." + (r.notice ? " " + r.notice : ""), show = () => toast(msg, r.notice ? 8000 : 4500);
     const {v, id} = parseHash(); if (v === "review" && r.cards.includes(+id)) { await openCard(+id); show(); } else if (v === "review" && r.cards.length) { location.hash = "review/" + r.cards[0]; setTimeout(show, 500); } else { if (v === "queue") loadQueue(); else if (v === "export") exportInfo(); show(); }
     refreshUndo();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(e.message); refreshUndo(); }   // v0.4.4 #10: a refused action is closed; the button moves on
 }
 $("#undoBtn").onclick = doUndo;
 async function refreshCounts() {
@@ -79,7 +80,7 @@ async function refreshCounts() {
     const c = await call("/api/counts" + (Q.batch ? "?batch=" + encodeURIComponent(Q.batch) : ""));
     const rd = S.B && S.B.uid === (S.ME && S.ME.id) ? S.B.rows.filter(r => ["wait", "up", "queued", "reading"].includes(r.state)).length : 0;
     const pb = $("#pendingBadge"); pb.hidden = !c.mine_pending && !rd;
-    pb.textContent = String(c.mine_pending) + (rd ? ` +${rd}` : "");
+    pb.textContent = String(c.mine_pending) + (rd ? ` · ${rd} reading` : "");   // v0.4.4 #9 (coordinator): plain words, not "63 +4"
     const lbl = `${c.mine_pending} waiting in your batches` + (rd ? `, ${rd} still being read` : "");
     pb.setAttribute("aria-label", lbl); pb.title = lbl;
     if ($("#v-queue").hidden) $$("#statusTabs button span").forEach(x => x.textContent = "");

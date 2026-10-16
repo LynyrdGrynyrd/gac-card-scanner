@@ -294,15 +294,19 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         _named = set(_warn) | {i for i, _ in conf_[:20]} | set(ovr_) | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))} \
             | {k for k, v in res["decisions"].items() if v[0] == mx.REVIEW}
         _more = _flagged - _named
+        # v0.4.4 #3 (data-manager M1, reviewer): ONE 'To check' set: the Check-line cards + the cards a person must decide (NEEDS REVIEW).
+        # Screen, Save dialog, READ-ME Totals, dry run and Preview all use it.
+        _chk0 = set(_warn) | {i for i, _ in conf_} | set(ovr_) | _flagged | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}
+        _tc = _chk0 | {int(k) for k, v in res["decisions"].items() if v[0] == mx.REVIEW}
         _has_web = any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h)
         readme = "\n".join([
             *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
             "GAC Card Scanner: MC Trade import file",
-            readme_totals(cnt_),
-            "Before importing: read the “Check” lines. An import can't be undone." + (" Test 2 rows first." if len(rows) + len(upd) > 2 else "")
+            readme_totals(cnt_, len(_tc)),
+            ("Before importing: read the “Check” lines. " if _tc else "") + "An import can't be undone." + (" Test 2 rows first." if len(rows) + len(upd) > 2 else "")
             + (" Import new contacts and updates separately." if upd else ""),
             f"Created {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
-            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the CSV and this READ-ME (not for import).",
+            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the CSV, the summary and this READ-ME (not for import).",
             *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
             (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
             (f"Check: {plural(len(ovr_), 'card')} approved anyway (see the CSV)." if ovr_ else ""),
@@ -335,6 +339,16 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         _seen = set(); readme = "\n".join(x for x in readme.split("\n") if not x.strip() or not (x in _seen or _seen.add(x)))   # round 24: each warning once
         comp = {"extra.csv": ("\ufeff" + e.getvalue()).encode(), "readme.txt": readme.encode()}
         if upd: comp["updates.xlsx"] = _book(upd)
+        # v0.4.4 #8 (data-manager): the summary sheet is back, as its own workbook (the import file stays one template sheet)
+        _sw = Workbook(); _ss = _sw.active; _ss.title = "Summary"
+        for rw_ in (["GAC Card Scanner export summary (not for import)"], ["Batch", batch_label or "All batches"], ["Cards", len(sel)],
+                    ["New contacts", cnt_[mx.NEW]], ["Updates", cnt_[mx.UPDATE]], ["To check", len(_tc)], ["Left out", cnt_[mx.LEFT]], [],
+                    ["To check", "Why"], *[[f"#{i}", "; ".join(_warn.get(i, [])) or (_mcn.get(i) or "see the READ-ME")] for i in sorted(_tc)]):
+            _ss.append([safe_cell(x) if isinstance(x, str) else x for x in rw_])
+        for rw in _ss.iter_rows():
+            for cell in rw:
+                if isinstance(cell.value, str): cell.data_type = "s"
+        _sb = io.BytesIO(); _sw.save(_sb); comp["summary.xlsx"] = _sb.getvalue()
         # round 9 (mctrade-r6): what each update row would overwrite in MC Trade, old value next to new
         _byid = {str(r_["profile_id"]): r_ for r_ in (crm_source.real() or [])}; _udiff = []
         _inhdr = {mx.canonical(h) for h in hdr if h}   # round 13 (mctrade-r8 R2): only columns that are really in the file (no phantom IndWebsite)
@@ -350,7 +364,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                            # doesn't hold MC Trade's current value for these, so it is shown as unknown (old=None).
                            + [{"field": h_, "old": None, "new": str(v_), "changes": None}
                               for h_, v_ in r_.items() if v_ not in (None, "") and mx.canonical(h_) in _inhdr and h_ not in ("ProfileID", "MemberSince", "OrgInd", "IndFirstName", "IndLastName", "OrgName", "IndEmail", "IndPhone")]})
-        summ = {"mc_possible": {str(k): v for k, v in sorted(_mcn.items())}, "check_ids": sorted(set(_warn) | {i for i, _ in conf_} | set(ovr_) | _flagged | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
+        summ = {"mc_possible": {str(k): v for k, v in sorted(_mcn.items())}, "check_ids": sorted(_chk0), "to_check_ids": sorted(_tc),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
                 "new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
                 "left_ids": [c["id"] for c, _ in left if c["id"] not in {x["id"] for x, _ in rows}],
                 "review": res["review"], "possible": res["possible"], "crm_real": cinfo["real"],
@@ -362,9 +376,11 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         return body_x, MT["xlsx"], fn, comp, summ
     raise HTTPException(404)
 
-def readme_totals(cnt):
+def readme_totals(cnt, to_check=None):
+    """v0.4.4 #3: 'to check' is the same number as on the screen and in the Save dialog (was '0 to review' next to Check lines)."""
     from . import mctrade_export as mx
-    return (f"Totals: {cnt[mx.NEW]} new · {cnt[mx.UPDATE]} {U._s(cnt[mx.UPDATE], 'update')} · {cnt[mx.REVIEW]} to review · "
+    tc = cnt[mx.REVIEW] if to_check is None else to_check
+    return (f"Totals: {cnt[mx.NEW]} new · {cnt[mx.UPDATE]} {U._s(cnt[mx.UPDATE], 'update')} · {tc} to check · "
             f"{cnt[mx.LEFT]} left out.")
 
 def comp_name(fn, suf):
@@ -562,7 +578,7 @@ def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
                                                   "X-Export-Id": str(eid), "X-Companions": ",".join(extras)} | summ_h)
 
 COMPANION = {"extra.csv": ("text/csv", "-extra-columns.csv"), "readme.txt": ("text/plain", "-READ-ME.txt"),
-             "updates.xlsx": (MT["xlsx"], "-UPDATES.xlsx")}
+             "updates.xlsx": (MT["xlsx"], "-UPDATES.xlsx"), "summary.xlsx": (MT["xlsx"], "-SUMMARY.xlsx")}
 @U.router.get("/api/exports/{eid}/companion/{name}")
 def export_companion(eid: int, name: str, request: Request):
     """Companion files of an MC Trade import file: the non-template columns + rows left out, and the READ ME notes."""

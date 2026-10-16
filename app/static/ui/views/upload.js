@@ -181,6 +181,10 @@ function conn(ok) {
   if (conn.leaving) return;
   conn.f = (conn.f || 0) + 1; conn.t = conn.t || Date.now();
   el.hidden = !(conn.f >= 2 && Date.now() - conn.t >= 4000);
+  // v0.4.4 #7 (data-manager L1: the banner stayed): while it shows, check the server every 3 s and clear it once it answers
+  if (!el.hidden && !conn.watch) conn.watch = setInterval(async () => {
+    try { const r = await fetch("/health"); if (r.ok) { clearInterval(conn.watch); conn.watch = null; conn(true); } } catch {}
+  }, 3000);
 }
 addEventListener("pagehide", () => { conn.leaving = true; });
 function addKids(row, job) {   // round 20: cards of a PDF appear as each page is read

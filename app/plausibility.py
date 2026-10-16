@@ -148,7 +148,9 @@ def check(f):
                     out.append(_sug("email_web", "emails", f"Email domain “{d}” and website “{web}” differ by {dist} letter(s): one is probably misread"))
         # local part vs name
         la = _a(lp)
-        if fn and ln and len(la) >= 4:
+        # v0.4.4 #12 (reviewer: "praman@…" vs "Morg4n Raman"): no hint when the NAME is the misread part (digits in it); the
+        # email was right and the hint wrongly blamed it. The name is flagged on its own.
+        if fn and ln and len(la) >= 4 and not re.search(r"\d", f"{f.get('first_name') or ''}{f.get('last_name') or ''}"):
             pats = {fn + ln, fn[0] + ln, fn, ln, ln + fn[0], fn + ln[0]}
             full = {fn + ln, fn[0] + ln, ln + fn[0], ln + fn}
             if la not in pats:

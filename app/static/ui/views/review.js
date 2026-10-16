@@ -69,9 +69,10 @@ async function openCard(id, opts = {}) {
     Object.keys(af).forEach(k => { const el = AFID[k] && document.getElementById(AFID[k]), lab = el && el.closest(".f")?.querySelector("label"), sv = String(d.sources[k] || "");
       if (!lab || sv.startsWith("edited") || sv.startsWith("ai") || lab.querySelector(".chg")) return;
       const was = af[k] == null ? "" : Array.isArray(af[k]) ? af[k].map(x => typeof x === "object" ? x.number : x).join(", ") : String(af[k]);
-      // v0.4.3 #8 (coordinator): no 'changed' tag when the value shown is what was read (only case, spaces or dots differ)
-      const now_ = String(el.value || ""), nz = v => String(v).toLowerCase().replace(/[\s.,]+/g, "");
-      if (nz(now_) === nz(was) || !now_.trim()) return;
+      // v0.4.3 #8 / v0.4.4 #5 (data-manager M3 REGRESSION): hide the tag only when the value shown is EXACTLY what was read.
+      // A spacing or dot fix (website 'www. x .com', company respacing) is a real change and keeps its 'changed' tag.
+      const now_ = String(el.value || "").trim();
+      if (!now_ || now_ === String(was).trim()) return;
       lab.insertAdjacentHTML("beforeend", ` <span class="chg src" title="${esc("Fixed automatically. Read as: " + (was || "(empty)"))}">changed</span>`); }); }
   Object.entries(d.confirmed || {}).forEach(([k, c_]) => { const el = document.getElementById(k) || $(`[data-extra="${k}"]`), lab = el && el.closest(".f")?.querySelector("label");
     if (lab) lab.insertAdjacentHTML("beforeend", ` <span class="src confirmed" title="${esc(c_.reason || "")}">✓ confirmed by ${esc(c_.by || "?")}</span>`); });   // round 23 (skeptic r22 L5)
@@ -90,7 +91,7 @@ async function openCard(id, opts = {}) {
   S.dirty = false; dirtyIds.clear();
   ORIG = {}; $$("#rForm input[id], #rForm textarea[id]").forEach(el => { if (el.type !== "file") ORIG[el.id] = el.value; });
   let restore = keep;
-  if (!restore) { try { const ld = JSON.parse(localStorage.getItem(draftKey(c.id)) || "null");
+  if (!restore) { try { const ld = JSON.parse(localStorage.getItem(draftKey(c.id)) || "null") || d.my_draft || null;   // v0.4.4 #10: or your server-side draft
     // reviewer r8: a draft whose values equal the saved card (e.g. saved just before) is a ghost: drop it, say nothing
     // coordinator r3 #2: compare the way the server stores values (spacing, separators, email/website case), so a save the server tidied isn't "unsaved"
     const nv = normV;
@@ -173,7 +174,7 @@ function markRisks(d) {
 $("#bDiscard") && ($("#bDiscard").onclick = async () => { if (!S.cur) return;
   const r = await ask({title: "Discard your edits?", html: `<p>The form goes back to the saved card #${S.cur.id}. Your typed changes (${esc([...dirtyIds].map(i => LABEL[i.replace(/^x_/, "")] || i.replace(/^x_/, "")).join(", "))}) are thrown away.</p>`,
     buttons: [{label: "Discard my edits", cls: "danger", value: 1}, {label: "Cancel", value: null, primary: true, focus: true}]});
-  if (!r.value) return; clearTimeout(keepDraft.t); dropDraft(S.cur.id); S.dirty = false; dirtyIds.clear(); delete SS.draft; await openCard(S.cur.id); toast("Edits discarded."); });
+  if (!r.value) return; clearTimeout(keepDraft.t); dropDraft(S.cur.id); try { await post(`/api/cards/${S.cur.id}/draft`, {vals: {}}); } catch {} S.dirty = false; dirtyIds.clear(); delete SS.draft; await openCard(S.cur.id); toast("Edits discarded."); });
 addEventListener("beforeunload", e => { if (S.SIGNING_OUT) return; if (!$("#v-review").hidden && Object.keys(ORIG).length && recomputeDirty()) { saveDraft(); e.preventDefault(); e.returnValue = ""; } });
 addEventListener("pageshow", e => { if (e.persisted) location.reload(); });   // never show a cached page after sign-out
 let vT = null;
@@ -288,15 +289,16 @@ function showErrors(errs, loud) {
   $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? `<b>Fix before approving:</b><ul>${Object.values(errs).map(m => `<li>${esc(m)}</li>`).join("")}</ul>` : "";
 }
 // round 23 (datamanager/coordinator/newcomer r22): 'This is correct' confirms ONE field at a time, shows the value and needs a
-// reason. Phones are never confirmable. v0.4.3 #7: staff confirm every confirmable field (reason logged); no "Ask an admin".
-const CONF_ADMIN = [];
+// reason. Phones are never confirmable. v0.4.4 (user decision): email/website/address are admin-only; reviewers see one plain line.
+const CONF_ADMIN = ["emails", "website", "address", "other_address"];
 function confirmBtn(ov, sid, hardNow) {
   if (!$("#rErr") || $("#rErr").hidden || $("#rErr .conf")) return;
   const adm = S.ME && S.ME.role === "admin", all = (ov || []).filter(k => k !== "phones");
   const mine = all.filter(k => adm || !((S.cur && S.cur.admin_override) || CONF_ADMIN).includes(k));
-  if (!mine.length) return;
+  const askAdm = !adm && Object.keys(hardNow || (S.cur && S.cur.hard) || {}).some(k => CONF_ADMIN.includes(k));
+  if (!mine.length && !askAdm) return;
   const lab = k => LABEL[k === "name" ? "first_name" : k] || k;
-  $("#rErr").insertAdjacentHTML("beforeend", `<p class="small conf">${mine.length ? "Photo agrees? " + mine.map((k, i) => `<button type="button" class="btn small" data-confirm="${esc(k)}"${i ? "" : ' id="bConfirmOk"'}>Confirm ${esc(lab(k))}</button>`).join(" ") : ""}</p>`);
+  $("#rErr").insertAdjacentHTML("beforeend", `<p class="small conf">${mine.length ? "Photo agrees? " + mine.map((k, i) => `<button type="button" class="btn small" data-confirm="${esc(k)}"${i ? "" : ' id="bConfirmOk"'}>Confirm ${esc(lab(k))}</button>`).join(" ") : ""}${askAdm ? `${mine.length ? " " : ""}<span id="askAdmin">An admin needs to confirm this.</span>` : ""}</p>`);
   $$("#rErr [data-confirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.confirm, sid));
 }
 async function doConfirm(k, sid) {
@@ -339,7 +341,7 @@ function renderDupes(d) {
     const canSame = !!(bestQ && bestQ.same_user && bestQ.can_same !== false);   // the server refuses a merge into another person's card
     // v0.4.2 #11 (skeptic L3) / #8: someone else's look-alike gets no "Same person?" headline (only Different is possible); short text
     const head = !bestQ ? "" : canSame ? `<b>Same person?</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id}</a>` : `<b>Looks like</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id}</a> <span class="small">(someone else's card)</span>`;
-    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : (kept.length > 3 ? `Marked different from ${plural(kept.length, "card")}.` : `Marked different from ${kept.map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}.`))
+    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : (kept.length > 3 ? `Different from ${(d.kept_n || kept.length)}.` : `Marked different from ${kept.map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}.`))
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
       // v0.4 #7: side by side, "Same person?", Same / Different; differences highlighted (Same = the existing merge, Different = keep both)
@@ -369,7 +371,9 @@ function renderDupes(d) {
       const str = v => Array.isArray(v) ? v.map(p => typeof p === "object" ? p.number : p).join(", ") : (v || "");
       // v0.4.3 #6 (coordinator): where both cards have a value, the person picks which one to keep; the other goes into the note
       const pick = x => `<select class="mkeep" data-f="${esc(x.field)}" aria-label="Keep for ${esc(F[x.field] || x.field)}"><option value="tgt"${x.keep === "tgt" ? " selected" : ""}>Keep #${tid}'s</option><option value="src"${x.keep === "src" ? " selected" : ""}>Keep this card's</option></select>` +
-        `<span class="small"> ${x.why === "fails_check" && x.keep === "src" ? `(#${tid}'s fails a check)` : x.why === "fuller" && x.keep === "src" ? "(fuller)" : ""} The other goes into the note.</span>`;
+        `<span class="small"> ${x.why === "fails_check" && x.keep === "src" ? `(#${tid}'s fails a check)` : x.why === "fuller" && x.keep === "src" ? "(fuller)" : ""}</span>` +
+        // v0.4.4 #2 (data-manager/coordinator): a live line says exactly which value goes to the note
+        `<div class="small mnote" data-t="${esc(x.target)}" data-s="${esc(x.this)}">Goes to note: ${esc(x.keep === "src" ? x.target : x.this)}</div>`;
       const rows = pv.rows.map(x => `<tr><th scope="row">${F[x.field] || x.field}</th><td>${esc(x.target) || "<i>empty</i>"}</td><td>${esc(x.this)}</td><td>${!x.target ? "added to #" + tid : x.why === "spacing" ? "<b>kept: #" + tid + "'s value</b> (only spacing or capitals differ)" : pick(x)}</td></tr>`).join("") +
         ["emails", "phones", "social"].map(k => { const have = new Set((t[k] || []).map(x => (typeof x === "object" ? x.number : x).replace(/\D/g, k === "phones" ? "" : "$&").toLowerCase()));
           const add = (me[k] || []).filter(x => k !== "phones" || (x.number || "").replace(/\s*(x|ext\.?)\s*\d+$/i, "").replace(/\D/g, "").length >= ((x.number || "").trim().startsWith("+") ? 8 : 10)).filter(x => ![...have].some(h => k === "phones" && h.endsWith((x.number || "").replace(/\D/g, ""))) && !have.has((typeof x === "object" ? x.number : x).replace(/\D/g, k === "phones" ? "" : "$&").toLowerCase()));
@@ -380,7 +384,7 @@ function renderDupes(d) {
           const dropRows = [...drop].map(x => `<tr><th scope="row">${LABEL[k] || k}</th><td>${esc(str(t[k]))}</td><td>${esc(x)}</td><td>not added (${(pv.email_drop_why || {})[x] === "misread" ? `looks like a misread copy of #${tid}'s email` : "it fails the email check (misread?): type the right address if needed"})</td></tr>`).join("");
           return rep.map(x => `<tr><th scope="row">${LABEL[k] || k}</th><td>${esc(x.old)}</td><td>${esc(x.new)}</td><td><b>replace:</b> #${tid}'s misread ${esc(x.old)} is replaced by ${esc(x.new)}</td></tr>`).join("") +
             dropRows + (plain.length ? `<tr><th scope="row">${LABEL[k] || k}</th><td>${esc(str(t[k])) || "<i>empty</i>"}</td><td>${esc(str(plain))}</td><td>${k === "phones" && plain.some(x => [...(t[k] || [])].some(h => { const hd = String(h.number || h).replace(/\D/g, ""), xd = String(x.number || x).replace(/\D/g, ""); return hd.length >= 7 && xd !== hd && xd.endsWith(hd); })) ? "<b>replaces</b> #" + tid + "'s shorter (truncated) number" : "added to #" + tid}</td></tr>` : ""); }).join("");   // round 15 (coordinator r14 #5)
-      const r = await ask({title: `Merge this card into #${tid}?`, html: (rows ? `<table class="aidiff"><thead><tr><th>Field</th><th>#${tid} has</th><th>This card has</th><th>After merging</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>No different values: nothing is lost.</p>") +
+      const r = await mergeAsk({title: `Merge this card into #${tid}?`, html: (rows ? `<table class="aidiff"><thead><tr><th>Field</th><th>#${tid} has</th><th>This card has</th><th>After merging</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>No different values: nothing is lost.</p>") +
           `<p class="small">This card is then rejected as a duplicate. Undo reverses the merge.</p>`,
         wide: true, buttons: [{label: "Merge", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
       if (r.cancelled) { await ask({title: "Not merged", html: `<p>The question closed before you answered. <b>Nothing was merged or saved.</b> Your edits are still on the form.</p>`, buttons: [{label: "OK", cls: "primary", value: 1, primary: true}]}); return; }   // round 15 (part-timer r14)
@@ -391,7 +395,9 @@ function renderDupes(d) {
       ap.onclick = e => { const v = sel.value; if (!v) return;
         if (v.startsWith("merge:")) return doMerge(e.currentTarget, +v.slice(6));
         const ids = q.filter(x => !x.strong).map(x => x.card_id);
-        act(e.currentTarget, {keep_apart: ids.length === 1 ? ids : "all"}, ids.length === 1 ? `Marked as a different person from #${ids[0]}.` : `Marked as a different person from ${ids.length} look-alike cards.`); };
+        // v0.4.4 #4: the exported look-alikes are named HERE, once, so Approve doesn't ask again
+        const nx_ = (S.cur.exported_elsewhere || []).filter(x => ids.includes(x.card_id) && (x.times || 0) > 0).length;
+        act(e.currentTarget, {keep_apart: ids.length === 1 ? ids : "all"}, (ids.length === 1 ? `Marked as a different person from #${ids[0]}.` : `Marked as a different person from ${ids.length} look-alike cards.`) + (nx_ ? ` ${nx_} of them ${nx_ === 1 ? "was" : "were"} exported before.` : "")); };
       const ds = $("#dSame"), dd = $("#dDiff");
       if (ds) ds.onclick = e => doMerge(e.currentTarget, bestQ.card_id);
       if (dd) dd.onclick = e => { sel.value = "keep"; ap.disabled = false; ap.onclick({currentTarget: e.currentTarget}); }; }
@@ -399,12 +405,12 @@ function renderDupes(d) {
   // v0.4.2 #8 (newcomer/reviewer): ONE box. While Same/Different is open, MC Trade is one line in it, not a second question
   const openQ = all.length && !decided && all.some(x => !x.kept_apart);
   $("#rDupC").hidden = !crm.length || openQ;
-  if (crm.length && openQ) $("#rDupQ").insertAdjacentHTML("beforeend", `<p class="small">Also maybe in MC Trade: <b>${esc(crm[0].name)}</b> (${esc(crm[0].why_text)}).</p>`);
+  if (crm.length && openQ) $("#rDupQ").insertAdjacentHTML("beforeend", `<p class="small">May already be in MC Trade: <b>${esc(crm[0].name)}</b> (${esc(crm[0].why_text)}).</p>`);
   if (crm.length && !openQ && !d.dupes.updates_enabled && d.status === "pending" && !d.dupes.crm_action) {   // only one outcome is possible: say it, no button
-    const m = crm[0]; $("#rDupC").innerHTML = `<b>Maybe in MC Trade:</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test list</span>` : ""}. Approve adds a new contact; the READ-ME lists it to check.`;
+    const m = crm[0]; $("#rDupC").innerHTML = `<b>May already be in MC Trade:</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test list</span>` : ""}. Approve adds a new contact; the READ-ME lists it to check.`;
   } else if (crm.length && !openQ) {
     const m = crm[0], ch = d.dupes.crm_action;
-    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "Maybe in MC Trade:"}</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test MC Trade list</span>` : ""}` +
+    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "May already be in MC Trade:"}</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test MC Trade list</span>` : ""}` +
       `<p class="small">${esc(m.organization)}, MC Trade #${esc(m.profile_id)}.</p>` +
       (d.status !== "pending" ? "" : ch ? `<p>Decision: <b>${ch === "update_existing" ? "update the existing contact" : "add as a new contact"}</b>. <button type="button" class="link" id="cChange">Change</button></p>`
           : d.dup_decided ? `<div class="btns"><button type="button" class="btn small" id="cNew">Add as new</button> <button type="button" class="link" id="cChange">Change</button></div>`   // round 22: after 'Different person' one button, not a second same/different pair
@@ -445,6 +451,11 @@ function waitForAI(sid) {
   $("#bApprove").insertAdjacentHTML("beforebegin", `<span id="aiWait" class="small" role="status">Waiting for the AI check…</span> `);
   toast("Waiting for the AI check. You'll see a message when it's done.", 4000);
 }
+function mergeAsk(o) {   // v0.4.4 #2: the dialog's "Goes to note" lines follow the Keep choice
+  const pr = ask(o);
+  $$("#dlgBody .mkeep").forEach(sel => sel.onchange = () => { const n = sel.closest("td").querySelector(".mnote"); if (n) n.textContent = "Goes to note: " + (sel.value === "src" ? n.dataset.t : n.dataset.s); });
+  return pr;
+}
 const dlgStopped = r => { if (r && r.cancelled) toast("Not saved: the question closed first. Your edits are still on the form.", 8000); };   // round 14
 let DECIDING = 0;   // round 17 (reviewer r16 N3, part-timer r16 #1): one decision at a time; the AI poll never re-renders under it
 async function decide(status, btn) {
@@ -455,6 +466,8 @@ async function decide(status, btn) {
 async function decide_(status, btn) {
   if (!S.CARD_READY) { toast("Wait for the card to finish loading before saving.", 4000); return; }
   const sid = S.cur.id;   // round 11 (part-timer r4): the card is fixed when the action starts (see act())
+  if (status === "rejected" && S.cur.status === "approved" && S.cur.exported) {   // v0.4.4 #7: say why, before asking anything
+    await ask({title: "Can't reject", html: `<p>Card #${sid} was already exported, so it can't be rejected here.</p><p class="small">If it shouldn't be in MC Trade, remove it there and add a note on the card.</p>`, buttons: [{label: "OK", cls: "primary", value: 1, primary: true}]}); return; }
   // round 14 (LOST SAVE): a click while the previous save is still running used to be ignored without a word (busy button).
   // It now waits for that save, then saves what is on the form at that moment.
   if (S.SAVING || btn.getAttribute("aria-busy") === "true") {
@@ -488,7 +501,9 @@ async function decide_(status, btn) {
   const keptIds = new Set(((S.cur.dupes || {}).queue || []).filter(x => x.kept_apart).map(x => x.card_id));
   // v0.4.2 #3 (reviewer Med-High): 'Different' answers the look-alike question, but Approve still says once that this person
   // was exported before / may be in MC Trade, so it is never a silent second import
-  const xe0 = status === "approved" ? (S.cur.exported_elsewhere || []).filter(x => (x.times || 0) > 0) : [];
+  // v0.4.4 #4 (coordinator/reviewer): look-alikes you already marked Different were named when you pressed Different
+  // ("N exported before"); Approve warns only about NEW information, so Enter approves in one press after Different
+  const xe0 = status === "approved" ? (S.cur.exported_elsewhere || []).filter(x => (x.times || 0) > 0 && !x.kept_apart && !keptIds.has(x.card_id)) : [];
   const crm0 = status === "approved" && S.cur.dupes && !S.cur.dupes.crm_action && !S.cur.dupes.updates_enabled ? (S.cur.dupes.crm || []).slice(0, 1) : [];
   // round 23 (newcomer r22): a choice already made on the card (or 'Different person' when adding as new is the only choice) is sent, so it is not asked again
   if (status === "approved" && S.cur.dupes && !body.crm_action) { if (S.cur.dupes.crm_action) body.crm_action = S.cur.dupes.crm_action; else if (S.cur.dup_decided && (S.cur.dupes.crm || []).length && !S.cur.dupes.updates_enabled) body.crm_action = "create_new"; }
@@ -506,15 +521,16 @@ async function decide_(status, btn) {
     // v0.4.3 #8 (newcomer): ONE wording for the AI not being finished
     if (aiBusy) bits.push(`<p>AI check not finished.${aiWas === "queued" ? " Deciding now <b>cancels</b> it." : " Its suggestions appear later."}</p>`);
     if (status === "approved" && xe0.length) bits.push(`<p>Exported before: ${xe0.slice(0, 3).map(x => "#" + x.card_id + (keptIds.has(x.card_id) || x.kept_apart ? " (you said Different)" : "")).join(", ")}${xe0.length > 3 ? ` and ${xe0.length - 3} more` : ""}.</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
-    if (crm0.length) bits.push(`<p>Maybe in MC Trade: <b>${esc(crm0[0].name)}</b>. It will be added as a new contact.</p>`);
+    if (crm0.length) bits.push(`<p>May already be in MC Trade: <b>${esc(crm0[0].name)}</b>. It will be added as a new contact.</p>`);
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const warn0 = xe0.length || crm0.length;
     const r0 = await ask({title: status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : "Approve as a new person?", html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
       // v0.4.1 #1: when this person was exported before, Cancel is the default (Enter or a held key never approves through it)
-      buttons: warn0 && status === "approved" ? [{label: xe0.length ? "Approve anyway" : "Add as new contact", value: 1}, {label: aiBusy ? "Wait for the AI" : "Cancel", cls: "primary", value: aiBusy ? "wait" : null, primary: true, focus: true}]
-        : [{label: status === "approved" ? "Approve now" : "Reject now", cls: "primary", value: 1, primary: true}, {label: aiBusy ? "Wait for the AI" : "Cancel", value: aiBusy ? "wait" : null}]});
+      // v0.4.4 #4: ONE dialog for AI + exported + MC Trade, and it always has Cancel
+      buttons: warn0 && status === "approved" ? [{label: xe0.length ? "Approve anyway" : "Add as new contact", value: 1}, ...(aiBusy ? [{label: "Wait for the AI", value: "wait"}] : []), {label: "Cancel", cls: "primary", value: null, primary: true, focus: true}]
+        : [{label: status === "approved" ? "Approve now" : "Reject now", cls: "primary", value: 1, primary: true}, ...(aiBusy ? [{label: "Wait for the AI", value: "wait"}] : []), {label: "Cancel", value: null}]});
     if (r0.value === "wait") { waitForAI(sid); return; }   // v0.4.3 #8: really waits: a status line, then a message when it is done
     if (!r0.value) { dlgStopped(r0); return; }
     if (needWhy) { if (!(r0.input || "").trim()) { toast("A reason is needed to approve anyway.", 4000); return; } body.override_reason = r0.input; }

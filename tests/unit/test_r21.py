@@ -56,7 +56,7 @@ def test_confirm_correct_override_is_audited(env):
     # round 22: phones are never overridable; emails need an admin, the exact value and the version
     assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "phones"}).status_code == 400
     v0 = rev.get(f"/api/cards/{cid}").json()["version"]
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 422   # v0.4.3 #7: staff may, with a reason
+    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 403   # v0.4.4: admins only
     assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0, "reason": "printed on the card"}).status_code == 200
     v = rev.post("/api/validate", json={"fields": st.get(cid)["fields"], "card_id": cid}).json(); assert "emails" not in v["hard"]
     assert "emails" in ui.garbled_errors(st.get(cid)["fields"] | {"emails": ["sam@smithlawz.com"]})   # a changed value is checked again

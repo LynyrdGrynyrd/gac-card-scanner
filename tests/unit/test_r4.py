@@ -52,7 +52,7 @@ def test_xlsx_template_dedupe_companions(env):
     row = rows[0]; g = lambda h: row[hdr.index(h)]
     assert g("IndFirstName") == "Tia" and g("IndCity") == "Cleveland" and g("IndWorkPhone") == "330-555-0181"
     assert g("AffCode1") == "CardScan-Pilot"
-    eid = r.headers["X-Export-Id"]; assert set(r.headers["X-Companions"].split(",")) == {"extra.csv", "readme.txt"}
+    eid = r.headers["X-Export-Id"]; assert set(r.headers["X-Companions"].split(",")) == {"extra.csv", "readme.txt", "summary.xlsx"}
     ex = adm.get(f"/api/exports/{eid}/companion/extra.csv"); assert ex.text.startswith("\ufeff") and "met at booth" in ex.text
     assert env["rev2"].get(f"/api/exports/{eid}/companion/extra.csv").status_code == 403
     assert [e for e in adm.get("/api/exports").json() if e["id"] == int(eid)][0]["companions"]

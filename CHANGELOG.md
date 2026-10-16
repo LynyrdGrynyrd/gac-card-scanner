@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.4 (2026-10-16)
+
+### Admin-only confirm, safer merge, one "To check" number (from the v0.4.3 tester reports)
+- **Only admins may Confirm** a blocked or misread email, website or address. Reviewers see the red box with "An admin needs to confirm this." The server enforces it. (This undoes the v0.4.3 staff-confirm change.)
+- **Same (merge)** never writes into another person's card or batch (checked by the server). Every value that isn't kept, address included, goes into the note, and the note goes to the CSV Note column. Each row in the merge dialog shows what goes to the note.
+- **One "To check" number** on the screen, in the Save dialog, the READ-ME totals, the dry run, the Preview and History. One wording: "May already be in MC Trade". The READ-ME only asks you to read "Check" lines when there are some.
+- **After Different:** one dialog (AI, exported before, MC Trade) with Cancel. Approving again doesn't ask again; Enter still approves when nothing is new.
+- **Website and company clean-ups** are marked "changed" again.
+- **Export:** the batch picker no longer shows counts from another batch and says "Loading…" while it loads. A line says "Export marks these cards as exported. Preview doesn't." A summary workbook (-SUMMARY.xlsx) comes with the import file.
+- **Reject on an exported card** says why it can't be rejected. "Reconnecting" clears when the server is back.
+- **Queue badge** reads "63 · 4 reading".
+- **Undo** moves on when an action is refused. Drafts are cleared from the browser at every sign-out; an idle sign-out keeps your draft on the server, for you only. Finished upload jobs are released from memory.
+- **Help:** signed out, the page has no app menu. The heading shows the running version.
+- **Hints:** no "one letter off the name" hint when the name itself is misread.
+- **Old test data:** cards left pending after an export get the "export it again" mark and a history line (no reset).
+
 ## v0.4.3 (2026-10-16)
 
 ### Safer undo, sign-out and duplicates (from the v0.4.2 tester reports)

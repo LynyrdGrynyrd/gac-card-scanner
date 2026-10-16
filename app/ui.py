@@ -61,11 +61,31 @@ def _init_ui(c):
         try: c.execute("ALTER TABLE exports ADD COLUMN batch_label TEXT")
         except Exception as e:
             if "duplicate column" not in str(e): raise
+    if "refused" not in {r[1] for r in c.execute("PRAGMA table_info(actions)")}:   # v0.4.4 #10: an action Undo can no longer take back
+        try: c.execute("ALTER TABLE actions ADD COLUMN refused REAL")
+        except Exception as e:
+            if "duplicate column" not in str(e): raise
+    c.execute("CREATE TABLE IF NOT EXISTS drafts(user_id INTEGER, card_id INTEGER, vals TEXT, version TEXT, ts REAL, PRIMARY KEY(user_id, card_id))")   # v0.4.4 #10
     c.execute("CREATE TABLE IF NOT EXISTS batch_owners(batch TEXT PRIMARY KEY, user_id INTEGER, ts REAL)")   # v0.4.3 #8: owner by user id
     for name, ix in (("ix_hist_card", "card_history(card_id, id)"), ("ix_hist_action", "card_history(action, reviewer)"),
                      ("ix_meta_batch", "card_meta(batch)"), ("ix_meta_sha", "card_meta(sha256)"),
                      ("ix_actions_user", "actions(user_id, undone)"), ("ix_exports_file", "exports(filename)")):
         c.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {ix}")
+    _repair_pending_exported(c)
+
+def _repair_pending_exported(c):
+    """v0.4.4 #13 (skeptic: #797, made before the v0.4.3 undo fix): a card that is back to pending after an export
+    but has no "export it again" mark gets that mark and a history line, the same as an edit after export. No data is reset."""
+    try:
+        rows = c.execute("""SELECT m.card_id FROM card_meta m JOIN cards k ON k.id=m.card_id
+                            WHERE m.exported IS NOT NULL AND m.reexport IS NULL AND k.status='pending'""").fetchall()
+    except Exception: return
+    now = time.time()
+    for (cid,) in rows:
+        c.execute("UPDATE card_meta SET reexport=? WHERE card_id=?", (now, cid))
+        c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
+                  (cid, now, "system", "reexport_needed", None, None, json.dumps({"why": "status changed after export (repair)"})))
+    if rows: c.commit()
 def db():
     """Audit 2026-10 P0-4: schema set-up runs once per database file, not on every connection."""
     c = store.db(); store.once("ui", _init_ui)
@@ -401,7 +421,7 @@ def _lost_dot(m_, dom=None, others=()):
     return not (dom and dom in {o for o in others if o})
 
 OVERRIDABLE = ("name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
-ADMIN_OVERRIDE = ()   # v0.4.3 #7: any staff member may Confirm with a reason (logged); was emails/website/address admin-only
+ADMIN_OVERRIDE = ("emails", "website", "address", "other_address")   # v0.4.4 (user decision): admin-only again, reverses v0.4.3 #7
 def overridable(f):
     """Fields whose hard check can be confirmed with 'This is correct': only garbled-looking values, never formula/HTML."""
     from . import mctrade_export as _mx
@@ -585,6 +605,9 @@ def _dupes(c, others, metas, crm):
         x["blocking"] = (x["strong"] or x["same_batch"]) and not rej and not other_rej   # a rejected twin only warns
         # v0.4.3 #8: Same (merge) toward your own OLDER batch only on a strong match (same photo, email or phone)
         x["can_same"] = x["same_user"] and (x["same_batch"] or bool({"same photo", "email exact", "phone exact"} & set(x["why"])))
+        if x["can_same"] and not x["same_batch"]:   # v0.4.4 #1: both batches must have the same owner (user id), as the server checks
+            o1, o2 = batch_owner_id(m.get("batch")), batch_owner_id(om.get("batch"))
+            x["can_same"] = o1 is not None and o1 == o2
     open_q = [x for x in q if not x["kept_apart"]]
     return {"crm": crm, "queue": q, "open": open_q, "unresolved_queue": any(x["blocking"] for x in open_q), "lookalikes_elsewhere": [x["card_id"] for x in open_q if not x["blocking"]], "resolution": res, "crm_action": m.get("crm_action"), "meta": m,
             "updates_enabled": auth.get_setting("mctrade_updates_enabled") == "1"}
@@ -633,12 +656,23 @@ def match_score(x):
     return round(nm + (1.0 if ("email exact" in why or "same email" in why) else 0.0) + (1.0 if ("phone exact" in why or "same phone" in why) else 0.0)
                  + (1.0 if "same photo" in why else 0.0), 3)
 
-def merge_refusal(c, f2, tgt):
+def _batch_of(cid): return (meta(cid) or {}).get("batch")
+
+def merge_refusal(c, f2, tgt, user=None):
     """v0.4.1 #2: a merge needs the target in this card's look-alike list and both cards scanned by the same person."""
     cs_, metas_ = _active()
     ids = {x["card_id"] for f_ in (c["fields"], f2) for x in dupes(c | {"fields": f_}, cs_, metas_)["queue"]}
     if tgt["id"] not in ids:
         return {"error": f"Card #{tgt['id']} doesn't look like this card, so it can't be merged into.", "need": "merge_unrelated"}
+    # v0.4.4 #1 (data-manager REGRESSION: merged into another tester's #516): the target's batch must be YOURS, by user id.
+    # Initials alone matched two different people. Applies to admins too: a merge edits the target card.
+    if user is not None:
+        for cid_ in (tgt["id"], c["id"]):
+            oid = batch_owner_id(_batch_of(cid_))
+            if oid is not None and oid != user.get("id"):
+                return {"error": f"Card #{cid_} is in someone else's batch, so it can't be merged. Use Different.", "need": "merge_other_user"}
+            if oid is None and _batch_of(cid_) and cid_ == tgt["id"]:
+                return {"error": f"Card #{tgt['id']} has no known owner, so it can't be merged into. Use Different.", "need": "merge_other_user"}
     sc = scanners([c["id"], tgt["id"]])
     # v0.4.2 #11 (skeptic L2): two cards with NO scan record are not "the same scanner" (None == None)
     if not sc.get(c["id"]) or sc.get(c["id"]) != sc.get(tgt["id"]):
@@ -735,9 +769,9 @@ def attention(c, d, cards=None, names=None):
         r.append({"code": "dup_crm", "text": f"Similar to MC Trade contact {d['crm'][0]['name']} (you chose: {'update that contact' if d['crm_action'] == 'update_existing' else 'add as new'})"})
     elif d["crm"] and "email exact" in (d["crm"][0].get("why") or []):   # newcomer r8 N6: still an MC Trade email match after 'add as new'
         if crm_source.real() is None:   # round 9 (newcomer r9 N1): say what the export really does with SAMPLE data
-            r.append({"code": "dup_crm", "field": "emails", "text": f"Same email as SAMPLE test contact {d['crm'][0]['name']}. Only SAMPLE contacts are loaded, so the export does NOT hold it back: it goes in the new-profiles file. With GAC's real MC Trade contacts loaded it would be NEEDS REVIEW."})
+            r.append({"code": "dup_crm", "field": "emails", "text": f"May already be in MC Trade: {d['crm'][0]['name']} (same email, test list). The export lists it under To check."})
         else:
-            r.append({"code": "dup_crm", "field": "emails", "text": f"Same email as MC Trade contact {d['crm'][0]['name']}: the export lists it under NEEDS REVIEW"})
+            r.append({"code": "dup_crm", "field": "emails", "text": f"May already be in MC Trade: {d['crm'][0]['name']} (same email). The export lists it under To check."})
     m = d.get("meta") or {}
     if m.get("ai_rejected"):   # reviewer r8: 'Keep current' over an AI suggestion is not 'Looks good'
         # round 16 (coordinator r15 #3): a field the person has since set to the AI's value themselves is no longer "kept"
@@ -829,6 +863,7 @@ def enrich(c, cards, metas, full=False, names=None):
         # the page box itself stays quiet for those (decided)
         out["exported_elsewhere"] = [] if c["status"] != "pending" else [x | {"times": nexp.get(x["card_id"], 1), "kept_apart": x["card_id"] in _kx or m.get("dup_resolution") == "keep_both"} for x in xb]
         out["dup_decided"] = m.get("dup_resolution") == "keep_both"
+        out["kept_n"] = len(_kept(m))   # v0.4.4 #3 (reviewer: page 34 vs History 12): the page counts what History logged
         try:   # round 22: hard blocks + which of them 'This is correct' may confirm, so the card shows them (and the button) on open
             hard_ = hard_errors(f)   # the page hides admin-only ones (ADMIN_OVERRIDE) for reviewers; the server checks the role anyway
             out |= {"hard": hard_, "overridable": [k for k in overridable(f) if k in hard_], "admin_override": list(ADMIN_OVERRIDE)}
@@ -894,6 +929,17 @@ def wait_for_memory(jid=None, max_s=None):
         with JLOCK: j = JOBS.get(jid) or {}; j.pop("waiting_memory", None); j.pop("waiting_memory_msg", None)
     return True
 JOBS, JLOCK = {}, threading.Lock()
+
+def _trim_mem():
+    """v0.4.4 #10 (memory 734 -> 1077 MB in 40 min): finished jobs were kept forever (each with its whole card), and freed
+    image/OCR buffers stayed in glibc's per-thread arenas. Drop jobs finished over 2 h ago (their done record is on disk)
+    and hand freed memory back to the system after each read."""
+    cut = time.time() - 7200
+    with JLOCK:
+        for k in [k for k, j in JOBS.items() if j.get("finished") and j["finished"] < cut]: JOBS.pop(k, None)
+    try:
+        import ctypes; ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception: pass
 DEAD_JOBS: set = set()   # audit 2026-10 F09: jobs from before a demo wipe; a worker still reading one never creates its card
 def reset_jobs():
     """Public demo wipe: every job (queued, reading, finished) belongs to the old generation. Running readers are stopped,
@@ -965,6 +1011,7 @@ def ingest(data, engine, ext, jid=None, meta_kw=None):
     return cid, src
 
 def _run(jid, data, engine, ext, batch, label, fname, sha, who, skip_ai=False):  # noqa: PLR0913
+    _trim_mem()
     wait_for_memory(jid)
     with JLOCK:
         if (JOBS.get(jid) or {}).get("state") != "queued": return   # round 19: cancelled while waiting in line
@@ -1007,12 +1054,12 @@ def _run(jid, data, engine, ext, batch, label, fname, sha, who, skip_ai=False): 
 async def create_job(request: Request, image: UploadFile = File(...), engine: str = Form("auto"), batch: str = Form(""),
                      batch_label: str = Form(""), allow_duplicate: str = Form(""), skip_ai: str = Form("")):
     t0 = time.time(); data = await image.read(); fname = image.filename or "photo"
-    batch = batch_for(batch, batch_label, _who(request))
     u_ = request.state.user
     if batch and u_.get("role") != "admin" and not demo.enabled():   # v0.4.3 #8 (skeptic L2): no cards into another person's batch
-        oid = batch_owner_id(batch)
+        oid = batch_owner_id(batch)   # v0.4.4: checked BEFORE the label may reroute it, so both paths refuse the same way
         if oid is not None and oid != u_.get("id"):
             return JSONResponse({"error": "This batch belongs to someone else. Start your own batch on Scan.", "need": "not_your_batch"}, 403)
+    batch = batch_for(batch, batch_label, _who(request))
     claim_batch(batch, u_)
     if _cancelled_since(_who(request), batch, t0):   # round 21: landed just after Cancel -> not scanned
         return JSONResponse({"error": "Not scanned: the upload was cancelled.", "cancelled": True}, 409)
@@ -1662,7 +1709,7 @@ def confirm_correct(cid: CardId, request: Request, body: dict = Body(...)):
         if k not in OVERRIDABLE: return JSONResponse({"error": "This check can't be overridden."}, 400)
         u = request.state.user
         if k in ADMIN_OVERRIDE and u.get("role") != "admin":
-            return JSONResponse({"error": "Only an admin can confirm this field. Ask an admin, or fix the value."}, 403)
+            return JSONResponse({"error": "An admin needs to confirm this."}, 403)
         vp = _version_problem(c, body.get("version"), cid)
         if vp: return vp
         f = c["fields"]
@@ -1803,12 +1850,35 @@ def batches(request: Request):
 def card_version(c):
     """Short fingerprint of what the reviewer sees (fields, status, note). Saves send it back; a mismatch means the form is stale."""
     return hashlib.sha1(json.dumps([c.get("fields"), c.get("status"), c.get("note") or ""], sort_keys=True, default=str).encode()).hexdigest()[:12]
-@router.get("/api/cards/{cid}")
 def card(cid: CardId):
     c = store.get(cid)
     if not c: raise HTTPException(404, "Card not found")
     cs, metas = _active(include_archived=True)
     return enrich(c, cs, metas, full=True)
+
+@router.get("/api/cards/{cid}")
+def card_route(cid: CardId, request: Request):
+    out = card(cid)
+    u = getattr(request.state, "user", None) or {}
+    r = db().execute("SELECT vals, version, ts FROM drafts WHERE user_id=? AND card_id=?", (u.get("id"), cid)).fetchone() if u.get("id") else None
+    if r:   # v0.4.4 #10: your own server-side draft (kept at an idle sign-out; the browser copy is cleared at every sign-out)
+        try: out["my_draft"] = {"vals": json.loads(r["vals"]), "version": r["version"], "ts": r["ts"] * 1000}
+        except Exception: pass
+    return out
+
+@router.post("/api/cards/{cid}/draft")
+def save_draft(cid: CardId, request: Request, body: dict = Body(...)):
+    """v0.4.4 #10: keep unsaved edits on the server for the signed-in person only (never shown to anyone else)."""
+    if not store.get(cid): return JSONResponse({"error": "Card not found."}, 404)
+    vals = body.get("vals") if isinstance(body, dict) else None
+    if not isinstance(vals, dict) or not all(isinstance(k, str) and isinstance(v, str) and len(k) < 40 and len(v) < 4000 for k, v in vals.items()) or len(vals) > 40:
+        return JSONResponse({"error": "vals must be a small object of text fields."}, 422)
+    if not vals:   # an empty draft = discard it
+        with db() as c_: c_.execute("DELETE FROM drafts WHERE user_id=? AND card_id=?", (request.state.user["id"], cid))
+        return {"ok": True, "deleted": True}
+    with db() as c_: c_.execute("INSERT OR REPLACE INTO drafts(user_id,card_id,vals,version,ts) VALUES(?,?,?,?,?)",
+                                (request.state.user["id"], cid, json.dumps(vals), str(body.get("version") or "")[:40], time.time()))
+    return {"ok": True}
 
 def _apply_fields(f, body_fields):
     changed = {}
@@ -1924,6 +1994,10 @@ def _update(cid, request, body, internal=False):
     if len(wiped) >= 2 and _form and body.get("_allow_blank") is not True:   # a whole form sent (the page), not a deliberate partial API edit
         return JSONResponse({"error": "This save would clear " + ", ".join(LABEL.get(k, k) for k in wiped) + " (the form was probably still empty when Save was clicked). Nothing was saved: wait for the card to finish loading, then try again.",
                              "need": "blank_wipe", "fields": wiped}, 409)
+    if st == "rejected" and c["status"] == "approved" and meta(cid).get("exported") and not internal:
+        # v0.4.4 #7 (data-manager L1): an exported card is in the MC Trade file; rejecting it here would not take it out
+        return JSONResponse({"error": f"Card #{cid} was already exported, so it can't be rejected here. If it shouldn't be in MC Trade, remove it there and add a note on the card.",
+                             "need": "exported_reject"}, 409)
     if (st and st != c["status"] or body.get("merge_into")):
         if c["status"] != "pending" and not body.get("confirm_redecide"):
             return JSONResponse({"error": f"This card was already {c['status']} by {c.get('reviewer') or 'someone'}. Change it?",
@@ -1945,7 +2019,7 @@ def _update(cid, request, body, internal=False):
         # v0.4.2 #11 (skeptic L1): replaying a merge added the note to the target a second time (and into the export)
         return JSONResponse({"error": f"Card #{cid} is already merged into #{merge_tgt['id']}.", "need": "merge_done"}, 409)
     if merge_tgt:   # v0.4.1 #2 (skeptic M1): only into a listed look-alike, and only between cards the same person scanned
-        refused = merge_refusal(c, f2, merge_tgt)
+        refused = merge_refusal(c, f2, merge_tgt, None if internal else request.state.user)
         if refused: return JSONResponse(refused, 422)
     label = ({"approved": "Approve", "rejected": "Reject", "pending": "Move to pending"}.get(st, "Edit") + f" card #{cid}")
     if merge_tgt: label = f"Merge card #{cid} into #{merge_tgt['id']}"
@@ -1974,11 +2048,15 @@ def _update(cid, request, body, internal=False):
         for k in ("first_name", "last_name", "title", "company", "website", "address", "department"):
             pk = merge_pick(tf, f, k)
             if pk and mk_.get(k) in ("src", "tgt") and f.get(k): pk = mk_[k]
+            lab_ = LABEL.get(k, k.replace('_', ' ').capitalize())
             if pk == "src":
-                if tf.get(k): replaced[k] = tf[k]
+                if tf.get(k):
+                    replaced[k] = tf[k]
+                    # v0.4.4 #2 (data-manager M2, coordinator): the REPLACED value goes to the note too ('Regional Owner', the old address)
+                    if _merge_ws(tf[k]) != _merge_ws(f[k]): unkept.append(f"{lab_}: {tf[k]}")
                 filled[k] = f[k]; tf[k] = f[k]
-            elif f.get(k) and tf.get(k) and k != "title" and _merge_ws(f[k]) != _merge_ws(tf[k]):
-                unkept.append(f"{LABEL.get(k, k.replace('_', ' ').capitalize())}: {f[k]}")   # v0.4.3 #6: never dropped silently; it goes to the note
+            elif f.get(k) and tf.get(k) and _merge_ws(f[k]) != _merge_ws(tf[k]):
+                unkept.append(f"{lab_}: {f[k]}")   # v0.4.3 #6: never dropped silently; it goes to the note
         for k in ("emails", "social"):
             add = [x for x in f.get(k, []) if x not in tf.get(k, [])]
             if add and k == "emails":   # round 9 (part-timer r3): a misread email is REPLACED by the valid look-alike, not kept beside it
@@ -1993,8 +2071,7 @@ def _update(cid, request, body, internal=False):
                 tf["emails"] = keep_
             if add: tf[k] = tf.get(k, []) + add; filled[k] = add
         title_note = ""
-        if f.get("title") and tf.get("title") and merge_pick(tf, f, "title") == "tgt" and f["title"].lower() not in tf["title"].lower():
-            title_note = f"Also titled: {f['title']}"   # round 10: the other title is kept in the note, not lost
+        # v0.4.4 #2: every value not kept (title included) is in `unkept` above; no second 'Also titled' line
         nums = {_digits(p["number"]) for p in tf.get("phones", [])}
         # round 9 (coordinator r3 N1): a truncated copy of a number already there ("555-0165" vs "(330) 555-0165") is not added
         addp = [p for p in f.get("phones", []) if _digits(p["number"]) not in nums and not any(n_.endswith(_digits(p["number"])) for n_ in nums if _digits(p["number"]))
@@ -2025,6 +2102,8 @@ def _update(cid, request, body, internal=False):
     if st == "approved" and not merge_tgt and STALE_DUP.search(note or ""):   # re-approved after a merge: the note is no longer true
         note = STALE_DUP.sub("", note).strip(" |"); set_meta(cid, dup_resolution=None)
     store.update(cid, fields=f, status=st, reviewer=rv if st else c.get("reviewer"), note=note)
+    if not internal and getattr(request.state, "user", None):   # v0.4.4 #10: saved, so your server-side draft of this card is done
+        with db() as c_: c_.execute("DELETE FROM drafts WHERE user_id=? AND card_id=?", (request.state.user["id"], cid))
     if st in ("approved", "rejected") and meta(cid).get("ai_status") in ("queued", "checking"):   # part-timer r2: cancel cleanly, running or not
         AI_WAIT.pop(cid, None); set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"note": "the card was decided before the AI check finished (check cancelled)"}))
     if st == "approved":   # every approval past a cross-batch look-alike leaves a confirm row (also via 'none are the same person')
@@ -2488,8 +2567,21 @@ def archive(request: Request, body: dict = Body(...)):
 # ---------------------------------------------------------------- undo
 @router.get("/api/undo")
 def undo_peek(request: Request):
-    r = db().execute("SELECT id,ts,label FROM actions WHERE user_id=? AND undone IS NULL ORDER BY id DESC LIMIT 1", (request.state.user["id"],)).fetchone()
-    return dict(r) if r else {}
+    # v0.4.4 #10 (skeptic L1): an action that can't be undone any more (exported since) is closed and skipped, so the
+    # Undo button moves on to the one before it instead of failing every time
+    for _ in range(20):
+        r = db().execute("SELECT id,ts,label,snapshot FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL ORDER BY id DESC LIMIT 1", (request.state.user["id"],)).fetchone()
+        if not r: return {}
+        if not _undo_exported(r): return {k: r[k] for k in ("id", "ts", "label")}
+        with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), r["id"]))
+    return {}
+
+def _undo_exported(a):
+    """Cards of action `a` that were exported after it (v0.4.3 #1)."""
+    try: snap = json.loads(a["snapshot"])
+    except Exception: return []
+    return [s_["card"]["id"] for s_ in snap if s_.get("card") and db().execute(
+        "SELECT 1 FROM card_history WHERE card_id=? AND action='exported' AND ts>=? LIMIT 1", (s_["card"]["id"], a["ts"])).fetchone()]
 
 @router.post("/api/undo")
 def undo(request: Request, body: dict = Body(default={})):
@@ -2501,7 +2593,7 @@ def undo(request: Request, body: dict = Body(default={})):
         except BadId: aid = None
         if aid is None:
             return JSONResponse({"error": "id must be the number of an action from your undo list."}, 422)
-    q = "SELECT * FROM actions WHERE user_id=? AND undone IS NULL" + (" AND id=?" if "id" in body else "") + " ORDER BY id DESC LIMIT 1"
+    q = "SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL" + (" AND id=?" if "id" in body else "") + " ORDER BY id DESC LIMIT 1"
     a = db().execute(q, (user["id"], aid) if "id" in body else (user["id"],)).fetchone()
     if not a: return JSONResponse({"error": "Nothing to undo."}, 404)
     if time.time() - a["ts"] > 24 * 3600: return JSONResponse({"error": "That action is more than a day old and can't be undone here."}, 409)
@@ -2512,9 +2604,9 @@ def undo(request: Request, body: dict = Body(default={})):
     conflicts = {}; restored = {}
     # v0.4.3 #1 (skeptic M1): a card exported AFTER this action is in an MC Trade file already; undoing it here would make
     # the app disagree with that file silently. Refused: change it by hand (a later edit marks it for re-export).
-    xp = [s_["card"]["id"] for s_ in snap if s_.get("card") and db().execute(
-        "SELECT 1 FROM card_history WHERE card_id=? AND action='exported' AND ts>=? LIMIT 1", (s_["card"]["id"], a["ts"])).fetchone()]
+    xp = _undo_exported(a)
     if xp:
+        with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), a["id"]))   # v0.4.4 #10: never offered again
         return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Change it by hand; it is then marked for re-export.",
                              "need": "exported", "cards": xp}, 409)
     with WRITE_LOCK:

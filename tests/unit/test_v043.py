@@ -45,7 +45,7 @@ def test_v043_server_idle_signout(env, monkeypatch):
 
 def test_v043_idle_dialog_keeps_draft():
     src = open("app/static/ui/header.js", encoding="utf-8").read()
-    assert "kept as your draft" in src and "if (!window.gacIdleOut) clearDrafts()" in src
+    assert "kept as your draft" in src and "/draft`" in src   # v0.4.4 #10: kept on the server
     assert "X-User-Active" in open("app/static/ui/core/api.js", encoding="utf-8").read()
 
 
@@ -72,8 +72,8 @@ def test_v043_exported_elsewhere_kept_after_different(env):
 # ---- #4 possible MC Trade match: CSV Check note, preview/dry run list
 def test_v043_mc_possible_in_summary_and_dryrun_code():
     src = open("app/exporting.py", encoding="utf-8").read(); assert '"mc_possible"' in src and "_mcn" in src
-    assert "NEEDS REVIEW before import" in open("app/admin_files.py", encoding="utf-8").read()
-    assert "Needs review (" in open("app/static/ui/views/export.js", encoding="utf-8").read()
+    assert "TO CHECK" in open("app/admin_files.py", encoding="utf-8").read()   # v0.4.4 #3: one 'To check' wording
+    assert "To check (" in open("app/static/ui/views/export.js", encoding="utf-8").read()
 
 
 # ---- #5 'example' domains
@@ -106,8 +106,8 @@ def test_v043_merge_keeps_other_value_in_note(env):
 # ---- #7 staff may confirm with a reason
 def test_v043_staff_confirm_everything():
     from app import ui
-    assert ui.ADMIN_OVERRIDE == ()
-    assert "Ask an admin to confirm" not in open("app/static/ui/views/review.js", encoding="utf-8").read().replace("no \"Ask an admin\"", "")
+    assert ui.ADMIN_OVERRIDE == ("emails", "website", "address", "other_address")   # v0.4.4 user decision: admins only again
+    assert "An admin needs to confirm this." in open("app/static/ui/views/review.js", encoding="utf-8").read()
 
 
 # ---- #8 smaller fixes
@@ -144,7 +144,7 @@ def test_v043_frontend_small_fixes():
     assert "already exported `" not in rv and "AI check not finished" in rv and "waitForAI" in rv and "can_same" in rv
     up = open("app/static/ui/views/upload.js", encoding="utf-8").read(); assert "conn.f >= 2" in up and "j.batch_label" in up
     h = open("app/static/ui/help.html", encoding="utf-8").read()   # built from training/ (private); the public repo has the output only
-    assert 'id="helpNav" hidden' in h and "signs you out" in h
+    assert 'id="helpNavSlot"' in h and '<nav aria-label="Main"' not in h and "signs you out" in h
 
 
 def test_v043_readme_more_notes_not_overcounted():

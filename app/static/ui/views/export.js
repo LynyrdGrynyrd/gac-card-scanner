@@ -10,6 +10,9 @@ const HK = {xlsx: "Excel", csv: "CSV", vcf: "vCard"};   // v0.3.2: short export 
 /* ---------- export ---------- */
 async function exportInfo() {
   const st = $("#exStatus").value, eb = $("#exBatch").value; $("#exInfo").textContent = "Checking…";
+  // v0.4.4 #6 (reviewer: another batch's "2 ready" / "0 cards ready" for 2-3 s): a newer check wins; until then, "Loading…"
+  const seq = exportInfo.seq = (exportInfo.seq || 0) + 1;
+  if ($("#exBig")) { $("#exBig").textContent = "…"; $("#exBigT").textContent = "Loading…"; }
   try {
     if (!exportInfo.busyList) {   // refreshed every time (manager L-new3: a new batch showed only after a reload)
       exportInfo.busyList = true; let bs; try { bs = await call("/api/batches"); exportInfo.list = bs; } finally { exportInfo.busyList = false; }
@@ -39,9 +42,10 @@ async function exportInfo() {
       $("#exBatch").value = [...$("#exBatch").options].some(o => o.value === keepB) ? keepB : ($("#exBatch").options[0] || {}).value || ""; filterExBatch(); }
     if ($("#exBatch").value !== "__more__") exportInfo.last = $("#exBatch").value;
     if ($("#exBatch").value === "__choose__") {   // nothing chosen: nothing to export, no check
-      $("#exInfo").textContent = "Choose a batch."; $("#exDup").hidden = true; $$(".tile").forEach(t => t.disabled = true); loadExportHistory(); return {count: 0}; }
+      $("#exInfo").textContent = "Choose a batch."; if ($("#exBig")) { $("#exBig").textContent = "–"; $("#exBigT").textContent = "Choose a batch"; } $("#exDup").hidden = true; $$(".tile").forEach(t => t.disabled = true); loadExportHistory(); return {count: 0}; }
     if ($("#exBatch").value !== eb) { if (!exportInfo.depth) { exportInfo.depth = 1; try { return await exportInfo(); } finally { exportInfo.depth = 0; } } }   // selection changed meanwhile: check the batch actually shown
     const r = await call(`/api/export/check?status=${st}&batch=${encodeURIComponent(eb)}`);
+    if (seq !== exportInfo.seq || $("#exBatch").value !== eb || $("#exStatus").value !== st) return r;   // stale answer: a newer check is on its way
     { const o_ = $("#exBatch").selectedOptions[0];   // v0.4.3 #4 (reviewer: "0 ready" in the list next to "2 cards ready"): the check is the one count
       if (o_ && eb && st === "approved_new" && typeof r.count === "number") o_.textContent = o_.textContent.replace(/· \d+ ready to export$/, `· ${r.count} ready to export`); }
     const bo_ = (exportInfo.list || []).find(b => b.batch === eb), notMine = eb === "" || (bo_ && !bo_.own);   // v0.4.1 #7: say whose batch it is, on the page
@@ -102,8 +106,9 @@ $("#exPreview").onclick = async () => {
         const rn = v.row_notes || [], nChk = rn.filter(Boolean).length;   // v0.4.2 #3: an MC Trade look-alike is marked, not shown as a plain new profile
         const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p>` +
           // v0.4.3 #4: possible MC Trade matches get their own "Needs review" list, as in the dry run and the CSV Check column
-          (Object.keys(v.mc_possible || {}).length ? `<p><b>Needs review (${Object.keys(v.mc_possible).length})</b></p><ul>${Object.entries(v.mc_possible).map(([i, w]) => `<li><a href="#review/${esc(i)}">#${esc(i)}</a> ${esc(w)}</li>`).join("")}</ul>` : "") +
-          `<p><b>New profiles (${plural(v.rows.length, "row")})</b>${nChk ? ` <span class="flag bad">${nChk} to check</span>` : ""}</p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
+          // v0.4.4 #3: the same 'To check' list (and number) as the page, the Save dialog and the READ-ME
+          ((v.to_check_ids || []).length ? `<p><b>To check (${v.to_check_ids.length})</b></p><ul>${v.to_check_ids.map(i => `<li><a href="#review/${esc(i)}">#${esc(i)}</a>${(v.mc_possible || {})[i] ? " " + esc((v.mc_possible || {})[i]) : ""}</li>`).join("")}</ul>` : "") +
+          `<p><b>New profiles (${plural(v.rows.length, "row")})</b></p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
           `<p><b>Left out (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
           ((v.warnings || []).length ? `<details class="more"><summary>In the file, with a warning (${v.warnings.length})</summary><ul>${v.warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></details>` : ""),
@@ -187,7 +192,7 @@ async function tileExport(t) {
     // round 23 (coordinator/newcomer r22): one short line, plus only what needs action
     $("#exDone").innerHTML = (sm ? `<b>✓ ${plural(sm.cards, "card")} exported` + (sm.update_rows ? ` (${plural(sm.new_rows, "new contact")}, ${plural(sm.update_rows, "update")})` : "") + (sm.crm_real ? "" : " (test MC Trade list)") + `.</b>` +
         (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "") +
-        (sm.possible.length ? ` <span class="flag low">Maybe in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "")
+        (sm.possible.length ? ` <span class="flag low">May already be in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "")
       : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the .xlsx${comp.includes("updates.xlsx") ? " (updates separately)" : ""}` + ((sm ? sm.new_rows + (sm.update_rows || 0) : +n) > 2 ? "; test 2 rows first." : ".") : "");
     const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
     if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
