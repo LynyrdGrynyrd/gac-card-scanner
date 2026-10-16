@@ -7,6 +7,7 @@ import {hideToast, toast} from "../ui/toast.js";
 import {ask, busy} from "../ui/dialog.js";
 import {doUndo, refreshCounts, refreshUndo, who} from "../header.js";
 import {STATUS, confBar} from "./queue.js";
+import {setBoxes, wireZoom, zoomReset} from "./zoom.js";
 
 /* ---------- review ---------- */
 const order = () => { try { return JSON.parse(SS.order || "[]"); } catch { return []; } };
@@ -30,10 +31,10 @@ async function openCard(id, opts = {}) {
   if (opts.keep && S.cur && S.cur.id === id) recomputeDirty();
   const keep = opts.keep && S.cur && S.cur.id === id && S.dirty ? dirtyVals() : null;
   $("#rForm").inert = false; $("#rForm").classList.remove("loading"); $$("#rForm [data-ro16]").forEach(el => { el.readOnly = false; delete el.dataset.ro16; }); $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = b.getAttribute("aria-busy") === "true"); S.CARD_READY = true;   // round 17 (part-timer r16 #4): never re-enabled while it still reads "Saving…"
-  if (!S.cur || S.cur.id !== d.id) scrollTo(0, 0);
+  if (!S.cur || S.cur.id !== d.id) { scrollTo(0, 0); const fm = $("#rForm"); fm.classList.remove("flip"); void fm.offsetWidth; fm.classList.add("flip"); }
   S.cur = d; const c = d.card, f = c.fields, k = f.confidence || {};
   $("#rImg").src = $("#zImg").src = "/img/" + c.image; $("#rawLink").href = "/img/" + c.image;
-  $("#rRaw").textContent = c.raw_text || "";
+  $("#rRaw").textContent = c.raw_text || ""; setBoxes(f.boxes); wireZoom();
   $("#rImg").alt = d.image_deleted ? "Photo deleted by the retention policy" : "Photo of the business card";
   $("#rBatch").textContent = [d.batch_label ? "Batch: " + d.batch_label : "", (/ \((page \d+ of \d+|card \d+ of \d+)/.test(d.filename || "") || /\.(hei[cf]|pdf)(\.jpg)?$/i.test(d.filename || "")) ? "From: " + d.filename.replace(/\.jpg$/i, "") : ""].filter(Boolean).join(" · ");   // round 18: which file/page
   $("#h-r").textContent = `Review card #${c.id}`;
@@ -57,13 +58,18 @@ async function openCard(id, opts = {}) {
     $("#addrBox").insertAdjacentHTML("beforebegin", `<div class="f extra"><label for="x_${esc(key)}">${esc(LABEL[key] || key.replace(/_/g, " "))}</label><input id="x_${esc(key)}" data-extra="${esc(key)}" data-c="${esc(key)}" value="${esc(val)}"></div>`); });
   $$("#fields [data-c]").forEach(el => { const box = el.closest(".f"); box.querySelector(".cf")?.remove();
     const low = d.low.includes(el.dataset.c), v = k[el.dataset.c]; box.classList.toggle("low", low);
-    if (low) box.querySelector("label").insertAdjacentHTML("afterbegin", `<span class="cf">Please check${v != null ? " · " + Math.round(v * 100) + "%" : ""}</span>`); });
+    if (low) box.querySelector("label").insertAdjacentHTML("afterbegin", `<span class="cf">Check${v != null ? " · " + Math.round(v * 100) + "%" : ""}</span>`); });
   $("#legend").hidden = !d.low.length;
   const SRCK = {first_name: "first_name", last_name: "last_name", title: "title", company: "company", emails: "emails", phones: "phones", website: "website", address: "address", social: "social"};
   $$("#fields .src").forEach(x => x.remove());
   $$("#fields input[id], #fields textarea[id]").forEach(el => { const key = el.dataset.extra || SRCK[el.id]; const sv = key && d.sources[key]; if (!sv) return;
     const [kind, by] = sv.split(":"), lab = el.closest(".f")?.querySelector("label"); if (!lab) return;
-    lab.insertAdjacentHTML("beforeend", kind === "qr" ? ' <span class="src qr" title="Read from the QR code on the card: very reliable">from QR code</span>' : kind === "ai" ? ' <span class="src ai" title="Corrected by the local AI double-check: please confirm">corrected by AI</span>' : kind === "back" ? ' <span class="src ocr">from the back of the card</span>' : kind === "edited" ? ` <span class="src edited">edited by ${esc(by)}</span>` : ""); });   // plain "read from text" is the default: not tagged (see #srcLegend)
+    lab.insertAdjacentHTML("beforeend", kind === "qr" ? ' <span class="src qr" title="Read from the QR code on the card: very reliable">from QR code</span>' : kind === "ai" ? ' <span class="chg" title="Corrected by the AI check. Check the photo.">changed</span>' : kind === "back" ? ' <span class="src ocr">from the back of the card</span>' : kind === "edited" ? ` <span class="src edited">edited by ${esc(by)}</span>` : ""); });   // plain "read from text" is the default: not tagged (see #srcLegend)
+  { const af = f.auto_fixed || {}, AFID = {title: "title", company: "company", emails: "emails", phones: "phones", website: "website", address: "address"};   // v0.4 #9: display only, no undo
+    Object.keys(af).forEach(k => { const el = AFID[k] && document.getElementById(AFID[k]), lab = el && el.closest(".f")?.querySelector("label"), sv = String(d.sources[k] || "");
+      if (!lab || sv.startsWith("edited") || sv.startsWith("ai") || lab.querySelector(".chg")) return;
+      const was = af[k] == null ? "" : Array.isArray(af[k]) ? af[k].map(x => typeof x === "object" ? x.number : x).join(", ") : String(af[k]);
+      lab.insertAdjacentHTML("beforeend", ` <span class="chg src" title="${esc("Fixed automatically. Read as: " + (was || "(empty)"))}">changed</span>`); }); }
   Object.entries(d.confirmed || {}).forEach(([k, c_]) => { const el = document.getElementById(k) || $(`[data-extra="${k}"]`), lab = el && el.closest(".f")?.querySelector("label");
     if (lab) lab.insertAdjacentHTML("beforeend", ` <span class="src confirmed" title="${esc(c_.reason || "")}">✓ confirmed by ${esc(c_.by || "?")}</span>`); });   // round 23 (skeptic r22 L5)
   showErrors(Object.keys(d.hard || {}).length ? {...(d.errors || {}), ...d.hard} : d.errors, false); confirmBtn(d.overridable, d.id);   // round 22: blocks + override visible on open
@@ -298,6 +304,17 @@ function confirmBtn(ov, sid, hardNow) {
 // round 14 (parttimer r6): a long look-alike list shows the first 3 and a count you can expand
 const capList = (items, n = 3) => items.length <= n + 1 ? items.join("") : items.slice(0, n).join("") +
   `<li class="more"><details><summary>${items.length - n} more look-alike${items.length - n > 1 ? "s" : ""} (click to show)</summary><ul>${items.slice(n).join("")}</ul></details></li>`;
+// v0.4 #7: the two cards next to each other; a value that differs is highlighted
+const DUPF = [["name", f => [f.first_name, f.last_name].filter(Boolean).join(" ")], ["title", f => f.title], ["company", f => f.company],
+  ["phones", f => (f.phones || []).map(p => p.number).join(", ")], ["emails", f => (f.emails || []).join(", ")], ["website", f => f.website], ["address", f => f.address]];
+async function fillDupGrid(d) {
+  const g = $("#dGrid"); if (!g) return; const tid = +g.dataset.with, sid = d.id; let o;
+  try { o = (await call("/api/cards/" + tid)).card.fields; } catch { g.hidden = true; return; }
+  if (!S.cur || S.cur.id !== sid || !g.isConnected) return;
+  const me = d.card.fields, nz = v => String(v || "").toLowerCase().replace(/[^a-z0-9@]/g, "");
+  const col = (f, other) => DUPF.map(([k, get]) => { const v = get(f) || "", w = get(other) || ""; return v ? `<p${k === "name" ? ' class="nm"' : ""}>${nz(v) !== nz(w) ? `<span class="diff">${esc(v)}</span>` : esc(v)}</p>` : ""; }).join("");
+  g.children[0].innerHTML = `<div class="tag">This card</div>` + col(me, o); g.children[1].innerHTML = `<div class="tag">#${tid}</div>` + col(o, me);
+}
 function renderDupes(d) {
   const rejected = d.status === "rejected", all = rejected ? [] : d.dupes.queue, crm = rejected ? [] : d.dupes.crm;
   const decided = d.dup_decided || d.status !== "pending";   // round 21: after 'Different person' (or a decision) no merge buttons
@@ -310,8 +327,10 @@ function renderDupes(d) {
     $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : `<b>Checked:</b> marked different from ${kept.length > 3 ? plural(kept.length, "look-alike") + ": " : ""}${kept.slice(0, 3).map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}${kept.length > 3 ? ` and ${kept.length - 3} more` : ""}.`)
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
-      : `<b>Matches</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id} ${esc(bestQ.name || "(no name)")}</a>${q.length > 1 ? ` and ${plural(q.length - 1, "other")}` : ""}${bestQ.strong ? ` <span class="small"><b>Scanned twice</b>: keep one.</span>` : ""}` +
-        `<div class="btns"><button type="button" class="btn small" id="dSame">Same person – combine with #${bestQ.card_id}</button>${q.some(x => !x.strong) ? ` <button type="button" class="btn small" id="dDiff">Different person</button>` : ""}</div>` +
+      // v0.4 #7: side by side, "Same person?", Same / Different; differences highlighted (Same = the existing merge, Different = keep both)
+      : `<b>Same person?</b> <a href="#review/${bestQ.card_id}">#${bestQ.card_id}</a>${q.length > 1 ? ` and ${plural(q.length - 1, "other")}` : ""}${bestQ.strong ? ` <span class="small"><b>Scanned twice</b>: keep one.</span>` : ""}` +
+        `<div class="dupgrid" id="dGrid" data-with="${bestQ.card_id}"><div class="mini"><div class="tag">This card</div></div><div class="mini"><div class="tag">#${bestQ.card_id}</div><p class="small">Loading…</p></div></div>` +
+        `<div class="btns">${q.some(x => !x.strong) ? `<button type="button" class="btn" id="dDiff">Different</button> ` : ""}<button type="button" class="btn" id="dSame" aria-label="Same person: combine with #${bestQ.card_id}">Same</button></div>` +
         `<details class="more small"><summary>Details</summary><ul>${capList(q.map(x => `<li><a href="#review/${x.card_id}">#${x.card_id} ${esc(x.name || "(no name)")}</a>${x.organization ? ", " + esc(x.organization) : ""} (${esc(x.status || "")}): ${esc(x.why_text || x.why.join(", "))}${x.strong ? ` <span class="small"><b>Scanned twice</b> (${x.why.includes("same photo") ? "same photo" : "same email or phone in this batch"}): keep one.</span>` : ""}</li>`))}</ul>` +
       `<div class="btns"><label for="dDecide" class="small">Decision:</label> <select id="dDecide"><option value="">Choose…</option>` +
         (() => { const opt = x => `<option value="merge:${x.card_id}">Same as #${x.card_id}${x.name ? " " + esc(x.name) : ""} – ${x.same_batch ? "this batch" : "other batch" + (x.status ? ", " + esc(x.status) : "")}</option>`;
@@ -327,6 +346,7 @@ function renderDupes(d) {
       (q.some(x => !x.blocking) ? ` Other batches don't block approval.` : "") + `</details>` +
       (kept.length ? `<p class="small">Marked different: ${kept.map(x => `<a href="#review/${x.card_id}">#${x.card_id}</a>`).join(", ")}.</p>` : "") +
       `<span id="dMerge" hidden></span>`;
+    fillDupGrid(d);
     const doMerge = async (btn, tid) => {   // round 7: preview what merging does (no silent drop); round 8: same pick rule as the server
       const sid = S.cur.id; if (tid === sid) { toast("A card can't be merged into itself.", 5000); return; }
       let t, pv = {rows: []};
@@ -580,11 +600,30 @@ $("#bDelete").onclick = async () => {
   try { const x = await post(`/api/admin/cards/${S.cur.id}/delete`, {confirm: S.cur.id}); toast(`Card #${x.deleted} deleted.`); location.hash = SS.queueHash || "queue"; refreshCounts(); }
   catch (e) { toast("Not deleted: " + e.message, 5000); }
 };
-$("#prev").onclick = () => step(-1); $("#next").onclick = () => step(1);
+$("#prev").onclick = () => step(-1); $("#next").onclick = () => step(1); $("#bSkip").onclick = () => step(1);
 $("#zoom").onclick = $("#rImg").onclick = () => $("#zoomDlg").showModal();
+// v0.4 #4: Enter approves only when nothing could be lost or skipped: no dialog open, no unsaved edits, no shown error,
+// the card loaded and pending, and focus not on a button/link/textarea (those keep their own Enter). The server still validates.
+function enterOk(e) {
+  const a = document.activeElement, t = a && a.tagName;
+  if (document.querySelector("dialog[open]") || S.dirty || recomputeDirty() || S.SAVING || !S.CARD_READY || !S.cur || S.cur.status !== "pending") return false;
+  if (/^(BUTTON|A|TEXTAREA|SELECT|SUMMARY)$/.test(t) || (a && a.isContentEditable)) return false;
+  if (!$("#rErr").hidden || $$("#fields .f.err").length || $("#bApprove").hidden || $("#bApprove").disabled) return false;
+  return !e.shiftKey && !e.isComposing;
+}
 document.addEventListener("keydown", e => {
-  if ($("#v-review").hidden || e.ctrlKey || e.metaKey || e.altKey || $("#dlg").open || $("#zoomDlg").open) return;
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { if (e.key === "Escape") document.activeElement.blur(); return; }
+  if ($("#v-review").hidden || document.querySelector("dialog[open]")) return;
+  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const inField = /^(INPUT)$/.test(document.activeElement.tagName);
+    if (enterOk(e)) { e.preventDefault(); decide("approved", $("#bApprove")); }
+    else if (inField && S.dirty) { e.preventDefault(); toast("Unsaved edits: use Approve or Save.", 3000); }
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { e.preventDefault(); doUndo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { if (e.key === "Escape") { document.activeElement.blur(); zoomReset(); } return; }
+  if (e.key === "Escape") { zoomReset(); return; }
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft") { if (S.dirty) { toast("Save or discard your edits first.", 3000); return; } e.preventDefault(); step(e.key === "ArrowRight" ? 1 : -1); return; }
   const k = e.key.toLowerCase();
   if (k === "a") decide("approved", $("#bApprove")); else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
   e.preventDefault();

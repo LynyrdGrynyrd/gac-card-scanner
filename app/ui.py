@@ -1704,7 +1704,7 @@ def card(cid: CardId):
 def _apply_fields(f, body_fields):
     changed = {}
     for k, v in body_fields.items():
-        if k in ("confidence", "overall_confidence", "ocr_conf", "fallback_reason", "edited", "sources"): continue
+        if k in ("confidence", "overall_confidence", "ocr_conf", "fallback_reason", "edited", "sources", "boxes", "auto_fixed"): continue   # v0.4: boxes come from OCR only
         if k in ("emails", "social"):
             v = [str(x).strip() for x in (v or []) if str(x).strip()]
         elif k == "phones":
@@ -2521,7 +2521,7 @@ from .exporting import (  # noqa: E402,F401
     ADMIN_ONLY_FILTERS, AUDIT, COMPANION, EXPORT_BUSY, FILTERS, HANDLE, MORE, MT, NUMBERISH, PLAINNUM,
     REVIEWER_FILTERS, SUSPECT_WEB, XCOLS, _EXL, _bname, _do_export_real, _export_claim, _export_release,
     _export_set, _filter_refused, _fname, _note, _slug, _stale_export, _wdom, _when, build_export, comp_name,
-    crm_look, do_export, exact_email_profile, export_again, export_check, export_companion, export_history,
+    crm_look, do_export, exact_email_profile, export_again, export_check, export_companion, export_history, export_summary,
     export_versions, ids3, plural, readme_totals, safe_cell, same_names, strict_profile_id, website_warnings)
 from . import audit_log as _audit_log  # noqa: E402,F401  (module handle, e.g. for tests that patch it)
 from .audit_log import (  # noqa: E402,F401
