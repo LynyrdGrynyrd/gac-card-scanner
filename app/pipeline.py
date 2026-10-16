@@ -1,7 +1,19 @@
 """Single entry point: image bytes -> fields. Used by web app (/scan, /api/scan) and benchmarks.
 Stages: QR/vCard decode -> hybrid OCR (PP-OCR det + Tesseract rec) -> rule parser -> optional local VLM merge."""
-import os
+import json, os
 from . import ocr, parser, qr
+FIX_KEYS = ("title", "company", "emails", "phones", "website", "address")
+
+def postfix_marked(f):
+    """Run the real-card clean-ups and (v0.4 #9, display only) remember what they changed, so the review screen can mark
+    the field "changed". The values and the rules are exactly postfix.apply's; nothing is undone or blocked here."""
+    from . import postfix
+    k_ = lambda v: json.dumps(v, sort_keys=True, default=str)
+    raw = {k: json.loads(k_(f.get(k))) for k in FIX_KEYS}
+    f = postfix.apply(f)
+    f["auto_fixed"] = {k: raw[k] for k in FIX_KEYS if k_(f.get(k)) != k_(raw[k])}
+    return f
+
 def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
     r = ocr.run_ocr(data, engine); lines0 = r.get("lines")   # v0.4: full-frame lines (the crop pass has other coordinates)
     f = parser.from_vlm(r["structured"]) if "structured" in r else parser.parse(r["text"], r.get("lines"))
@@ -39,7 +51,7 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
             f = merge.merge(f, v, r["text"]); f["sources"]["vlm"] = os.getenv("VLM_NAME", "qwen3-vl-4b")
         except Exception as e: f["sources"]["vlm_error"] = str(e)[:200]
     if os.getenv("REALCARD_POSTFIX", "1") == "1":
-        from . import postfix; f = postfix.apply(f)
+        f = postfix_marked(f)
     if cons:   # audit 2026-10: flags and suggestions describe the final (merged + post-fixed) values; the first pass's untouched adjustments are undone so they don't stack
         conf = f.setdefault("confidence", {})
         for k, x in post.items():
