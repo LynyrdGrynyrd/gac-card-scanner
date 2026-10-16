@@ -61,6 +61,7 @@ async function exportInfo() {
     }
     $("#exDup").querySelectorAll("[data-xbatch]").forEach(a => a.onclick = e => { e.preventDefault(); $("#exBatch").value = a.dataset.xbatch; exportInfo(); });
     $$(".tile").forEach(t => t.disabled = !r.count || r.duplicates.length > 0); loadExportHistory();
+    if ($("#exBig")) { $("#exBig").textContent = r.count; $("#exBigT").textContent = r.count === 1 ? "card ready" : "cards ready"; }
     return r;
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
 }
@@ -126,7 +127,7 @@ $$(".tile").forEach(t => t.onclick = async () => {   // round 14 (parttimer r6):
   try { await tileExport(t); } finally { t.removeAttribute("aria-busy"); t.style.cursor = lbl0; }
 });
 async function tileExport(t) {
-  const kind = t.dataset.ex, st = $("#exStatus").value;
+  const kind = ($("input[name=exKind]:checked") || {}).value || t.dataset.ex || "xlsx", st = $("#exStatus").value;
   const pre = kind === "xlsx" ? call(`/api/export/xlsx?preview=1&view=1&status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`).catch(e => ({__err: e})) : null;
   const info = await exportInfo(); if (!info || !info.count || info.duplicates.length) return;
   { const eb_ = $("#exBatch").value, bo = (S.BATCHES || []).find(b => b.batch === eb_) || (exportInfo.list || []).find(b => b.batch === eb_);   // round 24 (reviewer r23): warn before exporting someone else's batch
@@ -149,8 +150,12 @@ async function tileExport(t) {
                  (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
         (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
         `</ul></div>`; } } catch {} }
-  const r = await ask({title: `Export ${plural(info.count, "card")}?`, html: so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p>`,
-    buttons: [{label: "Export", cls: "primary", value: 1, primary: true}, {label: "Cancel", value: null}]});
+  // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
+  let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
+  const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
+  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updated", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) : "";
+  const r = await ask({title: "Ready to save", html: sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p>Batch: <b>${esc($("#exBatch").selectedOptions[0]?.textContent || "All batches")}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> <details class="more"><summary>More</summary>The READ-ME.txt and extra-columns.csv are for reading, not for import.</details>` : "You'll get one file."}</p></details>`,
+    buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");
   try {

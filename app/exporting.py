@@ -369,6 +369,23 @@ def website_warnings(sel, metas, rows=None, merged=None):
         if c["id"] in merged_into: why.append("it came in through a merge (from #" + ", #".join(str(x) for x in merged_into[c["id"]]) + ")")
         if why: out.append((c["id"], w, "; ".join(why) + (f"; it doesn't match the email domain {', '.join(sorted(eds))}" if eds else "")))
     return out
+@U.router.get("/api/export/summary")
+def export_summary(request: Request, status: str = "approved_new", batch: str = ""):
+    """v0.4 #5: the counts for the export sheet ("12 new, 1 to check"), from the same server re-check the export runs.
+    Counts only: no names, no file, nothing marked as exported."""
+    if _filter_refused(status, request.state.user):
+        return JSONResponse({"error": "Only an admin can export pending, rejected or all cards.", "admin_only": True}, 403)
+    sel, metas, probs = _export_set(status, batch)
+    flagged = {c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or U.validate(c["fields"])}
+    out = {"count": len(sel), "new": 0, "updated": 0, "to_check": len(flagged), "left_out": 0, "blocked": bool(probs)}
+    if sel:
+        res = build_export("xlsx", sel, metas, status, "summary", "", preview=True)
+        view = (res[4].get("_view") if len(res) > 4 else None) or {}
+        dz = view.get("decisions") or {}; left = view.get("left") or []
+        rv = {x[0] for x in left if dz.get(x[0]) == "review"}
+        out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": len(flagged | rv), "left_out": len(left) - len(rv)}
+    return out
+
 MT = {"csv": "text/csv", "vcf": "text/vcard", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
 @U.router.get("/api/export/{kind}")
 def do_export(kind: str, request: Request, status: str = "approved_new", batch: str = "", preview: bool = False):
