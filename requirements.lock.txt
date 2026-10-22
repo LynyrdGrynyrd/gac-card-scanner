@@ -13,7 +13,7 @@ click==8.5.0              # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'  # via qrcode
 cryptography==50.0.2      # via -r requirements.txt
 et-xmlfile==2.0.0         # via openpyxl
-fastapi==0.143.0          # via -r requirements.txt
+fastapi==0.146.0          # via -r requirements.txt
 flatbuffers==25.12.19     # via onnxruntime
 gender-guesser==0.4.0     # via -r requirements.txt
 h11==0.16.0               # via uvicorn
@@ -41,7 +41,7 @@ rapidfuzz==3.14.6         # via -r requirements.txt
 rapidocr-onnxruntime==1.2.3  # via -r requirements.txt
 shapely==2.2.0            # via rapidocr-onnxruntime
 six==1.17.0               # via rapidocr-onnxruntime
-starlette==1.8.0          # via fastapi
+starlette==1.9.0          # via fastapi
 typing-extensions==4.16.0  # via anyio, fastapi, opentelemetry-api, pydantic, pydantic-core, starlette, typing-inspection
 typing-inspection==0.4.4  # via fastapi, pydantic
 uvicorn==0.54.0           # via -r requirements.txt

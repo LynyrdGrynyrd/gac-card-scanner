@@ -6,19 +6,19 @@
 # The test tools
 pytest==9.1.1             # tests/unit, tests/api, tests/e2e
 httpx==0.28.1             # fastapi.testclient
-hypothesis==6.169.4       # tests/unit/test_props_parser.py (also used by schemathesis)
-schemathesis==4.31.1      # tests/api
+hypothesis==6.170.2       # tests/unit/test_props_parser.py (also used by schemathesis)
+schemathesis==4.32.0      # tests/api
 playwright==1.64.0        # tests/e2e (then: python -m playwright install chromium)
 # Their dependencies
-certifi==2026.7.22        # via httpcore, httpx, requests
+certifi==2026.10.18        # via httpcore, httpx, requests
 charset-normalizer==3.5.2  # via requests
-graphql-core==3.2.13      # via hypothesis-graphql
+graphql-core==3.3.0      # via hypothesis-graphql
 greenlet==3.5.6           # via playwright
 harfile==0.5.0            # via schemathesis
 httpcore==1.0.9           # via httpx
 hypothesis-graphql==0.13.2  # via schemathesis
 iniconfig==2.3.1          # via pytest
-jsonschema-rs==0.58.6     # via schemathesis
+jsonschema-rs==0.59.0     # via schemathesis
 markdown-it-py==4.2.0     # via rich
 markupsafe==3.0.4         # via werkzeug
 mdurl==0.1.2              # via markdown-it-py
