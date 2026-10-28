@@ -35,9 +35,9 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 27, 2026 · version <span data-ver>0.4.5</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
+<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.6</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
 <h1 id="reviewer-start-here">Reviewer Start Here</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.5</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.6</em></p>
 <blockquote class="callout">
 <p>Scan, check, approve, export. Admin jobs are in the <strong><a href="/static/ui/help-admin.html">Admin Guide</a></strong>. Pictures use made-up cards.</p>
 </blockquote>
@@ -68,6 +68,7 @@
 </ol>
 <figure><img alt="Scan" src="/static/ui/help-img/02_scan_page.webp" loading="lazy" /></figure>
 <p>One card per photo, flat, no glare. You can review while the rest are read.</p>
+<p>On the Scan page: <strong>Needs a look</strong> = check the photo · <strong>Blocked</strong> = fix before approving · <strong>Not added</strong> = skipped · <strong>Cancelled</strong> = stopped.</p>
 <hr />
 <h2 id="3-review-one-card">3. Review one card</h2>
 <p>Click <strong>Review batch →</strong>. Check each field against the photo.</p>
@@ -110,7 +111,7 @@
 <li><strong>Yellow</strong> = check the photo.</li>
 <li><strong>changed</strong> = the scanner tidied it. Hover to see what it read.</li>
 <li><strong>Blocked</strong> = fix before approving.</li>
-<li><strong>Red box</strong>: fix the field. If the card really shows it like that: <strong>ask an admin</strong> (only admins can Confirm).</li>
+<li><strong>Red box</strong>: fix the field. If the card really shows it like that, an admin must confirm it: a misread in name, title, company or department, or a block on email, website or address. Click <strong>Needs admin</strong> to flag the card.</li>
 </ul>
 <hr />
 <h2 id="4-same-person">4. Same person?</h2>
@@ -121,6 +122,7 @@
 <li><strong>Different</strong>: both are kept.</li>
 </ul>
 <p>Answer this first. <strong>Enter</strong> won't approve until you do.
+A card in someone else's batch shows only as a count ("Looks like 1 card in another batch"): click <strong>Different</strong> if it's not the same person, or ask an admin.
 If the card was exported before, or may be in MC Trade, <strong>Approve</strong> asks once more.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
@@ -132,18 +134,18 @@ If the card was exported before, or may be in MC Trade, <strong>Approve</strong>
 <figure><img alt="Export" src="/static/ui/help-img/19_export_page.webp" loading="lazy" /></figure>
 <ul>
 <li><strong>To check</strong> = cards to look at before the import. The READ-ME lists them.</li>
-<li>The import file is <strong>GAC-MCTrade-…-DATE.xlsx</strong>. The <strong>-SUMMARY.xlsx</strong> is only a summary: don't import it.</li>
+<li>Import only the file named <strong>IMPORT-ME_…xlsx</strong>. Files named <strong>NOT-FOR-IMPORT_…</strong> are for reading.</li>
 <li>You can export <strong>only your own batch</strong>. Other batches: ask an admin.</li>
 <li>Export marks the cards as exported. <strong>Preview</strong> doesn't.</li>
-<li><strong>Export blocked:</strong> open the listed cards and fix them. A red box on an email, website or address: ask an admin to confirm it.</li>
-<li>Import only the <strong>.xlsx</strong> into MC Trade. Test 2 rows first.</li>
+<li><strong>Export blocked:</strong> open the listed cards and fix them, or click <strong>Needs admin</strong>.</li>
+<li>The READ-ME says <strong>Ready to import: X of Y clean, Z to check.</strong> Test 2 rows first.</li>
 </ul>
 <hr />
 <h2 id="6-ask-an-admin-when">6. Ask an admin when</h2>
 <p>Your admin: ______________________ (name, phone or email)</p>
 <ul>
 <li>you are locked out;</li>
-<li>a red box says <strong>Fix it, or ask an admin if the card is right.</strong>;</li>
+<li>a red box says <strong>Fix it, or ask an admin if the card is right.</strong></li>
 <li>you need to export someone else's batch.</li>
 </ul>
 </main>

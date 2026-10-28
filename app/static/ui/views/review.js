@@ -41,13 +41,16 @@ async function openCard(id, opts = {}) {
   { const qh = new URLSearchParams(((SS.queueHash || "#queue?").split("?")[1]) || ""); qh.set("batch", d.batch || "__none__"); if (!qh.has("s")) qh.set("s", "pending");
     $$(".pager a.ghost").forEach(a => a.href = "#queue?" + qh); }   // reviewer r8: back to THIS card's batch, with the other filters kept
   if (!opts.keep) { $("#h-r").tabIndex = -1; $("#h-r").focus({preventScroll: true}); }   // keys (J/K/A/R) work right after a link jump
-  $("#rStatus").className = "pill " + c.status; $("#rStatus").textContent = c.status + (d.archived ? " · archived" : "");
+  $("#rStatus").className = "pill " + c.status; $("#rStatus").textContent = c.status + (d.archived ? " · archived" : "") + (d.needs_admin && c.status === "pending" ? " · needs admin" : "");
+  $("#rStatus").title = d.needs_admin && c.status === "pending" ? `Needs admin: ${d.needs_admin.reason || ""}${d.needs_admin.by ? " (" + d.needs_admin.by + ")" : ""}` : "";
   $("#rDecided").textContent = c.status !== "pending" ? `${c.status[0].toUpperCase() + c.status.slice(1)} by ${c.reviewer || "?"} on ${when(c.decided)}` + (c.note ? ` · Note: ${c.note}` : "") : "";
   { const xe = d.dup_decided ? [] : (d.exported_elsewhere || []).filter(x => !x.kept_apart), el = $("#rExported");   // round 11 (part-timer r4): warn before Approve, not only on it
     // round 21 (all r20 bots): ONE duplicate box. 'Already exported' is a line in it, only on pending cards, and gone after a decision
     el.hidden = !xe.length || c.status !== "pending";
-    if (xe.length) el.innerHTML = `<b>Already exported:</b> ${plural(xe.length, "card")} in another batch. Merge it, or approve only if it's an update. ` +
-      `<details class="more small"><summary>Show ${xe.length}</summary><ul>${xe.map(x => `<li><a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a> (${esc(x.why.join(", "))}; exported ${x.times}×)</li>`).join("")}</ul></details>`; }
+    // v0.4.6 #6: the same count as the Approve dialog ("Exported before (N)"); other people's cards are a count, never a link
+    const xv = xe.filter(x => !x.hidden);
+    if (xe.length) el.innerHTML = `<b>Exported before (${xe.length}).</b> Same person? Merge, or approve only if it's an update.` +
+      (xv.length ? ` <details class="more small"><summary>Show</summary><ul>${xv.map(x => `<li><a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a> (${esc(x.why.join(", "))})</li>`).join("")}</ul></details>` : ""); }
   $("#rConf").innerHTML = "Scan " + confBar(d.conf ?? f.overall_confidence, d.status === "pending" && Object.keys(d.hard || {}).length > 0);   // newcomer r9 N5: same number as the queue
   ["first_name", "last_name", "title", "company", "website", "address"].forEach(x => $("#" + x).value = f[x] || "");
   $("#emails").value = (f.emails || []).join(", "); $("#social").value = (f.social || []).join(" ");
@@ -166,7 +169,7 @@ function markRisks(d) {
   const hk = Object.keys(d.hard || {}).map(k => k === "name" ? "first_name" : k), hardF = new Set(hk.concat(hk.some(k => k === "emails" || k === "website") ? ["emails", "website"] : []));
   const items = d.status !== "pending" ? [] : (d.attention || []).filter(a => !(a.field && hardF.has(a.field === "name" ? "first_name" : a.field))).filter(a => !["invalid", "hard", "dup_queue", "override", "reexport"].includes(a.code) && !(a.code === "dup_other" && dupQShown && !/rejected/.test(a.text || "")) && !(a.code === "dup_crm" && dupCShown));
   items.forEach(a => { const el = a.field && document.getElementById(FID[a.field] || a.field); const box = el && el.closest(".f"); if (!box) return;
-    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}${a.code === "hint" && a.field === "company" && d.status === "pending" ? ` <button type="button" class="btn small" data-softconfirm="company">Confirm</button>` : ""}</p>`); });   // v0.4.1 #8
+    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}${a.code === "hint" && a.field === "company" && d.status === "pending" ? (S.ME && S.ME.role === "admin" ? ` <button type="button" class="btn small" data-softconfirm="company">Confirm</button>` : ` <span class="askadm">Ask an admin.</span>`) : ""}</p>`); });   // v0.4.1 #8
   $$("#fields [data-softconfirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.softconfirm, d.id));
   const r = $("#rRisk"); r.hidden = !items.length;
   r.innerHTML = items.length ? `<b>To check (${items.length}):</b><ul>${items.map(a => `<li${a.field && FID[a.field] ? ` data-f="${esc(FID[a.field])}"` : ""}>${esc(a.text)}</li>`).join("")}</ul>` : "";
@@ -288,7 +291,11 @@ function showErrors(errs, loud) {
   const n = errs ? Object.keys(errs).length : 0;
   // v0.4.5 #7: for a reviewer, each confirmable problem says what to do, on its own line
   const adm_ = S.ME && S.ME.role === "admin", ov_ = (S.cur && S.cur.overridable) || [];
-  $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? `<b>Fix before approving:</b><ul>${Object.entries(errs).map(([k, m]) => `<li data-err="${esc(k)}">${esc(m)}${!adm_ && k !== "phones" && ov_.includes(k) ? ` <span class="askadm">Fix it, or ask an admin if the card is right.</span>` : ""}</li>`).join("")}</ul>` : "";
+  // v0.4.6 #8: the "ask an admin" line shows ONCE under the list; #3: a reviewer can flag the card for an admin in one click
+  const askN = !adm_ && Object.keys(errs || {}).some(k => k !== "phones" && ov_.includes(k)), na_ = S.cur && S.cur.needs_admin;
+  $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? `<b>Fix before approving:</b><ul>${Object.entries(errs).map(([k, m]) => `<li data-err="${esc(k)}">${esc(m)}</li>`).join("")}</ul>` +
+    (askN ? `<p class="small askadm">Fix it, or ask an admin if the card is right. ${na_ ? `<span id="naDone">Flagged for an admin.</span>` : `<button type="button" class="btn small" id="bNeedsAdmin">Needs admin</button>`}</p>` : "") : "";
+  if ($("#bNeedsAdmin")) $("#bNeedsAdmin").onclick = () => flagNeedsAdmin(S.cur.id);
 }
 // round 23 (datamanager/coordinator/newcomer r22): 'This is correct' confirms ONE field at a time, shows the value and needs a
 // reason. Phones are never confirmable. v0.4.4 (user decision): email/website/address are admin-only; reviewers see one plain line.
@@ -302,6 +309,10 @@ function confirmBtn(ov, sid, hardNow) {
   const lab = k => LABEL[k === "name" ? "first_name" : k] || k;
   $("#rErr").insertAdjacentHTML("beforeend", `<p class="small conf">${mine.length ? "Photo agrees? " + mine.map((k, i) => `<button type="button" class="btn small" data-confirm="${esc(k)}"${i ? "" : ' id="bConfirmOk"'}>Confirm ${esc(lab(k))}</button>`).join(" ") : ""}${askAdm ? `${mine.length ? " " : ""}<span id="askAdmin">An admin needs to confirm this.</span>` : ""}</p>`);
   $$("#rErr [data-confirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.confirm, sid));
+}
+async function flagNeedsAdmin(id) {   // v0.4.6 #3: one click; the reason is the red list (an admin sees it as a badge and a filter)
+  try { await post(`/api/cards/${id}/needs-admin`, {}); toast("Flagged for an admin.", 3500); if (S.cur && S.cur.id === id) await openCard(id, {keep: true}); refreshCounts(); }
+  catch (e) { toast(e.message, 5000); }
 }
 async function doConfirm(k, sid) {
     const lab = k_ => LABEL[k_ === "name" ? "first_name" : k_] || k_;
@@ -333,7 +344,13 @@ function renderDupes(d) {
   const rejected = d.status === "rejected", all = rejected ? [] : d.dupes.queue, crm = rejected ? [] : d.dupes.crm;
   const decided = d.dup_decided || d.status !== "pending";   // round 21: after 'Different person' (or a decision) no merge buttons
   const q = decided ? [] : all.filter(x => !x.kept_apart), kept = decided ? all : all.filter(x => x.kept_apart), res = q.length ? null : "keep_both";
-  $("#rDupQ").hidden = !all.length;
+  // v0.4.6 #1: look-alikes in other people's batches are a COUNT only (no ids, names, links or merge options)
+  const hid = rejected || decided ? 0 : (d.dupes.hidden_open || 0);
+  $("#rDupQ").hidden = !all.length && !hid;
+  if (!all.length && hid) {
+    $("#rDupQ").innerHTML = `<b>Looks like ${plural(hid, "card")} in another batch.</b> <div class="btns"><button type="button" class="btn" id="dDiff">Different</button></div>`;
+    $("#dDiff").onclick = e => act(e.currentTarget, {keep_apart: "all"}, "Marked different.");
+  }
   if (all.length) {
     // round 22 (datamanager r21): a STABLE merge target (no #354/#127 flipping): same tiers, then the lowest card number
     // v0.4.1 #2 (skeptic H2): the BEST match: same scanner and batch first, then scanned twice, then the name/email/phone score; the id only breaks ties
@@ -343,7 +360,7 @@ function renderDupes(d) {
     const canSame = !!(bestQ && bestQ.same_user && bestQ.can_same !== false);   // the server refuses a merge into another person's card
     // v0.4.2 #11 (skeptic L3) / #8: someone else's look-alike gets no "Same person?" headline (only Different is possible); short text
     const head = !bestQ ? "" : canSame ? `<b>Same person?</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a>` : `<b>Looks like</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a> <span class="small">(someone else's card)</span>`;
-    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : (kept.length > 3 ? `Different from ${(d.kept_n || kept.length)}.` : `Marked different from ${kept.map(x => `<a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a>`).join(", ")}.`))
+    $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : (kept.length > 3 ? "Marked different." : `Marked different: ${kept.map(x => `<a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a>`).join(", ")}.`))
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
       // v0.4 #7: side by side, "Same person?", Same / Different; differences highlighted (Same = the existing merge, Different = keep both)
@@ -363,6 +380,7 @@ function renderDupes(d) {
         `</select> <button type="button" class="btn small" id="dApply" disabled>Save decision</button></div></details>` +
       // v0.4.5 #10 (newcomer): no second helper line; the Same button says it (tooltip and name)
       (kept.length ? `<p class="small">Marked different: ${kept.map(x => `<a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a>`).join(", ")}.</p>` : "") +
+      (hid && res !== "keep_both" ? `<p class="small">Also looks like ${plural(hid, "card")} in another batch.</p>` : "") +
       `<span id="dMerge" hidden></span>`;
     fillDupGrid(d);
     const doMerge = async (btn, tid) => {   // round 7: preview what merging does (no silent drop); round 8: same pick rule as the server
@@ -398,8 +416,8 @@ function renderDupes(d) {
         if (v.startsWith("merge:")) return doMerge(e.currentTarget, +v.slice(6));
         const ids = q.filter(x => !x.strong).map(x => x.card_id);
         // v0.4.4 #4: the exported look-alikes are named HERE, once, so Approve doesn't ask again
-        const nx_ = (S.cur.exported_elsewhere || []).filter(x => ids.includes(x.card_id) && (x.times || 0) > 0).length;
-        act(e.currentTarget, {keep_apart: ids.length === 1 ? ids : "all"}, (ids.length === 1 ? `Marked as a different person from #${ids[0]}${nx_ ? " (exported before)" : ""}.` : `Marked as a different person from ${ids.length} look-alike cards.` + (nx_ ? ` ${nx_} of them ${nx_ === 1 ? "was" : "were"} exported before.` : ""))); };
+        // v0.4.6 #6: a short "Marked different." (the exported-before count is in the box and the Approve dialog)
+        act(e.currentTarget, {keep_apart: ids.length === 1 && !hid ? ids : "all"}, "Marked different."); };
       const ds = $("#dSame"), dd = $("#dDiff");
       if (ds) ds.onclick = e => doMerge(e.currentTarget, bestQ.card_id);
       if (dd) dd.onclick = e => { sel.value = "keep"; ap.disabled = false; ap.onclick({currentTarget: e.currentTarget}); }; }
@@ -491,7 +509,7 @@ async function decide_(status, btn) {
     if (!S.cur || S.cur.id !== sid) { toast(`Not saved: you moved from card #${sid} to another card.`, 6000); return; }
   }
   // v0.4.1 #5: the duplicate question is asked ONCE, in the Same/Different box (Approve doesn't ask it again in a dialog)
-  if (status === "approved" && sameOpen()) { toast("Same person? Answer Same or Different first.", 4000); $("#rDupQ").scrollIntoView({block: "center"}); return; }
+  if (status === "approved" && sameOpen()) { sameToast(4000); $("#rDupQ").scrollIntoView({block: "center"}); return; }
   const sent = formSnap();
   const body = {fields: collect(), status, reviewer: who(), note: $("#note").value, card_id: sid, version: S.cur.version};
   // round 13 (part-timer r5): the AI status on screen can be out of date (queued or started after the page loaded): ask the
@@ -508,18 +526,24 @@ async function decide_(status, btn) {
       const ov = v_.overridable || [], canOv = ov.length && Object.keys(hard_).every(k => ov.includes(k)) && !recomputeDirty();
       // round 22: the refusal shows once (inline + one summary line), no dialog; 'This is correct' sends field + exact value + version
       if (!recomputeDirty()) confirmBtn(ov, sid, hard_);   // the button covers the overridable blocks; others still need fixing
+      // v0.4.6 #3: Approve is never silent: a reviewer is told an admin has to confirm it
+      // v0.4.6 #4: when the blocker is a misread (Morg4n), the toast names it
+      const mis_ = Object.keys(hard_).find(k => /misread/i.test(String(hard_[k]))), mv_ = mis_ ? (collect()[mis_ === "name" ? "first_name" : mis_] || "") : "";
+      const isAdm_ = S.ME && S.ME.role === "admin", allOv_ = ov.length && Object.keys(hard_).every(k => ov.includes(k));
+      toast(mis_ && typeof mv_ === "string" && mv_ ? `"${mv_}" looks misread. Fix it${isAdm_ ? "" : ", or ask an admin"}.` : allOv_ && !isAdm_ ? "An admin needs to confirm this." : "Fix the red items first.", 4500);
       { const first = $("#fields .f.err input, #fields .f.err textarea"); first && first.focus(); return; }
       try { const fr_ = await call("/api/cards/" + sid); body.version = fr_.version; S.cur.version = fr_.version; } catch {} } } catch {} }
   const aiWas = fr0 ? fr0.ai_status : S.cur.ai_status;   // approving doesn't wait for the AI; a queued check is cancelled, a running one leaves suggestions
   // round 15 (part-timer): ONE dialog for AI-not-finished + already-known cross-batch look-alikes (no two questions in a row)
   // round 20 (reviewer r19): cards already marked "Different person" don't bring back the 'may send twice' warning
-  const keptIds = new Set(((S.cur.dupes || {}).queue || []).filter(x => x.kept_apart).map(x => x.card_id));
   // v0.4.2 #3 (reviewer Med-High): 'Different' answers the look-alike question, but Approve still says once that this person
   // was exported before / may be in MC Trade, so it is never a silent second import
   // v0.4.4 #4 (coordinator/reviewer): look-alikes you already marked Different were named when you pressed Different
   // ("N exported before"); Approve warns only about NEW information, so Enter approves in one press after Different
   // v0.4.5 #4 (data-manager: no warning for Grace/Jonah after Different): the user's rule is that Approve ALWAYS says when this
   // person was exported before, Different or not, in ONE dialog. An MC Trade look-alike alone shows no dialog (the box says it).
+  // v0.4.6 #6: ONE dialog with the same count as the duplicate box ("Exported before (N)"); Different is remembered per pair
+  // (the Same/Different question is not asked again from either card), but Approve still says once that it was exported (v0.4.5 rule)
   const xe0 = status === "approved" ? (S.cur.exported_elsewhere || []).filter(x => (x.times || 0) > 0) : [];
   // round 23 (newcomer r22): a choice already made on the card (or 'Different person' when adding as new is the only choice) is sent, so it is not asked again
   if (status === "approved" && S.cur.dupes && !body.crm_action) { if (S.cur.dupes.crm_action) body.crm_action = S.cur.dupes.crm_action; else if ((S.cur.dupes.crm || []).length && !S.cur.dupes.updates_enabled) body.crm_action = "create_new"; }
@@ -537,12 +561,12 @@ async function decide_(status, btn) {
     const bits = [];
     // v0.4.3 #8 (newcomer): ONE wording for the AI not being finished
     if (aiBusy) bits.push(`<p>AI check not finished.${aiWas === "queued" ? " Deciding now <b>cancels</b> it." : " Its suggestions appear later."}</p>`);
-    if (status === "approved" && xe0.length) bits.push(`<p>This person may have been exported before: ${xe0.slice(0, 3).map(x => "#" + x.card_id + (x.name ? " " + esc(x.name) : "") + (keptIds.has(x.card_id) || x.kept_apart ? " (you said Different)" : "")).join(", ")}${xe0.length > 3 ? ` and ${xe0.length - 3} more` : ""}.</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
+    if (status === "approved" && xe0.length) bits.push(`<p>Exported before (${xe0.length}). Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
     if (crm0.length) bits.push(`<p>May already be in MC Trade: <b>${esc(crm0[0].name)}</b>. It will be added as a new contact.</p>`);
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const warn0 = xe0.length || crm0.length;
-    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : "Exported before";
+    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : `Exported before (${xe0.length})`;
     if (aiBusy && t0 === "AI check not finished") bits[0] = bits[0].replace("AI check not finished. ", "");   // v0.4.5 UX: the title already says it
     const r0 = await ask({title: t0, html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
@@ -613,7 +637,8 @@ async function decide_(status, btn) {
         }
         if (need === "confirm_cross_batch") {
           const r = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(e.message)}</p>` + ((e.data.others || []).length > 1 ? `<p>Open: ${e.data.others.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}</p>` : "") + `<p class="small">“Approve this one too” doesn't change the other cards.</p>`,
-            buttons: [{label: (e.data.others || []).length > 1 ? `Open the first of these ${e.data.others.length} cards` : "Open that card", value: "open"}, {label: "Different person: approve this one too", value: "go"}, {label: "Cancel", cls: "primary", value: null, primary: true, focus: true}]});
+            // v0.4.6 #1: no "Open" for cards in someone else's batch (the server sends no id for them)
+            buttons: [...(e.data.other ? [{label: (e.data.others || []).length > 1 ? `Open the first of these ${e.data.others.length} cards` : "Open that card", value: "open"}] : []), {label: "Different person: approve this one too", value: "go"}, {label: "Cancel", cls: "primary", value: null, primary: true, focus: true}]});
           if (r.value === "open") { location.hash = "review/" + e.data.other; return; }
           if (!r.value) { dlgStopped(r); return; } body.confirm_cross_batch = true; continue;
         }
@@ -700,6 +725,12 @@ function enterOk(e) {
   return !e.shiftKey && !e.isComposing;
 }
 const sameOpen = () => { const q = $("#rDupQ"); return !!(q && !q.hidden && q.querySelector("#dSame, #dDiff")); };
+// v0.4.6 #4/#9: ONE message for "why can't I approve yet": a misread on the saved card is named first; "Same or Different"
+// only when there is a Same button; never the same toast twice in a row
+let lastSameT = 0;
+function sameMsg() { const h = Object.values((S.cur && S.cur.hard) || {}); if (h.length) return h[0] + " Fix it first.";
+  return $("#rDupQ #dSame") ? "Same person? Answer Same or Different first." : "Pick Different first."; }
+function sameToast(ms) { if (Date.now() - lastSameT < 2500) return; lastSameT = Date.now(); toast(sameMsg(), ms || 4000); }
 let ENTER_ARMED = true; S.ENTER_AFTER = 0;
 const ENTER_PAUSE = 600;
 document.addEventListener("keyup", e => { if (e.key === "Enter" || e.key.toLowerCase() === "a") ENTER_ARMED = true; });
@@ -709,7 +740,7 @@ document.addEventListener("keydown", e => {
     const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     if (enterOk(e)) { e.preventDefault(); ENTER_ARMED = false; decide("approved", $("#bApprove")); }
     else if (!e.repeat && inField && document.activeElement.tagName === "INPUT") { e.preventDefault(); toast(S.dirty ? "Unsaved. Save first." : "Esc, then Enter to approve.", 3000); }
-    else if (!e.repeat && !inField && sameOpen() && !document.querySelector("dialog[open]")) toast("Same person? Answer Same or Different first.", 3000);
+    else if (!e.repeat && !inField && sameOpen() && !document.querySelector("dialog[open]")) sameToast(3000);
     return;
   }
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) { e.preventDefault(); doUndo(); return; }
@@ -719,7 +750,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight" || e.key === "ArrowLeft") { if (S.dirty) { toast("Save or discard your edits first.", 3000); return; } e.preventDefault(); step(e.key === "ArrowRight" ? 1 : -1); return; }
   const k = e.key.toLowerCase();
   if (e.repeat) { e.preventDefault(); return; }   // v0.4.1 #1: a held key acts once
-  if (k === "a" && (!ENTER_ARMED || Date.now() < S.ENTER_AFTER || sameOpen())) { e.preventDefault(); if (sameOpen()) toast("Same person? Answer Same or Different first.", 3000); return; }
+  if (k === "a" && (!ENTER_ARMED || Date.now() < S.ENTER_AFTER || sameOpen())) { e.preventDefault(); if (sameOpen()) sameToast(3000); return; }
   if (k === "a") { ENTER_ARMED = false; decide("approved", $("#bApprove")); } else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
   e.preventDefault();
 });

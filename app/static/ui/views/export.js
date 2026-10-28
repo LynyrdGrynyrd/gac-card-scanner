@@ -20,9 +20,14 @@ async function exportInfo() {
       let keepB = exportInfo.picked ? $("#exBatch").value : "";   // round 22: a fresh visit picks the default below (never a stale empty batch)   // the person may have picked a batch while the list was loading (r15int: "All batches" = "" is a real pick too)
       // round 7 (part-timer r1): your own batches first, and the default is your most recent batch, not "All batches"
       const cnt = b => st === "approved_new" ? `${b.ready ?? b.n} ready to export` : st === "approved" ? `${b.approved ?? b.n} approved` : `${plural(b.n, "card")}`;
-      const opt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} · ${cnt(b)}</option>`;
+      // v0.4.6 #7: two batches with the same name are told apart ("Monday (2)"), oldest first
+      const dn = {}, seenN = {}; [...bs].sort((a, b) => (a.started || 0) - (b.started || 0)).forEach(b => { const l = b.batch_label || b.batch; seenN[l] = (seenN[l] || 0) + 1; dn[b.batch] = seenN[l] > 1 ? `${l} (${seenN[l]})` : l; });
+      const opt = b => `<option value="${esc(b.batch)}">${esc(dn[b.batch] || b.batch_label || b.batch)} · ${cnt(b)}</option>`;
       // v0.4.2 #1: a reviewer can export only their own batches (the server refuses the rest); admins see everyone's
-      const adm = S.ME && S.ME.role === "admin", mine = bs.filter(b => adm ? b.mine : b.own), others = adm ? bs.filter(b => !b.mine) : [];
+      const adm = S.ME && S.ME.role === "admin", others = adm ? bs.filter(b => !b.mine) : [];
+      const rdy0 = b => (st === "approved_new" ? (b.ready ?? b.n) : st === "approved" ? (b.approved ?? b.n) : b.n) > 0, old0 = b => (b.started || 0) < Date.now() / 1000 - 14 * 86400;
+      // v0.4.6 #7: batches with nothing to export are left out (a reviewer's always, an admin's old ones), except the one in use
+      const mine = bs.filter(b => adm ? b.mine : b.own).filter(b => rdy0(b) || b.batch === exportInfo.last || ($("#exShowAll") && $("#exShowAll").checked) || (adm && !old0(b)));
       // round 8 (part-timer r2): your batches first; other people's only with "Show other people's batches too"
       const showAll = ($("#exShowAll") && $("#exShowAll").checked) || exportInfo.more, othShown = showAll ? others : others.filter(b => b.batch === keepB);
       const rdy = b => (st === "approved_new" ? (b.ready ?? b.n) : st === "approved" ? (b.approved ?? b.n) : b.n) > 0;
@@ -173,9 +178,10 @@ async function tileExport(t) {
   // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
   let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
   const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
-  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) : "";
+  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) +
+    (kind === "xlsx" && sum.ready ? `<p class="small" id="exReady">${esc(sum.ready.text)}</p>` : "") : "";   // v0.4.6 #7: the README's own line
   const bl_ = (exportInfo.list || []).find(b => b.batch === $("#exBatch").value);
-  const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${nUpd ? 4 : 3} files. Import only the .xlsx${nUpd ? " (and the UPDATES .xlsx as a separate import)" : ""}.</b> The READ-ME and CSV are for reading only.` : "You'll get one file."}</p></details>`,
+  const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${(sum && sum.ready && sum.ready.files) || (nUpd ? 5 : 4)} files. Import only IMPORT-ME${nUpd ? " (updates separately)" : ""}.</b> NOT-FOR-IMPORT files are for reading.` : "You'll get one file."}</p></details>`,
     buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");
@@ -195,7 +201,7 @@ async function tileExport(t) {
     $("#exDone").innerHTML = (sm ? `<b>✓ ${plural(sm.cards, "card")} exported` + (sm.update_rows ? ` (${plural(sm.new_rows, "new contact")}, ${plural(sm.update_rows, "update")})` : "") + (sm.crm_real ? "" : " (test MC Trade list)") + `.</b>` +
         (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "") +
         (sm.possible.length ? ` <span class="flag low">May already be in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "")
-      : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the .xlsx${comp.includes("updates.xlsx") ? " (updates separately)" : ""}` + ((sm ? sm.new_rows + (sm.update_rows || 0) : +n) > 2 ? "; test 2 rows first." : ".") : "");
+      : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the IMPORT-ME file${comp.includes("updates.xlsx") ? "s (updates separately)" : ""}.` + (sm && sm.ready ? " " + esc(sm.ready.text) : "") : "");
     const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
     if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
     $("#exDone").dataset.batch = $("#exBatch").value;

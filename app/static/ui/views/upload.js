@@ -282,7 +282,7 @@ function renderBatch() {
   const etaS = (left + qa) * (S.B.avg || 0), etaTxt = etaS < 60 ? "less than a minute left" : `about ${Math.round(etaS / 60)} min left`;   // round 15 (part-timer r14): no "1 min left (≈1 s per card)"
   // round 22: when other people's cards are in line, say how many are ahead instead of a time guess
   $("#batchEta").textContent = left && qa ? `Reading… ${qa} ahead of you.` : left && S.B.avg ? `Reading… ${etaTxt}.` : left ? "Reading photos…" : "";
-  $("#batchLegend").hidden = !fin; $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(S.B.id)}&s=pending`;
+  $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(S.B.id)}&s=pending`;
   $("#clearBatch").hidden = fin !== n; $("#cancelBatch").hidden = fin === n || !!S.B.stopped;
 }
 $("#batchList").addEventListener("click", e => { if (S.B && !S.B.t0) S.B.t0 = Date.now() / 1000;

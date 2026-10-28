@@ -48,7 +48,7 @@ def test_different_then_approve_warns_exported_once(new_page, server):
         dl = page.locator("#dlg[open]")
         if dl.count(): dl.get_by_role("button").filter(has_text="Different").first.click(); page.wait_for_timeout(800)
     page.locator("#bApprove").click()
-    dlg = page.locator("#dlg[open]"); expect(dlg).to_be_visible(); expect(dlg).to_contain_text(f"#{a}"); expect(dlg).to_contain_text("exported before")
+    dlg = page.locator("#dlg[open]"); expect(dlg).to_be_visible(); expect(dlg).to_contain_text("Exported before (1). Approve anyway?")   # v0.4.6 #6: one count, no list
     page.keyboard.press("Enter")                       # Cancel has the focus: Enter never approves through the warning
     page.wait_for_timeout(800); assert card_json(page, b)["status"] == "pending"
     page.locator("#bApprove").click()

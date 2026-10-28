@@ -75,7 +75,7 @@ def test_csv_guard_dashed_phone_and_handles(env):
 
 def test_short_filenames(env):
     fn = env["ui"]._fname("contacts-for-MC-Trade", "approved_new", "xlsx", "R5 QA newcomer Oct 13 · Oct 13, 8:22 PM · QN")
-    assert len(fn) < 60 and fn.count("Oct-13") == 1, fn
+    assert len(fn) < 75 and fn.count("Oct-13") == 1 and fn.startswith("IMPORT-ME_"), fn   # v0.4.6 #7: IMPORT-ME_ + seconds
 
 # ---- skeptic
 def test_reapprove_keeps_override(env):

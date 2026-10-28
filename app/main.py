@@ -101,7 +101,9 @@ _th.Thread(target=_mem_watch, daemon=True, name="mem-watch").start()
 def health():
     up = _ai_up()
     from . import updates as _up
-    return {"ok": True, "version": _up.current_version(), "commit": _up.current_commit(), **_up.build_info(), "ai_checker": "online" if up else "offline",
+    bi = dict(_up.build_info())   # v0.4.6 #8 (part-timer: two commits): ONE commit, the public release's when this folder came from one
+    cm = bi.pop("public_commit", None) or _up.current_commit()
+    return {"ok": True, "version": _up.current_version(), "commit": cm, **bi, "ai_checker": "online" if up else "offline",
             "uptime_s": int(time.time() - _STARTED), "rss_mb": _rss_mb(),
             **({} if up else {"ai_note": "AI check is off right now. Scanning still works.", "ai_hint": "Start it from Admin > Settings > AI helper (desktop app) or start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + ")."})}
 

@@ -72,7 +72,8 @@ def test_ai_check_guards(env, monkeypatch):
     ui.AI_MANUAL.clear(); b = mk(ui, store)
     codes = [rc.post(f"/api/cards/{b}/ai-check", json={}).status_code for _ in range(ui.AI_MANUAL_MAX + 2)]
     assert codes[:ui.AI_MANUAL_MAX] == [200] * ui.AI_MANUAL_MAX and codes[-1] == 429
-    assert env["rev2"].post(f"/api/cards/{b}/ai-check", json={}).status_code == 200   # the limit is per person
+    assert env["rev2"].post(f"/api/cards/{b}/ai-check", json={}).status_code == 404   # v0.4.6 #1: not rev2's card
+    assert env["adm"].post(f"/api/cards/{b}/ai-check", json={}).status_code == 200   # the limit is per person
     ui.AI_MANUAL.clear()
 
 def test_company_digit_letter_hint():

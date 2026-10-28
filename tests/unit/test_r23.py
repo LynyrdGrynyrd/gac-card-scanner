@@ -15,7 +15,7 @@ def test_wrong_blocks_and_misses():
     assert "name" in H(first_name="Morg4n") and "last_name" in H(last_name="Sm1th") and "name" not in H(first_name="Morgan")
     assert "phones" in H(phones=[{"number": "555-0100"}]) and "no area code" in H(phones=[{"number": "555-0100"}])["phones"]
     for ok in ("330-555-0100", "330-555-0170 x4271", "(330) 555-0100 ext 12", "+44 20 7946 0958", "1-330-555-0100"): assert "phones" not in H(phones=[{"number": ok}]), ok
-    m = H(address="g W Exchange St, Cuyahoga Falls, OH 44223")["address"]; assert "44223" in m
+    m = H(address="g W Exchange St, Cuyahoga Falls, OH 44223")["address"]; assert "“g”" in m and len(m) < 70   # v0.4.6 #8: short line
     assert "phones" in U.payload_problems({"phones": [{"number": "555-0100"}]}) or "phones" in H(phones=[{"number": "555-0100"}])
 
 def _confirm(c, cid, field, value, reason="printed like this on the card"):

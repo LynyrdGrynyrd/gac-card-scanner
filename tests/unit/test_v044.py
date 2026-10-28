@@ -37,7 +37,7 @@ def test_v044_merge_into_other_users_batch_refused(env):
     src = mk(ui, st, first_name="Nia", last_name="Park", company="Park Co", emails=["np@v44m.example.com"]); ui.set_meta(src, batch="v44b", batch_label="v44b")
     before = json.dumps(st.get(tgt)["fields"], sort_keys=True)
     r = b.post(f"/api/cards/{src}", json={"status": "rejected", "merge_into": tgt})
-    assert r.status_code in (403, 409, 422) and r.json().get("need") in ("merge_other_user", "merge_other_batch"), r.text
+    assert r.status_code in (403, 409, 422) and r.json().get("need") in ("merge_other_user", "merge_other_batch", "merge_missing"), r.text   # v0.4.6: another person's card is "not found"
     assert json.dumps(st.get(tgt)["fields"], sort_keys=True) == before and st.get(src)["status"] != "rejected"
 
 

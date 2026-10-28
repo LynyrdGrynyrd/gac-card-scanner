@@ -191,6 +191,7 @@ def test_approve_blocked_until_fixed(env):
     ui, st, rc = env["ui"], env["store"], env["rev"]
     cid = st.add("t", "", {"first_name": "Dmitri", "last_name": "Bosco", "company": "Bosco Co", "address": "118o S Main St, Akron, OH 44308",
                            "emails": ["d@bosco.example"], "phones": [], "website": ""}, "x.jpg")
+    from test_app import _rev_ini; ui.log(cid, _rev_ini(ui), "scanned")
     r = rc.post(f"/api/cards/{cid}", json={"status": "approved", "override_reason": "looks fine"}); assert r.status_code == 422 and "118o" in r.text
     f = st.get(cid)["fields"]; f["address"] = "1180 S Main St, Akron, OH 44308"
     r = rc.post(f"/api/cards/{cid}", json={"fields": f, "status": "approved"}); assert r.status_code == 200, r.text
@@ -217,6 +218,7 @@ def test_bulk_adds_as_new_when_updates_off(env):
     try:
         r = rc.get("/api/cards").json()
         cid = st.add("t", "", {"first_name": "Sam", "last_name": "Sample", "company": "Sample Co", "emails": ["sam@sample.example"], "phones": [], "website": ""}, "y.jpg")
+        from test_app import _rev_ini; ui.log(cid, _rev_ini(ui), "scanned")
         orig = ui.approval_check
         def fake(c, f, b):
             if c["id"] == cid and not ui.meta(cid).get("crm_action"):

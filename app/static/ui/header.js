@@ -18,6 +18,7 @@ async function loadMe() {
   { const w = document.getElementById("youAre"); if (w && S.ME) { w.innerHTML = `You are: <b>${esc(S.ME.display || S.ME.username)}</b> · <button type="button" class="link" id="notMe">Not you?</button>`; $("#notMe").onclick = () => $("#logout").click(); } }
   idleStart(S.ME.idle_minutes);
   $("#whoText").innerHTML = `<b>${esc(S.ME.display)}</b> (${esc(S.ME.initials)})`;
+  $("#fNaL").hidden = S.ME.role !== "admin";
   $("#navAdmin").hidden = S.ME.role !== "admin"; $("#archiveAll").hidden = S.ME.role !== "admin"; $("#archiveBatch").hidden = S.ME.role !== "admin";
   if (S.ME.role !== "admin") $$("#exStatus option[value=all], #exStatus option[value=pending], #exStatus option[value=rejected]").forEach(o => o.remove());
   if (S.ME.must_change) setTimeout(() => changePw("Please choose your own password (the one you were given is temporary)."), 400);
@@ -65,9 +66,11 @@ $("#logout").onclick = async () => {
 /* ---------- undo ---------- */
 // v0.4.5 #6: Undo works on the batch you are in, from the last 2 hours, and says what it will undo
 const undoBatch = () => (S.cur && !$("#v-review").hidden && S.cur.batch) || ($("#fBatch") && !$("#v-queue").hidden && $("#fBatch").value) || (S.B && S.B.id) || "";
+// v0.4.6 #2: the server answers with the SAME rule the click uses (this batch, last 2 hours); nothing undoable = no button
 async function refreshUndo() { try { const b = undoBatch(), u = await call("/api/undo" + (b ? "?batch=" + encodeURIComponent(b) : "")); $("#undoBtn").hidden = !u.id;
   const what = u.id ? `${u.label} · ${u.age_min < 1 ? "just now" : u.age_min + " min ago"}${u.batch_label ? " · " + u.batch_label : ""}` : "";
-  $("#undoBtn").title = u.id ? "Undo: " + what + " (U)" : ""; $("#undoBtn").setAttribute("aria-label", u.id ? "Undo: " + what : "Undo"); $("#undoBtn").dataset.label = u.label || ""; $("#undoBtn").dataset.id = u.id || ""; } catch {} }
+  clearTimeout(refreshUndo.t); if (u.id) refreshUndo.t = setTimeout(refreshUndo, 60000);   // the "N min ago" never goes stale
+  $("#undoBtn").title = u.id ? "Undo: " + what + " (U)" : ""; $("#undoBtn").setAttribute("aria-label", u.id ? "Undo: " + what : "Undo"); $("#undoBtn").dataset.label = u.label || ""; $("#undoBtn").dataset.id = u.id || ""; } catch { $("#undoBtn").hidden = true; $("#undoBtn").dataset.id = ""; } }
 async function doUndo() {
   try { const id_ = Number($("#undoBtn").dataset.id) || null, b = undoBatch(); const r = await post("/api/undo", {...(id_ ? {id: id_} : {}), ...(b ? {batch: b} : {})}); refreshCounts();
     // v0.4.3 #8 (newcomer): a short "Undone" that survives the move to the card (a route change clears the message)
@@ -87,6 +90,7 @@ async function refreshCounts() {
     pb.textContent = String(c.mine_pending) + (rd ? ` · ${rd} reading` : "");   // v0.4.4 #9 (coordinator): plain words, not "63 +4"
     const lbl = `${c.mine_pending} waiting in your batches` + (rd ? `, ${rd} still being read` : "");
     pb.setAttribute("aria-label", lbl); pb.title = lbl;
+    const na = $("#naBadge"); if (na) { na.hidden = !c.needs_admin; na.textContent = `${c.needs_admin || 0} ${c.needs_admin === 1 ? "needs" : "need"} admin`; }   // v0.4.6 #3 (admins only)
     if ($("#v-queue").hidden) $$("#statusTabs button span").forEach(x => x.textContent = "");
     return c;
   } catch { return null; }

@@ -70,7 +70,7 @@ def test_v042_help_public_and_health_build_info(env, tmp_path, monkeypatch):
     assert anon.get("/ui/help", follow_redirects=False).status_code == 307
     assert anon.get("/static/ui/help.html").status_code == 200
     monkeypatch.setattr(updates, "_BUILD", {"public_commit": "abc1234", "tag": "v0.4.2"})
-    h = anon.get("/health").json(); assert h["public_commit"] == "abc1234" and h["tag"] == "v0.4.2"
+    h = anon.get("/health").json(); assert h["commit"] == "abc1234" and "public_commit" not in h and h["tag"] == "v0.4.2"
 
 
 # ---- #11 skeptic lows

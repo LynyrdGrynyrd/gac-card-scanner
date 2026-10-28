@@ -79,7 +79,9 @@ def _fname(kind, status, ext, batch_label=""):
     tag = {"approved_new": "new", "approved": "approved", "all": "all", "pending": "pending"}.get(status, _slug(status))
     if batch_label: tag += "-" + _slug(_bname(batch_label), 28)
     kind = {"contacts-for-MC-Trade": "MCTrade"}.get(kind, kind)
-    fn = f"GAC-{kind}-{tag}-{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}.{ext}"
+    # v0.4.6 #7: seconds in the name (a second export in the same minute no longer gets a confusing '-2'), and the MC Trade
+    # import file says so: IMPORT-ME_… (its companions are NOT-FOR-IMPORT_…, see comp_name)
+    fn = ("IMPORT-ME_" if kind == "MCTrade" else "") + f"GAC-{kind}-{tag}-{datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}.{ext}"
     # round 15 (manager r14 M-1): two exports never share a file name ("-2", "-3" ... when the name was used before)
     try:
         used = {r[0] for r in U.db().execute("SELECT filename FROM exports WHERE filename LIKE ?", (fn.rsplit(".", 1)[0] + "%",))}
@@ -245,7 +247,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
             b_ = io.BytesIO(); wb.save(b_); return b_.getvalue()
         body_x = _book(rows)
         fn = _fname("contacts-for-MC-Trade", status, "xlsx", batch_label)
-        rfn = ("PREVIEW-" if preview else "") + fn   # round 10 (coordinator r3 3c): the READ-ME names the files as they are saved
+        rfn = preview_name(fn) if preview else fn   # round 10 (coordinator r3 3c): the READ-ME names the files as they are saved
         # companion files (not for import): every non-template column + rows left out, and the READ ME notes
         e = io.StringIO(); w = csv.writer(e)
         w.writerow(["ScanCardID", "InImportFile", "Why left out", "FirstName", "LastName", "Email2", "Website", "Credentials", "Department", "OtherAddress",
@@ -268,6 +270,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
             w.writerow([safe_cell(x) for x in [c["id"], inimp, why.get(c["id"], ""), mx.clean(f_.get("first_name")), mx.clean(f_.get("last_name")),
                         em[1] if len(em) > 1 else "", mx.clean(f_.get("website"))] + [mx.clean(x) for x in more(c)[:5]] + [" ".join(f_.get("social") or []), mx.clean(_note(c))] + a[1:]])
         nflag = sum(1 for c in sel if aud(c)[-1])
+        _imp_ids = {c["id"] for c, _ in rows} | {c["id"] for c, _ in upd}
         _flagged = {c["id"] for c in sel if aud(c)[-1]}
         xb_ids = {}
         for c in sel:   # cards approved over a cross-batch look-alike warning (coordinator r1 #6): risk of a double import
@@ -308,14 +311,20 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         for c in sel:
             if c["id"] in _flagged and c["id"] not in _why: _why[c["id"]] = [str(aud(c)[-1]).rstrip(".")]
         _has_web = any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h)
+        # v0.4.6 #7: ONE 'Ready to import' line (screen, READ-ME, summary sheet, CSV)
+        _ready = {"rows": len(rows) + len(upd), "clean": len(_imp_ids - _tc), "to_check": len(_tc), "files": 4 + bool(upd)}
+        if not preview: w.writerow(["", "", ready_line(_ready)] + [""] * 16)
         readme = "\n".join([
-            *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
-            "GAC Card Scanner: MC Trade import file",
+            *(["*** PREVIEW: import none of these files. Nothing was marked as exported; use Export for the real file. ***"] if preview else []),
+            "GAC Card Scanner: MC Trade import file" if not preview else "GAC Card Scanner: MC Trade preview (not for import)",
+            ready_line(_ready) if not preview else "",
             readme_totals(cnt_, len(_tc)),
-            ("Before importing: read the “Check” lines. " if _tc else "") + "An import can't be undone." + (" Test 2 rows first." if len(rows) + len(upd) > 2 else "")
-            + (" Import new contacts and updates separately." if upd else ""),
+            ("" if preview else ("Before importing: read the “Check” lines. " if _tc else "") + "An import can't be undone."
+             + (" Import new contacts and updates separately." if upd else "")),
             f"Created {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
-            f"Import this file only: {rfn}" + (f" (and {comp_name(rfn, '-UPDATES.xlsx')} for updates)" if upd else "") + f". Not for import: {comp_name(rfn, '-SUMMARY.xlsx')}, the CSV and this READ-ME.",
+            # v0.4.6 #7 (READ-ME said "DO NOT IMPORT" and "Import this file only"): a preview names no file to import
+            (f"Import only: {rfn}" + (f" (and {comp_name(rfn, '-UPDATES.xlsx')} for updates)" if upd else "") + ". The NOT-FOR-IMPORT files are for reading."
+             if not preview else "These are preview copies: import none of them."),
             *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
             (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
             (f"Check: {plural(len(ovr_), 'card')} approved anyway (see the CSV)." if ovr_ else ""),
@@ -350,7 +359,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         if upd: comp["updates.xlsx"] = _book(upd)
         # v0.4.4 #8 (data-manager): the summary sheet is back, as its own workbook (the import file stays one template sheet)
         _sw = Workbook(); _ss = _sw.active; _ss.title = "Summary"
-        for rw_ in (["GAC Card Scanner export summary (not for import)"], ["Batch", batch_label or "All batches"], ["Cards", len(sel)],
+        for rw_ in (["GAC Card Scanner export summary (not for import)"], [ready_line(_ready)], ["Batch", batch_label or "All batches"], ["Cards", len(sel)],
                     ["New contacts", cnt_[mx.NEW]], ["Updates", cnt_[mx.UPDATE]], ["To check", len(_tc)], ["Left out", cnt_[mx.LEFT]], [],
                     ["Card", "Why to check it"], *[[f"#{i}", "; ".join(dict.fromkeys(_why.get(i, []))) or (_mcn.get(i) or "a note in the CSV Check column")] for i in sorted(_tc)]):
             _ss.append([safe_cell(x) if isinstance(x, str) else x for x in rw_])
@@ -373,7 +382,8 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
                            # doesn't hold MC Trade's current value for these, so it is shown as unknown (old=None).
                            + [{"field": h_, "old": None, "new": str(v_), "changes": None}
                               for h_, v_ in r_.items() if v_ not in (None, "") and mx.canonical(h_) in _inhdr and h_ not in ("ProfileID", "MemberSince", "OrgInd", "IndFirstName", "IndLastName", "OrgName", "IndEmail", "IndPhone")]})
-        summ = {"mc_possible": {str(k): v for k, v in sorted(_mcn.items())}, "check_ids": sorted(_chk0), "to_check_ids": sorted(_tc),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
+        _ready["text"] = ready_line(_ready)
+        summ = {"ready": _ready, "mc_possible": {str(k): v for k, v in sorted(_mcn.items())}, "check_ids": sorted(_chk0), "to_check_ids": sorted(_tc),   # v0.4.1 #4: the cards behind the READ-ME "Check" lines
                 "new_rows": len(rows), "update_rows": len(upd), "cards": len(sel), "left_out": len(left), "sample_email_matches": _smp,
                 "left_ids": [c["id"] for c, _ in left if c["id"] not in {x["id"] for x, _ in rows}],
                 "review": res["review"], "possible": res["possible"], "crm_real": cinfo["real"],
@@ -385,6 +395,11 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         return body_x, MT["xlsx"], fn, comp, summ
     raise HTTPException(404)
 
+def ready_line(r):
+    """v0.4.6 #7: 'Ready to import: 3 of 3 clean, 0 to check. Test 2 rows first.'"""
+    return (f"Ready to import: {r['clean']} of {r['rows']} clean, {r['to_check']} to check." + (" Test 2 rows first." if r["rows"] > 2 else ""))
+def preview_name(fn):
+    return "PREVIEW-NOT-FOR-IMPORT_" + re.sub(r"^(?:PREVIEW-)?(?:NOT-FOR-IMPORT_|IMPORT-ME_)?", "", fn)
 def readme_totals(cnt, to_check=None):
     """v0.4.4 #3: 'to check' is the same number as on the screen and in the Save dialog (was '0 to review' next to Check lines)."""
     from . import mctrade_export as mx
@@ -396,6 +411,9 @@ def comp_name(fn, suf):
     """Companion file name. The UPDATES file never says '-new-' (it holds updates of EXISTING profiles, not new ones)."""
     base = os.path.splitext(fn)[0]
     if suf == "-UPDATES.xlsx": base = base.replace("-MCTrade-new-", "-MCTrade-")
+    # v0.4.6 #7: the import files say IMPORT-ME, every other file says NOT-FOR-IMPORT (older exports keep their names)
+    if base.startswith("PREVIEW-"): return preview_name(base) + suf
+    if base.startswith("IMPORT-ME_"): return ("IMPORT-ME-UPDATES_" if suf == "-UPDATES.xlsx" else "NOT-FOR-IMPORT_") + base[len("IMPORT-ME_"):] + suf
     return base + suf
 
 # round 15 (second-round bots): only ONE real export of a batch (or of overlapping cards) runs at a time. A second one
@@ -466,6 +484,7 @@ def summary_counts(sel, metas, status):
         dz = {str(k): v for k, v in (sm.get("decisions") or view.get("decisions") or {}).items()}; left = view.get("left") or []
         rv = {x[0] for x in left if dz.get(str(x[0])) == "review"}
         chk = set(sm.get("check_ids") or [])
+        out["ready"] = sm.get("ready")
         out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": len(chk | rv), "left_out": len(left) - len(rv),
                 "need_decision": len(rv), "check_ids": sorted(chk | rv)}
     return out
@@ -520,7 +539,7 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
         auth.alog(user["username"], f"viewed the PREVIEW of the MC Trade files on screen ({len(sel)} {U._s(len(sel), 'card')}" + (f", batch {blabel or batch}" if batch else ", all batches") + "): " + ", ".join(f"#{c['id']}" for c in sel[:500]))
         return view | res[4] | {"versions": export_versions(sel)}
     if preview:
-        fn = "PREVIEW-" + fn
+        fn = preview_name(fn)
         if request.query_params.get("companion") and request.query_params["companion"] not in extras:   # mctrade-r5 F1
             return JSONResponse({"error": "There is no such file in this export (for example no update rows, so no UPDATES file)."}, 404)
         nm_ = request.query_params.get("companion") or "main file"

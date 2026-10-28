@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.6 (2026-10-28)
+
+### Reviewer privacy everywhere, Needs admin flag, misread digits, clearer export (from the v0.4.5 tester reports)
+- **Privacy:** one server rule for reviewers on the list, card page, photos, batch actions, look-alikes, History and Undo. Another batch's card is refused (404). A look-alike in another batch shows as a count only, with Different. No other batch ids in the merge list or the batch filter.
+- **Undo** only covers your current batch and the last 2 hours, for the button and the click. The button hides when there is nothing to undo; admins see the batch name.
+- **Blocked cards:** a reviewer's Approve says "An admin needs to confirm this." Reviewers see "Ask an admin." instead of Confirm on admin-only hints. New **Needs admin** button (with a reason); admins get a badge and a filter. Refused confirms are in the audit log.
+- **Misreads:** a digit inside a word (Morg4n, Partn3rs, L3gal) in name, title, company or department, and "|" in title or department, are flagged. The toast names the misread.
+- **Exported before:** one dialog, "Exported before (N). Approve anyway?", with Cancel focused. Different is remembered per pair ("Marked different"). "Seen before" only when the company or email is the same.
+- **Export:** IMPORT-ME_ and NOT-FOR-IMPORT_ file names with seconds; the file count matches the downloads; one "Ready to import: X of Y clean, Z to check." line on screen, in the READ-ME, the summary and the CSV. The batch picker drops duplicate names and empty batches; reviewers see "All my batches".
+- **Wording:** shorter address messages, one "ask an admin" line, the Review badge counts your own batches, the scan legend moved to Help, /health shows one commit. Guides name the misread fields and the email/website/address checks; the admin contact line can be filled at build time (GAC_ADMIN_CONTACT).
+
 ## v0.4.5 (2026-10-27)
 
 ### Memory fix, admin-only confirm for every field, safer merge and undo (from the v0.4.4 tester reports)

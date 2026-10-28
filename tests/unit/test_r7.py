@@ -241,6 +241,6 @@ def test_preview_readme_says_preview_and_ocr_lookalike_hint(env):
     cid = mk(ui, st, first_name="Pre", last_name="View", emails=["pre.r7pv@viewzz.io"]); ui.set_meta(cid, batch="r7pv", batch_label="R7PV")
     r = _ap(rev, cid); assert r.status_code == 200, r.text
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7pv&preview=1&companion=readme.txt").text
-    assert rd.startswith("*** PREVIEW ONLY") and "not checked against MC Trade" in rd and "Every column of GAC" not in rd
+    assert rd.startswith("*** PREVIEW: import none") and "not checked against MC Trade" in rd and "Every column of GAC" not in rd
     assert any(s["code"] == "ocr_lookalike" for s in plausibility.check({"company": "Rnbber City Robotics"}))
     ck = rev.get("/api/export/check?status=approved&batch=r7pv").json(); assert "pending_count" in ck and ck["cards"][0]["id"] == cid

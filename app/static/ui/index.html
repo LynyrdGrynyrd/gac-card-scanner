@@ -14,7 +14,7 @@
     <a href="#upload" class="brand"><img src="/static/brand/GAC_logo.png" alt="Greater Akron Chamber"><span>Card Scanner</span></a>
     <nav aria-label="Main">
       <a href="#upload" data-nav="upload">Scan cards</a>
-      <a href="#queue" data-nav="queue">Review queue <span id="pendingBadge" class="badge" hidden></span></a>
+      <a href="#queue" data-nav="queue">Review queue <span id="pendingBadge" class="badge" hidden></span> <span id="naBadge" class="badge warn" hidden title="Cards a reviewer flagged for an admin"></span></a>
       <a href="#export" data-nav="export">Export</a>
       <a href="#admin" data-nav="admin" id="navAdmin" hidden>Admin</a>
     </nav>
@@ -69,7 +69,6 @@
     <div class="progress" role="progressbar" aria-label="Batch progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="batchBar"><div></div></div>
     <p class="small" id="batchEta"></p>
     <ul id="batchList" class="filelist"></ul>
-    <p class="small" id="batchLegend" hidden><span class="flag low">Needs a look</span> = check the photo · <span class="flag bad">Blocked</span> = fix before approving · <span class="flag bad">Not added</span> = skipped · <span class="flag bad">Cancelled</span> = stopped</p>
     <div class="btns"><a href="#queue" class="btn primary" id="toQueue" hidden>Review batch →</a>
       <button class="btn" id="clearBatch" hidden>New batch</button>
       <button class="btn" id="cancelBatch" hidden title="Stops cards still waiting. Cards already added stay.">Cancel</button></div>
@@ -91,6 +90,7 @@
     <div class="fbatch"><label for="fBatch" class="inline">Batch</label><input id="fBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="12"><select id="fBatch" disabled><option value="">Loading…</option></select></div>
     <label class="chk"><input type="checkbox" id="fAtt"> Needs attention</label>
     <label class="chk"><input type="checkbox" id="fDup"> Duplicates</label>
+    <label class="chk" id="fNaL" hidden><input type="checkbox" id="fNa"> Needs admin</label>
     <label class="chk"><input type="checkbox" id="fNew"> Not exported</label>
     <label class="sr" for="fText">Search</label><input type="search" id="fText" placeholder="Search name, email, #id">
   </div>

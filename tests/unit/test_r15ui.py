@@ -11,7 +11,8 @@ def test_cards_batch_filter_strict(env):
     ids = {c["id"] for c in rc.get("/api/cards?batch=r15-a").json()}
     assert a in ids and b not in ids
     assert all(c["batch"] == "r15-a" for c in rc.get("/api/cards?batch=r15-a").json())
-    assert rc.get("/api/cards?batch=r15-zzz").json() == []
+    assert rc.get("/api/cards?batch=r15-zzz").status_code == 403   # v0.4.6 #1: not your batch (existing or not: no hint either way)
+    assert env["adm"].get("/api/cards?batch=r15-zzz").json() == []
 
 def test_bulk_refuses_other_batch(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]
@@ -29,7 +30,8 @@ def test_counts_per_user(env):
     a = mk(ui, store, first_name="Count", last_name="Mine"); ui.set_meta(a, batch="r15-e", batch_label="R15 E"); ui.log(a, ini, "scanned")
     c1 = rc.get("/api/counts?batch=r15-e").json(); c2 = r2.get("/api/counts").json()
     assert c1["mine_pending"] >= 1 and c1["batch"]["pending"] == 1 and c1["batch"]["all"] == 1
-    assert c2["mine_pending"] < c1["everyone_pending"] or c2["mine_pending"] == 0
+    assert "everyone_pending" not in c1 and c2["mine_pending"] == 0   # v0.4.6 #1: no count of other people's cards for a reviewer
+    assert env["adm"].get("/api/counts").json()["everyone_pending"] >= 1
     bs = {b["batch"]: b for b in rc.get("/api/batches").json()}
     assert bs["r15-e"]["own"] and bs["r15-e"]["mine"]
     assert "r15-e" not in {b["batch"]: b for b in r2.get("/api/batches").json()}   # v0.4.5 #9: reviewers see only their own

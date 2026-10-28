@@ -85,7 +85,7 @@ def test_preview_readme_uses_preview_names(env):
     out = ui.build_export("xlsx", sel, metas, "approved", "RR", preview=True)
     readme = out[3]["readme.txt"] if isinstance(out[3], dict) and "readme.txt" in out[3] else json.dumps(out, default=str)
     readme = readme.decode() if isinstance(readme, bytes) else readme
-    assert "PREVIEW-" in readme
+    assert "PREVIEW" in readme and "Import only" not in readme   # v0.4.6 #7: a preview names no file to import
 
 def test_note_sanitised(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]

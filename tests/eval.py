@@ -35,4 +35,19 @@ for m in a.min:
     k, _, c = m.rpartition("=")
     if not c.isdigit() or (k and k not in tot): ap.error(f"--min {m}: expected COUNT or FIELD=COUNT")
     if (tot[k][0] if k else A) < int(c): fails.append(f"{k or 'overall'} {tot[k][0] if k else A} < {c}")
+# v0.4.6 #5: misread detection (a digit inside a word, '|' in a title/department) must block approval; real digits must not
+import tempfile
+from app import store as _store; _store.DB = os.path.join(tempfile.mkdtemp(prefix="gac-eval-"), "eval.db")   # never the real cards.db
+from app import ui as _ui
+MIS = [("company", "Rubb3r City Robotics", 1), ("company", "Kent Partn3rs", 1), ("department", "L3gal", 1), ("title", "Own3r 4", 1),
+       ("first_name", "Morg4n", 1), ("department", "Acc|ounts", 1), ("title", "Vice Pres|dent", 1), ("title", "Ex3cutive Director", 1),
+       ("company", "3M", 0), ("company", "B2B Sales Co", 0), ("company", "21st Century Insurance", 0), ("company", "7-Eleven", 0),
+       ("department", "Level 3 Support", 0), ("company", "H2O Labs", 0), ("first_name", "Morgan", 0)]
+mok = 0
+for fld, val, want in MIS:
+    e = _ui.hard_errors({"first_name": "Ann", "last_name": "Lee", "emails": ["a@b.example.com"], "phones": [], fld: val})
+    got = int(("name" if fld == "first_name" else fld) in e); mok += got == want
+    if got != want: print(f"  MISREAD CHECK WRONG: {fld}={val!r} flagged={bool(got)} expected={bool(want)}")
+print(f"Misread detection {mok}/{len(MIS)}")
+if mok < len(MIS): fails.append(f"misread detection {mok} < {len(MIS)}")
 if fails: print("BELOW THRESHOLD: " + "; ".join(fails)); sys.exit(1)

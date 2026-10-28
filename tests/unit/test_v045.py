@@ -96,7 +96,7 @@ def test_v045_undo_scoped_to_batch_and_recent(env):
 # ---- #8 import file named; SUMMARY 'Why' real; merge note without misread values
 def test_v045_readme_names_import_file_and_summary_why():
     s = _src("app/exporting.py")
-    assert "Import this file only:" in s and "Not for import" in s
+    assert "Import only: {rfn}" in s and "NOT-FOR-IMPORT" in s   # v0.4.6 #7
 
 
 def test_v045_merge_note_skips_misread_values(env):
@@ -121,8 +121,7 @@ def test_v045_reviewer_batches_and_history_private(env):
     bl = {x["batch"] for x in r1.get("/api/batches").json()}
     assert "v45pa" in bl and "v45pb" not in bl
     assert "v45pb" in {x["batch"] for x in env["adm"].get("/api/batches").json()}
-    h = json.dumps(r1.get(f"/api/cards/{b}").json()["history"])
-    assert "secret-PB" not in h and "another user's export" in h
+    assert r1.get(f"/api/cards/{b}").status_code == 404   # v0.4.6 #1: another person's card can't be opened at all
     assert "secret-PB" in json.dumps(env["adm"].get(f"/api/cards/{b}").json()["history"])
 
 
