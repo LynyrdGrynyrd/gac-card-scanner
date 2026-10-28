@@ -1,6 +1,6 @@
 """Round-7 regression tests (parttimer-r1, mctrade-r4, manager-r4, newcomer-r7, skeptic-r7)."""
 import io, os, json, zipfile, threading
-from test_app import mk
+from test_app import mk, sent
 from openpyxl import Workbook, load_workbook
 from app import mctrade_export as M, crm_source, parser, plausibility
 
@@ -67,7 +67,7 @@ def test_ai_decide_empty_is_noop_and_needs_version(env):
 def test_edit_of_exported_card_with_status_flags_reexport(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     cid = mk(ui, st, first_name="Re", last_name="Export", emails=["re@ex.io"]); ui.set_meta(cid, batch="r7x")
-    assert _ap(rev, cid).status_code == 200; ui.set_meta(cid, exported=1.0)
+    assert _ap(rev, cid).status_code == 200; sent(ui, cid)
     assert rev.post(f"/api/cards/{cid}", json={"status": "approved", "fields": {"title": "Changed"}}).status_code == 200
     assert ui.meta(cid)["reexport"]
 
@@ -106,7 +106,7 @@ def test_no_real_crm_never_assigns_profile_ids(env, monkeypatch):
     r = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1"); assert "updates.xlsx" not in r.headers["X-Companions"]
     s = json.loads(r.headers["X-Summary"]); assert s["possible"] == [cid] and s["new_rows"] == 0 and not s["crm_real"]
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&companion=readme.txt").text
-    assert "Test MC Trade list" in rd and "May already be in MC Trade" in rd
+    assert "No list of MC Trade contacts is loaded" in rd and "Test MC Trade list" not in rd and "May already be in MC Trade" in rd   # v0.4.9 #10: plain words
     v = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&view=1").json(); assert v["rows"] == [] and v["left"][0][0] == cid
 
 def test_contacts_upload_used_by_export_and_dryrun(env):
@@ -177,7 +177,7 @@ def test_batches_mine_and_ready(env):
     assert _ap(rev, cid).status_code == 200
     b = [x for x in rev.get("/api/batches").json() if x["batch"] == "r7mine"][0]
     assert b["mine"] and b["ready"] == 1 and b["approved"] == 1
-    ui.set_meta(cid, exported=1.0)
+    sent(ui, cid)
     assert [x for x in rev.get("/api/batches").json() if x["batch"] == "r7mine"][0]["ready"] == 0
 
 # ---- coordinator r1 / reviewer r7 / advice
@@ -241,6 +241,6 @@ def test_preview_readme_says_preview_and_ocr_lookalike_hint(env):
     cid = mk(ui, st, first_name="Pre", last_name="View", emails=["pre.r7pv@viewzz.io"]); ui.set_meta(cid, batch="r7pv", batch_label="R7PV")
     r = _ap(rev, cid); assert r.status_code == 200, r.text
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7pv&preview=1&companion=readme.txt").text
-    assert rd.startswith("*** PREVIEW: import none") and "not checked against MC Trade" in rd and "Every column of GAC" not in rd
+    assert rd.startswith("*** PREVIEW: import none") and "not been checked against MC Trade" in rd and "Every column of GAC" not in rd
     assert any(s["code"] == "ocr_lookalike" for s in plausibility.check({"company": "Rnbber City Robotics"}))
     ck = rev.get("/api/export/check?status=approved&batch=r7pv").json(); assert "pending_count" in ck and ck["cards"][0]["id"] == cid

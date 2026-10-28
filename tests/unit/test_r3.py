@@ -44,7 +44,7 @@ def test_edit_or_merge_into_approved_rechecks(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     a = mk(ui, st, first_name="Zeb", last_name="Q", emails=["zeb@q.io"]); assert _approve(rev, a).status_code == 200
     r = rev.post(f"/api/cards/{a}", json={"fields": {"emails": ["garbage-not-email"], "phones": [{"type": "work", "number": "12"}]}})
-    assert r.status_code == 200 and r.json()["status"] == "pending" and "moved back to pending" in r.json()["notice"]
+    assert r.status_code == 200 and r.json()["status"] == "pending" and "moved back to pending" in r.json()["notice"].lower()
     assert any(h["action"] == "back_to_pending" for h in r.json()["history"])
     t = mk(ui, st, first_name="Mar", last_name="Del", emails=["mar@del.io"], company="Del Co"); assert _approve(rev, t).status_code == 200
     s = mk(ui, st, first_name="Mar", last_name="Del", emails=["no-at-sign", "mar.home@del.io"], phones=[{"type": "work", "number": "9"}], company="Del Co")

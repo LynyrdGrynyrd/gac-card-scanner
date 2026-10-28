@@ -25,23 +25,42 @@ def fold(s):
 def _norm(s): return re.sub(r"[^a-z0-9]", "", fold(s).lower())
 @lru_cache(maxsize=65536)
 def _nname(s): return " ".join(re.sub(r"[^a-z ]", "", fold(s).lower()).split())
+# v0.4.9 #3 (skeptic: 'Co' vs 'Co.', '+gac' emails slipped past): one normaliser for emails and company names
+@lru_cache(maxsize=65536)
+def norm_email(e):
+    """'D.Lawson+gac@X.com ' -> 'd.lawson@x.com' (case, spaces and a '+tag' ignored)."""
+    e = (e or "").strip().lower()
+    if "@" not in e: return e
+    loc, _, dom = e.rpartition("@")
+    return re.split(r"[+\s]", loc, maxsplit=1)[0] + "@" + dom.strip()
+CO_SUFFIX = {"co", "company", "inc", "incorporated", "llc", "lc", "ltd", "limited", "corp", "corporation", "plc", "lp", "llp",
+             "pllc", "pc", "gmbh", "the"}
+@lru_cache(maxsize=65536)
+def norm_company(s):
+    """'The Acme Co.' = 'Acme Company' = 'ACME, Inc' -> 'acme' (case, punctuation, '&'/'and' and legal suffixes ignored)."""
+    w = re.sub(r"[^a-z0-9]+", " ", fold(s).lower().replace("&", " and ").replace("l.l.c", "llc")).split()
+    w = [x for x in w if x != "and"]
+    core = list(w)
+    while core and core[-1] in CO_SUFFIX: core.pop()
+    while core and core[0] == "the": core.pop(0)
+    return "".join(core or w)
 def load_existing(path=SAMPLE):
     with open(path, encoding="utf-8", newline="") as fh: return list(csv.DictReader(fh))
 
 def match(fields, existing=None, near_names=False):
     existing = existing if existing is not None else load_existing()
-    emails = {e.lower() for e in fields.get("emails", [])}
+    emails = {norm_email(e) for e in fields.get("emails", [])}
     phones = {_digits(p["number"]) for p in fields.get("phones", [])}
     name = _nname(fields.get("first_name","") + " " + fields.get("last_name",""))
-    co = _norm(fields.get("company",""))
+    co = norm_company(fields.get("company",""))
     res = []
     for r in existing:
         score, why = 0.0, []
-        if r["email"] and r["email"].lower() in emails: score += 0.6; why.append("email exact")
+        if emails & {norm_email(x) for x in (r.get("emails") or [r.get("email")]) if x}: score += 0.6; why.append("email exact")
         if _digits(r["phone"]) and _digits(r["phone"]) in phones: score += 0.25; why.append("phone exact")
         ns = _name_ratio(name, _nname(r["first_name"] + " " + r["last_name"])) if name else 0
         if ns > 0.85: score += 0.25*ns; why.append(f"name~{ns:.2f}")
-        cs = _ratio(co, _norm(r["organization"])) if co else 0
+        cs = _ratio(co, norm_company(r["organization"])) if co else 0
         if cs > 0.7: score += 0.15*cs; why.append(f"org~{cs:.2f}")
         # round 9 (mctrade-r6 F1): an exact First+Last alone (0.25) is a match too
         if score >= 0.3 or ns >= 0.99 or (near_names and ns >= 0.9): res.append({"profile_id": r["profile_id"], "name": f"{r['first_name']} {r['last_name']}",
@@ -58,12 +77,12 @@ class Index:
         self.byid = {str(r["profile_id"]): r for r in rows}
         self.names = [_nname(r.get("first_name", "") + " " + r.get("last_name", "")) for r in rows]
         for i, r in enumerate(rows):
-            if r.get("email"): self.by_email.setdefault(r["email"].lower(), []).append(i)
+            for x in {norm_email(x) for x in (r.get("emails") or [r.get("email")]) if x}: self.by_email.setdefault(x, []).append(i)
             d = _digits(r.get("phone"))
             if d: self.by_phone.setdefault(d, []).append(i)
     def candidates(self, fields):
         hit = set()
-        for e in fields.get("emails", []): hit.update(self.by_email.get(e.lower(), ()))
+        for e in fields.get("emails", []): hit.update(self.by_email.get(norm_email(e), ()))
         for p in fields.get("phones", []): hit.update(self.by_phone.get(_digits(p.get("number")), ()))
         name = _nname(fields.get("first_name", "") + " " + fields.get("last_name", ""))
         if name:

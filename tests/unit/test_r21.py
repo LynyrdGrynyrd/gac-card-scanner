@@ -2,7 +2,7 @@
 To check up front, one duplicate box (silenced after 'Different person'), truthful Cancel, 'This is correct' override,
 one row per person in the export, README checklist/totals, vCard phones, job listing owner-only, 428 without versions."""
 import json, os, time
-from test_app import mk
+from test_app import mk, sent
 from app import ui as U, mctrade_export as MX, plausibility as P
 
 def H(**f): return U.hard_errors({"first_name": "Ann"} | f)
@@ -68,7 +68,7 @@ def test_different_person_silences_duplicate_warnings(env):
     ph = [{"type": "work", "number": "330-555-7781"}]
     a = mk(ui, st, first_name="Dup", last_name="One", emails=["dup1@x21.com"], website="x21.com", phones=ph); ui.set_meta(a, batch="old21", batch_label="Old")
     assert rev.post(f"/api/cards/{a}", json={"status": "approved", "crm_action": "create_new"}).status_code == 200
-    ui.set_meta(a, exported=time.time())
+    sent(ui, a)
     b = mk(ui, st, first_name="Dup", last_name="One", emails=["dup1@x21.com"], website="x21.com", phones=ph); ui.set_meta(b, batch="new21", batch_label="New")
     d = rev.get(f"/api/cards/{b}").json(); assert d["exported_elsewhere"]
     assert rev.post(f"/api/cards/{b}", json={"keep_apart": "all"}).status_code == 200

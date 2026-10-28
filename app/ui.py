@@ -148,6 +148,8 @@ DONE = os.path.join(DATA, "jobs_done")   # small result records so an open brows
 for _d in (UP, EXP, INBOX, DONE): os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------- extra tables
+# v0.4.9 #6: ONE wording for a card edited after it went to MC Trade (History, save warning, dialog, README)
+EDITED_AFTER = "Edited after export, so it is not in the next file unless an admin includes it."
 META_COLS = ["card_id", "batch", "batch_label", "filename", "sha256", "archived", "dup_resolution", "crm_action", "exported",
              "field_sources", "image_deleted", "ai_status", "ai_detail", "override", "reexport", "back_image", "kept_apart", "ai_rejected", "needs_admin"]
 def _init_ui(c):
@@ -220,6 +222,11 @@ def db():
     c = store.db(); store.once("ui", _init_ui)
     return c
 
+def sent_ids():
+    """v0.4.9 #2: cards that were in an MC Trade import file (the 'Sent to MC Trade' record; a CSV doesn't count)."""
+    from . import exporting
+    try: return exporting.sent_ids()
+    except Exception: return set()
 def meta(cid):
     r = db().execute("SELECT * FROM card_meta WHERE card_id=?", (cid,)).fetchone()
     return dict(r) if r else {k: None for k in META_COLS} | {"card_id": cid, "archived": 0}
@@ -237,7 +244,7 @@ def log(cid, reviewer, action, frm=None, to=None, detail=None):
         c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
                   (cid, time.time(), reviewer, action, frm, to, json.dumps(detail) if detail is not None else None))
 
-EXPORTED_EDIT_NOTE = "Saved. This card was exported before, so this edit won't be exported again unless an admin includes it."
+EXPORTED_EDIT_NOTE = "Saved. " + EDITED_AFTER
 
 def history(cid):
     out = [dict(r) | {"detail": json.loads(r["detail"]) if r["detail"] else None}
@@ -429,12 +436,18 @@ def digit_for_letter(v):
 # v0.4.7 #6: OCR look-alike words with one clear correction ('Rnbber' -> 'Rubber') block, like a digit misread. Words that are
 # also real words or names ('Manger', 'Mian', 'Flor') stay a suggestion only.
 LOOKALIKE_SOFT = {"manger", "mian", "flor", "sute", "salse", "ofice", "steet"}
-def lookalike_word(v):
+def lookalike_word(v, title_words=True):
+    """title_words=False (a company name): a job-title word with a dropped or swapped letter ('Managr Inc') may be a brand,
+    so it stays a suggestion (v0.4.9 #9)."""
     from . import plausibility as _pl
     for w in re.findall(r"[A-Za-z]{3,}", str(v or "")):
         fix = _pl.LOOKALIKE.get(w.lower())
+        if not title_words and w.lower() in _pl.TITLE_VARIANTS: continue
         if fix and w.lower() not in LOOKALIKE_SOFT: return w, (fix.capitalize() if w[0].isupper() else fix)
     return None
+def _pl_name_misread(v):
+    from . import plausibility as _pl
+    return _pl.name_misread(v)
 def garbled_errors(f):
     """Round 20 (coordinator r19): misreads that reached the export with only a soft hint now BLOCK approval until fixed:
     a house number with a letter in it ('118o S Main St'), a garbled website ('wwwsummit…', 'wvw.c0m.xq'), and an email
@@ -450,15 +463,15 @@ def garbled_errors(f):
         bad = name_garbled(v_, allow_digits=(k == "title"))
         if not bad and k in ("first_name", "last_name"):   # round 23 (part-timer r22 HIGH): 'Morg4n': a digit in a name is always a misread
             m_ = re.search(r"\d", str(v_ or "")); bad = m_.group(0) if m_ else None
-        if not bad and k in ("first_name", "last_name"):   # v0.4.8 #9: 'Rnbert' (o read as n): no name starts with Rn/Nr/Lr/Rl
-            m_ = re.match(r"\s*((?:Rn|Nr|Lr|Rl|Rm)[a-z])", str(v_ or "")); bad = m_.group(1)[:2] if m_ else None
+        nm_ = None if bad else _pl_name_misread(v_)   # v0.4.9 #9: 'Rnbert' in any of these fields; 'Rnjak', 'Nrupen' are real names
         if not bad and k in ("title", "company", "department"):   # v0.4.6 #5: a digit standing in for a letter ('Rubb3r', 'L3gal', 'Own3r')
             bad = digit_for_letter(v_)
         if not bad and k == "title":   # round 22 (newcomer r21): 'Acc0unt Manager' (a 0/1 inside a word); '1st', 'Level 3' are fine
             m_ = re.search(r"(?<=[A-Za-z])[01]{1,2}(?=[A-Za-z])", str(v_ or "")); bad = m_.group(0) if m_ else None
         if bad: err["name" if k == "first_name" else k] = f"{lab} “{f.get(k)}” has “{bad}” in it: a misread. Check the photo and fix it."
-        elif k in ("title", "company", "department") and lookalike_word(v_):
-            w_, g_ = lookalike_word(v_); err[k] = f"{lab} “{f.get(k)}”: “{w_}” looks misread (“{g_}”?). Check the photo and fix it."
+        elif nm_: err["name" if k == "first_name" else k] = f"{lab} “{f.get(k)}”: “{nm_[0]}” looks misread (“{nm_[1]}”?). Check the photo and fix it."
+        elif k in ("title", "company", "department") and lookalike_word(v_, title_words=(k != "company")):
+            w_, g_ = lookalike_word(v_, title_words=(k != "company")); err[k] = f"{lab} “{f.get(k)}”: “{w_}” looks misread (“{g_}”?). Check the photo and fix it."
     for p_ in f.get("phones") or []:
         n_ = str((p_ or {}).get("number") or "")
         if re.search(r"(?<![A-Za-z])[oOlI](?=\d)|(?<=\d)[oOlI](?![A-Za-z])|\d[oOlIsS]+\d|\([\doOlI]*[oOlI][\doOlI]*\)|\d{3}\)?[ .-]?\d{2,3}[oOlI]", n_):
@@ -669,7 +682,7 @@ def _bkeys(f, m):
         for d_ in (_digits(p_.get("number") or ""), _digits(_mx.EXT.sub("", p_.get("number") or ""))):
             if len(d_) >= 7: k.add("p:" + d_[-7:])
     for e in f.get("emails") or []:
-        if al(e): k.add("e:" + al(e)); k.add("u:" + al(e).split("@")[0][:6])
+        if al(e): k.add("e:" + al(mctrade_sync.norm_email(e))); k.add("u:" + al(e).split("@")[0][:6])
     for nm, t in ((f.get("last_name"), "l:"), (f.get("first_name"), "f:")):
         if al(nm)[:2]: k.add(t + al(nm)[:2])
     for w in re.findall(r"[a-z0-9]{3,}", (f.get("company") or "").lower())[:2]: k.add("c:" + w)
@@ -945,7 +958,7 @@ def attention(c, d, cards=None, names=None):
         r.append({"code": "dup_crm", "text": f"Similar to MC Trade contact {d['crm'][0]['name']} (you chose: {'update that contact' if d['crm_action'] == 'update_existing' else 'add as new'})"})
     elif d["crm"] and "email exact" in (d["crm"][0].get("why") or []):   # newcomer r8 N6: still an MC Trade email match after 'add as new'
         if crm_source.real() is None:   # round 9 (newcomer r9 N1): say what the export really does with SAMPLE data
-            r.append({"code": "dup_crm", "field": "emails", "text": f"May already be in MC Trade: {d['crm'][0]['name']} (same email, test list). The export lists it under To check."})
+            r.append({"code": "dup_crm", "field": "emails", "text": f"May already be in MC Trade: {d['crm'][0]['name']} (same email; practice contacts only). The export lists it under To check."})
         else:
             r.append({"code": "dup_crm", "field": "emails", "text": f"May already be in MC Trade: {d['crm'][0]['name']} (same email). The export lists it under To check."})
     m = d.get("meta") or {}
@@ -957,7 +970,7 @@ def attention(c, d, cards=None, names=None):
         if rj: r.append({"code": "ai_overridden", "field": None, "text": "AI suggested a different " + ", ".join(rj) + " (you kept the current value): check against the photo"})
     if c["status"] == "approved" and m.get("override"):
         r.append({"code": "override", "text": "Approved anyway: " + (_ov(m).get("reason") or "")})
-    if m.get("reexport"): r.append({"code": "reexport", "text": "Edited after export: not exported again unless an admin includes it"})
+    if m.get("reexport") and c["id"] in sent_ids(): r.append({"code": "reexport", "text": EDITED_AFTER})
     # round 15 (reviewer r14): each reason once (duplicate reasons used to repeat themselves)
     seen_t, uniq = set(), []
     for x in r:
@@ -1017,7 +1030,7 @@ def _shown_conf(f, a, src=None):
     # open problem left, is no longer "Unclear" because of the original photo read.
     if v < 0.6 and any(str(x).startswith(("edited", "confirmed")) for x in (src or {}).values()): return 0.8
     return v
-def enrich(c, cards, metas, full=False, names=None, vis=None):
+def enrich(c, cards, metas, full=False, names=None, vis=None, viewer=None):
     """vis (v0.4.6 #1): the card ids the viewer may see (None = all). Look-alikes outside it are counts only.
     v0.4.7 #1: for a reviewer the look-alike panels, the merge list, 'exported before' and History name only cards of the
     card's OWN batch (the batch being reviewed). The reviewer's older batches count as 'another batch' too: shared logins
@@ -1044,46 +1057,26 @@ def enrich(c, cards, metas, full=False, names=None, vis=None):
     except Exception: out["blocked"] = False
     if full:
         d = {k: v for k, v in d.items() if k not in ("meta", "_hidden", "_vis")}
-        # round 11 (part-timer r4): the review page warns BEFORE Approve when this person was already approved+exported elsewhere
-        xb = [x for x in _cross_batch(c, f, cards, metas) if x["exported"] and {"same email", "same phone", "same photo"} & set(x["why"])]
-        # v0.4.5 #4 (data-manager: Grace's misread email/phone matched nothing): exported look-alikes from OTHER batches in the
-        # look-alike list count too (similar name and company), so Approve still says "exported before"
-        _bx = (metas.get(c["id"]) or {}).get("batch"); _have = {x["card_id"] for x in xb}
-        _nm = {o["id"]: f"{o['fields'].get('first_name') or ''} {o['fields'].get('last_name') or ''}".strip() for o in cards}
-        for q_ in d.get("queue") or []:
-            om_ = metas.get(q_["card_id"]) or {}
-            if q_["card_id"] not in _have and om_.get("exported") and om_.get("batch") != _bx and not om_.get("archived"):
-                xb.append({"card_id": q_["card_id"], "why": list(q_.get("why") or []), "exported": True}); _have.add(q_["card_id"])
-        # v0.4.8 #5 (coordinator: "Exported before (32)" on every card): only when it is really this person: same email or
-        # photo, or the exact same name with the same phone or a matching company. A phone or a similar name alone is not enough.
-        _byid = {o["id"]: o for o in cards}
-        def _nmk(ff): return re.sub(r"[^a-z]", "", f"{ff.get('first_name') or ''}{ff.get('last_name') or ''}".lower())
-        def _cok(a_, b_):
-            a_, b_ = (re.sub(r"[^a-z0-9]", "", (x_ or "").lower()) for x_ in (a_, b_))
-            return bool(a_ and b_ and (a_ == b_ or (min(len(a_), len(b_)) >= 4 and (a_ in b_ or b_ in a_))))
-        def _strong(x):
-            w_ = set(x.get("why") or []); o_ = _byid.get(x["card_id"]); of_ = (o_ or {}).get("fields") or {}
-            if {"same email", "same photo"} & w_: return True
-            if not o_ or not _nmk(f) or _nmk(f) != _nmk(of_): return False
-            ph_ = {re.sub(r"\D", "", p_.get("number") or "")[-10:] for p_ in f.get("phones") or [] if p_.get("number")}
-            oph_ = {re.sub(r"\D", "", p_.get("number") or "")[-10:] for p_ in of_.get("phones") or [] if p_.get("number")}
-            return bool(ph_ & oph_ - {""}) or _cok(f.get("company"), of_.get("company"))
-        xb = [x for x in xb if _strong(x)]
-        for x in xb: x["name"] = _nm.get(x["card_id"], "")
-        with db() as conn:
-            nexp = {x["card_id"]: conn.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='exported'", (x["card_id"],)).fetchone()[0] for x in xb}
-            for x in xb:   # name WHICH export: its date and file
-                r_ = conn.execute("SELECT ts, detail FROM card_history WHERE card_id=? AND action='exported' ORDER BY id DESC LIMIT 1", (x["card_id"],)).fetchone()
-                try: fl_ = (json.loads(r_[1] or "{}") or {}).get("file") if r_ else None
-                except Exception: fl_ = None
-                x["last_ts"] = r_[0] if r_ else (metas.get(x["card_id"]) or {}).get("exported"); x["last_file"] = fl_
-        _kx = _kept(m)   # round 21: after 'Different person' (or for kept-apart cards) the 'already exported' warning is silent
-        # v0.4.3 #3 (reviewer/data-manager): kept after 'Different' too, flagged, so Approve still says "exported before" once;
-        # the page box itself stays quiet for those (decided)
-        # v0.4.6 #6: a 'Different' answer is remembered for the PAIR (either card's list), so the same pair never warns again
-        out["exported_elsewhere"] = [] if c["status"] != "pending" else [x | {"times": nexp.get(x["card_id"], 1), "kept_apart": x["card_id"] in _kx or c["id"] in _kept(metas.get(x["card_id"]) or {}) or m.get("dup_resolution") == "keep_both"} for x in xb]
-        if vis is not None:   # v0.4.6 #1: other people's cards are a count (no id, no name)
-            out["exported_elsewhere"] = [x if x["card_id"] in vis else {"hidden": True, "times": x["times"], "kept_apart": x["kept_apart"], "why": x.get("why") or [], "last_ts": x.get("last_ts")} for x in out["exported_elsewhere"]]
+        # v0.4.9 #5: 'Exported before' comes from the ONE 'Sent to MC Trade' record (MC Trade import files only): shown only
+        # when this person (this card, or the same email / same name at the same company) was in an earlier import file, so
+        # the next file leaves them out. The file is named only when it was the viewer's own export; otherwise the date only.
+        out["exported_elsewhere"] = []
+        if c["status"] == "pending":
+            from . import exporting as _ex
+            try: ex_, own_ = _ex.sent_record(c, metas)
+            except Exception: ex_, own_ = None, False
+            if ex_:
+                ks_ = _ex.card_keys(c); byid_ = {o["id"]: o for o in cards}
+                mid_ = c["id"] if own_ else next((i for i in sorted(ex_["ids"]) if i in byid_ and _ex.card_keys(byid_[i]) & ks_), None)
+                o_ = byid_.get(mid_) if mid_ else None
+                mine_ = bool(viewer and (ex_.get("user") or "") == viewer.get("username"))
+                x_ = {"card_id": mid_, "name": f"{(o_ or {}).get('fields', {}).get('first_name') or ''} {(o_ or {}).get('fields', {}).get('last_name') or ''}".strip(),
+                      "why": ["same person"], "last_ts": ex_.get("ts"), "last_file": ex_.get("file") if mine_ or viewer is None else None,
+                      "times": 1, "kept_apart": False, "this_card": own_}
+                if vis is not None and (mid_ is None or mid_ not in vis or (metas.get(mid_) or {}).get("batch") != m.get("batch")):
+                    x_ = {"hidden": True, "times": 1, "kept_apart": False, "why": ["same person"], "last_ts": ex_.get("ts"), "this_card": own_,
+                          "last_file": x_["last_file"] if own_ else None}
+                out["exported_elsewhere"] = [x_]
         out["dup_decided"] = m.get("dup_resolution") == "keep_both"
         out["kept_n"] = len(_kept(m))   # v0.4.4 #3 (reviewer: page 34 vs History 12): the page counts what History logged
         try:   # round 22: hard blocks + which of them 'This is correct' may confirm, so the card shows them (and the button) on open
@@ -1995,13 +1988,25 @@ def needs_admin(cid: CardId, request: Request, body: dict = Body(default={})):
         set_meta(cid, needs_admin=json.dumps(v)); log(cid, u["initials"], "needs_admin", detail={"reason": why})   # v0.4.8 #6: one audit row
         return {"ok": True, "needs_admin": v}
 
+def clip(s, n=40):
+    """v0.4.9 #10: shorten to about n characters at a word boundary, ending in '…' (never mid-word)."""
+    s = re.sub(r"\s+", " ", str(s or "")).strip()
+    if len(s) <= n: return s
+    cut = s[:n + 1].rsplit(" ", 1)[0] if " " in s[:n + 1] else s[:n]
+    return cut.rstrip(" ,;:·-") + "…"
+
 def na_reason(hard, f=None):
     """v0.4.7 #4: 'First name “Morg4n”, Email: looks misread' (short: field names and short values, never cut mid-sentence)."""
     if not hard: return ""
     def one(k):
         fk = "first_name" if k == "name" else k; v = (f or {}).get(fk)
         v = v[0] if isinstance(v, list) and v and isinstance(v[0], str) else v
-        return LABEL.get(fk, fk) + (f" “{v[:40]}”" if isinstance(v, str) and v.strip() else "")
+        if not (isinstance(v, str) and v.strip()): return LABEL.get(fk, fk)
+        # v0.4.9 #10 (mctrade-admin F3): cut at a word with "…", and the misread word itself is never the part cut off
+        bad_ = [w for w in re.findall(r"“([^”]{2,40})”", str(hard.get(k) or "")) if w in v and w != v]
+        cv = clip(v, 40)
+        if bad_ and bad_[-1] not in cv: cv = clip(v, max(8, 38 - len(bad_[-1]))).rstrip("…").rstrip() + " … " + bad_[-1]
+        return LABEL.get(fk, fk) + f" “{cv}”"
     return ", ".join(dict.fromkeys(one(k) for k in hard)) + ": " + ("looks misread" if all("misread" in str(v) or "missing" in str(v) for v in hard.values()) else "check the photo")
 
 def na_settle(cid, who="system"):
@@ -2155,12 +2160,23 @@ def batches(request: Request):
         oid = batch_owner_id(r["batch"])
         r["mine"] = r["batch"] in mine; r["own"] = (r["batch"] in ob_) if ob_ is not None else (oid == uid_ if oid is not None else r["batch"] in own)
     # v0.4.2 #4 (reviewer: "(0 ready)" next to "2 will be exported"): 'ready' from the export's own card set, not a second SQL rule
+    # v0.4.9 #1: 'N ready' is the number of ROWS the import file would get (the Export page's own count, one source)
     try:
-        cs_, ms_ = _active(); rd = {}
+        from . import exporting as _ex
+        cs_, ms_ = _active(); cand = {}; sent_ = sent_ids(); t0_ = time.time()
         for c in cs_:
             m = ms_.get(c["id"]) or {}
-            if c["status"] == "approved" and (not m.get("exported") or m.get("reexport")): rd[m.get("batch")] = rd.get(m.get("batch"), 0) + 1
-        for r in out: r["ready"] = rd.get(r["batch"], 0)
+            if c["status"] == "approved" and (c["id"] not in sent_ or m.get("reexport")): cand.setdefault(m.get("batch"), []).append(c)
+        vis_b = None if not scoped(request.state.user) else (ob_ or set())
+        idx_ = _ex.import_index()
+        for r in out:
+            sel_ = cand.get(r["batch"]) or []
+            if not sel_: r["ready"] = 0; continue
+            if (vis_b is None or r["batch"] in vis_b) and time.time() - t0_ < 3:
+                sc_ = _ex.counts_for(sel_, ms_, "approved_new", False, waiting=_ex.waiting_ids(r["batch"]))
+                r["ready"] = sc_.get("rows", 0); r["already"] = len(sc_.get("changed_ids") or []) + len(sc_.get("repeat_ids") or [])
+            else:   # too many batches to build now: the cards not already in an import file
+                chg_, rep_, _c = _ex.held_cards(sel_, ms_, idx_); r["ready"] = len(sel_) - len(chg_) - len(rep_)
     except Exception: pass
     # round 24 (reviewer r23): the owner's name, for the "this batch belongs to …" warning
     try:
@@ -2191,7 +2207,7 @@ def card(cid: CardId, user=None):
     vis = visible_ids(user) if user is not None else None
     if vis is not None and cid not in vis: raise HTTPException(404, "Card not found")
     cs, metas = _active(include_archived=True)
-    return enrich(c, cs, metas, full=True, vis=vis)
+    return enrich(c, cs, metas, full=True, vis=vis, viewer=user)
 def _na(m):
     try: return json.loads(m.get("needs_admin")) if m.get("needs_admin") else None
     except Exception: return None
@@ -2202,9 +2218,9 @@ def card_route(cid: CardId, request: Request):
     u0 = getattr(request.state, "user", None) or {}
     if u0.get("role") != "admin":   # v0.4.5 #9: a reviewer never sees other people's export file names or batch names in History
         for h in out.get("history") or []:
-            if h.get("reviewer") != u0.get("initials") and h.get("action") in ("exported", "redownloaded", "scanned", "moved"):
+            if h.get("reviewer") != u0.get("initials") and h.get("action") in ("exported", "exported_list", "redownloaded", "scanned", "moved"):
                 if isinstance(h.get("detail"), dict): h["detail"] = {k: v for k, v in h["detail"].items() if k not in ("file", "batch", "files")}
-                h["text"] = {"exported": "exported (another user's export)", "redownloaded": "re-downloaded by another user", "scanned": "scanned by another user"}.get(h["action"], h.get("text"))
+                h["text"] = {"exported": "exported (another user's export)", "exported_list": "put in a contacts list (another user's)", "redownloaded": "re-downloaded by another user", "scanned": "scanned by another user"}.get(h["action"], h.get("text"))
     u = getattr(request.state, "user", None) or {}
     r = db().execute("SELECT vals, version, ts FROM drafts WHERE user_id=? AND card_id=?", (u.get("id"), cid)).fetchone() if u.get("id") else None
     if r:   # v0.4.4 #10: your own server-side draft (kept at an idle sign-out; the browser copy is cleared at every sign-out)
@@ -2448,7 +2464,7 @@ def _update(cid, request, body, internal=False):
         if sb and not tb:   # carry the back photo over with the back's details
             set_meta(merge_tgt["id"], back_image=sb); set_meta(cid, back_image=None); log(merge_tgt["id"], rv, "back_added", detail={"filled": [], "from_card": cid})
         if merge_tgt["status"] == "approved": _recheck_approved(merge_tgt["id"], tf, rv, f"details merged from #{cid}")
-        if filled and meta(merge_tgt["id"]).get("exported"):   # target already went out: it must be exported again
+        if filled and merge_tgt["id"] in sent_ids():   # target already went out: it must be exported again
             set_meta(merge_tgt["id"], reexport=time.time()); log(merge_tgt["id"], rv, "reexport_needed", detail={"why": f"details merged from #{cid}"})
         st = "rejected"; note = f"Duplicate of #{merge_tgt['id']} (details merged)"; set_meta(cid, dup_resolution=f"merged_into:{merge_tgt['id']}")
     if st == "approved" and not merge_tgt and STALE_DUP.search(note or ""):   # re-approved after a merge: the note is no longer true
@@ -2475,7 +2491,7 @@ def _update(cid, request, body, internal=False):
         else: set_meta(cid, override=json.dumps({"reason": why, "problems": list(errs_now.values()), "by": rv}) if errs_now and why else None)
     elif st: set_meta(cid, override=None)
     note_changed = "note" in body and (note or "") != (c.get("note") or "")
-    if (changes or note_changed) and st in (None, "approved") and c["status"] == "approved" and meta(cid).get("exported"):   # skeptic R7-5, R8-3 (note too)
+    if (changes or note_changed) and st in (None, "approved") and c["status"] == "approved" and cid in sent_ids():   # skeptic R7-5, R8-3 (note too)
         set_meta(cid, reexport=time.time()); log(cid, rv, "reexport_needed", detail={"why": "edited after export"})
         exp_notice = True   # v0.4.8 #3: say it at save time
     else: exp_notice = False
@@ -2492,7 +2508,10 @@ def _update(cid, request, body, internal=False):
     out = card(cid, None if internal else request.state.user)   # (audit 2026-10 P2: a never-firing "stale after save" check was removed; the check under WRITE_LOCK above is the real one)
     if not st and changes: out["save_problems"] = validate(f) | hard_errors(f)   # saved, but tell the person what still blocks approval
     if exp_notice and not moved: out["notice"] = EXPORTED_EDIT_NOTE
-    if moved: out["notice"] = "This approved card now has problems, so it was moved back to pending: " + "; ".join(validate(f).values())
+    # v0.4.9 (data-manager): an approved card edited into a blocked value says plainly that it is back in Pending, and why
+    if moved:   # DM1 (v0.4.9): one short line that says the state changed and which fields to fix
+        ks_ = list(dict.fromkeys(LABEL.get("first_name" if k == "name" else k, k) for k in (validate(f) | hard_errors(f))))
+        out["notice"] = "Moved back to Pending: fix " + (", ".join(ks_[:3]) if ks_ else "the problems shown") + " to approve it again."
     return out
 
 def scrub_refusal(ref, user, c=None):
@@ -2675,8 +2694,9 @@ def _cross_batch(c, f, cs, metas):
     from . import mctrade_export as _mx
     m = metas.get(c["id"]) or {}; b = m.get("batch")
     def ph(fl): return {d[-10:] for d in (_digits(_mx.EXT.sub("", p.get("number") or "")) for p in fl.get("phones") or []) if len(d) >= 10}
-    def em(fl): return {e.strip().lower() for e in fl.get("emails") or [] if (e or "").strip()}
+    def em(fl): return {mctrade_sync.norm_email(e) for e in fl.get("emails") or [] if (e or "").strip()}   # v0.4.9 #3: '+tag' ignored
     e0, p0, out = em(f), ph(f), []
+    _sent = sent_ids()
     for o in cs:
         if o["id"] == c["id"] or o["status"] != "approved": continue
         om = metas.get(o["id"]) or {}
@@ -2685,7 +2705,7 @@ def _cross_batch(c, f, cs, metas):
         if m.get("sha256") and om.get("sha256") == m.get("sha256"): why.append("same photo")
         if e0 & em(o["fields"]): why.append("same email")
         if p0 & ph(o["fields"]): why.append("same phone")
-        if why: out.append({"card_id": o["id"], "why": why, "exported": bool(om.get("exported"))})
+        if why: out.append({"card_id": o["id"], "why": why, "exported": o["id"] in _sent})
     return sorted(out, key=lambda x: ("same photo" not in x["why"], x["card_id"]))
 
 def _req_ids(c, f2, cs, metas, body):
@@ -2827,7 +2847,7 @@ def _attach_back_write(cid, c0, r, name, initials, user):
     if user: snapshot([cid], user, f"Add back of card #{cid}")
     store.update(cid, fields=f)
     if filled and c["status"] == "approved":
-        if meta(cid).get("exported"): set_meta(cid, reexport=time.time()); log(cid, initials, "reexport_needed", detail={"why": "back of card added after export"})
+        if cid in sent_ids(): set_meta(cid, reexport=time.time()); log(cid, initials, "reexport_needed", detail={"why": "back of card added after export"})
         _recheck_approved(cid, f, initials, "back of card added after approval")
     with db() as x: x.execute("UPDATE cards SET raw_text=? WHERE id=?", ((c.get("raw_text") or "") + "\n\n--- back of card ---\n" + r["text"], cid))
     set_meta(cid, back_image=name, field_sources=json.dumps(src))
@@ -2994,7 +3014,8 @@ def _undo_pick(user, batch, aid=None, peek=False):
     allow = {batch} if batch else ({_current_batch(user), None} if scoped(user) else _admin_undo_batch(user))
     q = ("SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL AND ts>=?" + (" AND id=?" if aid is not None else "")
          + " ORDER BY id DESC LIMIT 50")
-    args = (user["id"], time.time() - UNDO_WINDOW) + ((aid,) if aid is not None else ())
+    # v0.4.9 #10: nothing from before this sign-in (a fresh sign-in shows no stale "Undo Edit #…")
+    args = (user["id"], max(time.time() - UNDO_WINDOW, float(user.get("_signed_in") or 0) - 1)) + ((aid,) if aid is not None else ())
     for r in db().execute(q, args).fetchall():
         if allow is not None and not (_undo_batches(r) and _undo_batches(r) <= allow): continue
         if _undo_exported(r):

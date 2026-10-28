@@ -1,6 +1,6 @@
 """Round-8 regression tests (mctrade-r5, manager-r8, parttimer-r2, newcomer-r8, reviewer-r8)."""
 import io, os, re, sys, json, csv, tarfile, sqlite3, subprocess, itertools
-from test_app import mk
+from test_app import mk, sent
 from openpyxl import Workbook, load_workbook
 from app import mctrade_export as M, crm_source, plausibility, auth
 
@@ -267,7 +267,7 @@ def test_note_html_refused_and_note_edit_flags_reexport(env):
     cid = mk(ui, st, first_name="Note", last_name="Check", emails=["note.check@x.example"])
     r = rev.post(f"/api/cards/{cid}", json={"status": "approved", "note": "<img src=x onerror=1>", "confirm_cross_batch": True})
     assert r.status_code == 422, r.text
-    st.update(cid, status="approved", reviewer="RR", note=""); ui.set_meta(cid, exported=1.0)
+    st.update(cid, status="approved", reviewer="RR", note=""); sent(ui, cid)
     r = rev.post(f"/api/cards/{cid}", json={"note": "called back"}); assert r.status_code == 200, r.text
     assert ui.meta(cid).get("reexport")
 

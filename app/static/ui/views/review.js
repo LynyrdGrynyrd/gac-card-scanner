@@ -20,6 +20,7 @@ let openSeq = 0;
 async function openCard(id, opts = {}) {
   const tok = ++openSeq, switching = !S.cur || S.cur.id !== id;
   if (switching) {   // round 6 (newcomer F1): never show the previous card's values under the new card's number
+    if (S.WAIT_AI && S.WAIT_AI !== id) toast(`Stopped waiting for the AI on card #${S.WAIT_AI}: you opened another card.`, 6000);   // v0.4.9 #10: always a word
     S.CARD_READY = false; S.cur = null; S.WAIT_AI = null; $("#aiWait")?.remove(); $("#rForm").inert = true; $("#rForm").classList.add("loading");
     $$("#rForm input, #rForm textarea").forEach(el => { if (!el.readOnly) { el.readOnly = true; el.dataset.ro16 = "1"; } });   // round 16 (part-timer r15): nothing typed into the empty form while it loads
     $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; e._h = null; } });
@@ -44,13 +45,11 @@ async function openCard(id, opts = {}) {
   $("#rStatus").className = "pill " + c.status; $("#rStatus").textContent = c.status + (d.archived ? " · archived" : "") + (d.needs_admin && c.status === "pending" ? " · needs admin" : "");
   $("#rStatus").title = d.needs_admin && c.status === "pending" ? `Needs admin: ${d.needs_admin.reason || ""}${d.needs_admin.by ? " (" + d.needs_admin.by + ")" : ""}` : "";
   $("#rDecided").textContent = c.status !== "pending" ? `${c.status[0].toUpperCase() + c.status.slice(1)} by ${c.reviewer || "?"} on ${when(c.decided)}` + (c.note ? ` · Note: ${c.note}` : "") : "";
-  { const xe = d.dup_decided ? [] : (d.exported_elsewhere || []).filter(x => !x.kept_apart), el = $("#rExported");   // round 11 (part-timer r4): warn before Approve, not only on it
+  { const xe = (d.exported_elsewhere || []).filter(x => !x.kept_apart), el = $("#rExported");   // v0.4.9 #5: only when this person really went to MC Trade   // round 11 (part-timer r4): warn before Approve, not only on it
     // round 21 (all r20 bots): ONE duplicate box. 'Already exported' is a line in it, only on pending cards, and gone after a decision
     el.hidden = !xe.length || c.status !== "pending";
     // v0.4.6 #6: the same count as the Approve dialog ("Exported before (N)"); other people's cards are a count, never a link
-    const xv = xe.filter(x => !x.hidden);
-    if (xe.length) el.innerHTML = `<b>${esc(xeLine(xe))}</b> Same person? Merge, or approve only if it's an update.` +
-      (xv.length ? ` <details class="more small"><summary>More</summary><ul>${xv.map(x => `<li><a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a> ${esc(x.name || "")} (${esc(x.why.join(", "))})${x.last_ts ? ", exported " + esc(when(x.last_ts)) : ""}${x.last_file ? ` <span class="sub">${esc(x.last_file)}</span>` : ""}</li>`).join("")}</ul></details>` : ""); }
+    if (xe.length) el.innerHTML = `<b>${esc(xeLine(xe))}</b> ${LEFT_OUT}`; }
   $("#rConf").innerHTML = "Scan " + confBar(d.conf ?? f.overall_confidence, d.status === "pending" && Object.keys(d.hard || {}).length > 0);   // newcomer r9 N5: same number as the queue
   ["first_name", "last_name", "title", "company", "website", "address"].forEach(x => $("#" + x).value = f[x] || "");
   $("#emails").value = (f.emails || []).join(", "); $("#social").value = (f.social || []).join(" ");
@@ -141,10 +140,12 @@ const normV = (i, v) => { let x = String(v ?? "").replace(/\s*&\s*/g, " & ");
 // and the leave prompt came back and a stale draft was written. Now the saved values become the baseline the moment the
 // server says "saved".
 // v0.4.8 #5: name WHICH earlier export (person + date), never a bare count
+// v0.4.9 #5: "Exported Oct 28, 1:56 PM." (+ the file only for your own export, + the card only when it is another one you can open)
+const LEFT_OUT = "This person will be left out of the next file.";
 function xeLine(xe) {
-  const x = [...xe].sort((a, b) => (b.last_ts || 0) - (a.last_ts || 0))[0], w = x.last_ts ? when(x.last_ts) : "";
-  const who_ = x.hidden ? "this person, in another batch" : `#${x.card_id}${x.name ? " " + x.name : ""}`;
-  return `Exported before: ${who_}${w ? ", " + w : ""}` + (xe.length > 1 ? ` (and ${xe.length - 1} more)` : "") + ".";
+  const x = xe[0], w = x.last_ts ? when(x.last_ts) : "";
+  const who_ = x.this_card || x.hidden || !x.card_id ? "" : ` as #${x.card_id}${x.name ? " " + x.name : ""}`;
+  return `Exported ${w || "before"}${x.last_file ? " in " + x.last_file : ""}${who_}.`;
 }
 function formSnap() { const o = {}; $$("#rForm input[id], #rForm textarea[id]").forEach(el => { if (el.type !== "file") o[el.id] = el.value; }); return o; }
 function markSaved(sid, sent) {
@@ -170,12 +171,12 @@ function markRisks(d) {
   $$("#fields .fhint").forEach(x => x.remove()); $$("#fields .f.hinted").forEach(x => x.classList.remove("hinted"));
   const FID = {name: "first_name", emails: "emails", phones: "phones", title: "title", company: "company", website: "website", address: "address", first_name: "first_name", last_name: "last_name"};
   // round 21: duplicates live in the one duplicate box, but only while that box shows them (a rejected card, or a rejected twin, keeps its hint here)
-  const rej_ = d.status === "rejected", dupQShown = !rej_ && ((d.dupes || {}).queue || []).length, dupCShown = !rej_ && ((d.dupes || {}).crm || []).length;
+  const rej_ = d.status === "rejected", dupQShown = !rej_ && (((d.dupes || {}).queue || []).length || (d.status === "pending" && !d.dup_decided && (d.dupes || {}).hidden_open)), dupCShown = !rej_ && ((d.dupes || {}).crm || []).length;
   // round 23 (coordinator r22): a field that already has a red block shows no extra soft line about the same thing
   const hk = Object.keys(d.hard || {}).map(k => k === "name" ? "first_name" : k), hardF = new Set(hk.concat(hk.some(k => k === "emails" || k === "website") ? ["emails", "website"] : []));
-  const items = d.status !== "pending" ? [] : (d.attention || []).filter(a => !(a.field && hardF.has(a.field === "name" ? "first_name" : a.field))).filter(a => !["invalid", "hard", "dup_queue", "override", "reexport"].includes(a.code) && !(a.code === "dup_other" && dupQShown && !/rejected/.test(a.text || "")) && !(a.code === "dup_crm" && dupCShown));
+  const items = d.status !== "pending" ? [] : (d.attention || []).filter(a => !(a.field && hardF.has(a.field === "name" ? "first_name" : a.field))).filter(a => !["invalid", "hard", "dup_queue", "override", "reexport"].includes(a.code) && !(a.code === "dup_other" && dupQShown && !/rejected/.test(a.text || ""))   /* v0.4.9 #8: "Seen before" once (the box) */ && !(a.code === "dup_crm" && dupCShown));
   items.forEach(a => { const el = a.field && document.getElementById(FID[a.field] || a.field); const box = el && el.closest(".f"); if (!box) return;
-    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}${a.code === "hint" && a.field === "company" && d.status === "pending" ? (S.ME && S.ME.role === "admin" ? ` <button type="button" class="btn small" data-softconfirm="company">Confirm</button>` : ` <span class="askadm">Ask an admin.</span>`) : ""}</p>`); });   // v0.4.1 #8
+    box.classList.add("hinted"); box.insertAdjacentHTML("beforeend", `<p class="fhint">⚠ ${esc(a.text)}${a.code === "hint" && a.field === "company" && d.status === "pending" ? (S.ME && S.ME.role === "admin" ? ` <button type="button" class="btn small" data-softconfirm="company">Confirm</button>` : "") : ""}</p>`); });   // v0.4.1 #8   // v0.4.9 #8: no stray "Ask an admin." on a suggestion
   $$("#fields [data-softconfirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.softconfirm, d.id));
   const r = $("#rRisk"); r.hidden = !items.length;
   r.innerHTML = items.length ? `<b>To check (${items.length}):</b><ul>${items.map(a => `<li${a.field && FID[a.field] ? ` data-f="${esc(FID[a.field])}"` : ""}>${esc(a.text)}</li>`).join("")}</ul>` : "";
@@ -436,12 +437,12 @@ function renderDupes(d) {
   // v0.4.2 #8 (newcomer/reviewer): ONE box. While Same/Different is open, MC Trade is one line in it, not a second question
   const openQ = all.length && !decided && all.some(x => !x.kept_apart);
   $("#rDupC").hidden = !crm.length || openQ;
-  if (crm.length && openQ) $("#rDupQ").insertAdjacentHTML("beforeend", `<p class="small">May already be in MC Trade: <b>${esc(crm[0].name)}</b>${crm[0].sample ? " (test list)" : ""}.</p>`);
+  if (crm.length && openQ) $("#rDupQ").insertAdjacentHTML("beforeend", `<p class="small">May already be in MC Trade: <b>${esc(crm[0].name)}</b>${crm[0].sample ? " (practice contacts)" : ""}.</p>`);
   if (crm.length && !openQ && !d.dupes.updates_enabled && d.status === "pending" && !d.dupes.crm_action) {   // only one outcome is possible: say it, no button
-    const m = crm[0]; $("#rDupC").innerHTML = `<b>May already be in MC Trade:</b> <b>${esc(m.name)}</b>${m.sample ? ` <span class="chip low">Test list</span>` : ""}. Approve adds it as new.`;
+    const m = crm[0]; $("#rDupC").innerHTML = `<b>May already be in MC Trade:</b> <b>${esc(m.name)}</b>${m.sample ? ` <span class="chip low">Practice contacts</span>` : ""}. Approve adds it as new.`;
   } else if (crm.length && !openQ) {
     const m = crm[0], ch = d.dupes.crm_action;
-    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "May already be in MC Trade:"}</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Test MC Trade list</span>` : ""}` +
+    $("#rDupC").innerHTML = `<b>${ch ? "MC Trade:" : "May already be in MC Trade:"}</b> <b>${esc(m.name)}</b> (${esc(m.why_text)})${m.sample ? ` <span class="chip low">Practice contacts</span>` : ""}` +
       `<p class="small">${esc(m.organization)}, MC Trade #${esc(m.profile_id)}.</p>` +
       (d.status !== "pending" ? "" : ch ? `<p>Decision: <b>${ch === "update_existing" ? "update the existing contact" : "add as a new contact"}</b>. <button type="button" class="link" id="cChange">Change</button></p>`
           : d.dup_decided ? `<div class="btns"><button type="button" class="btn small" id="cNew">Add as new</button> <button type="button" class="link" id="cChange">Change</button></div>`   // round 22: after 'Different person' one button, not a second same/different pair
@@ -580,19 +581,18 @@ async function decide_(status, btn) {
     const bits = [];
     // v0.4.3 #8 (newcomer): ONE wording for the AI not being finished
     if (aiBusy) bits.push(`<p>AI check not finished.${aiWas === "queued" ? " Deciding now <b>cancels</b> it." : " Its suggestions appear later."}</p>`);
-    if (status === "approved" && xe0.length) bits.push(`<p>${esc(xeLine(xe0))} Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
+    if (status === "approved" && xe0.length) bits.push(`<p>${esc(xeLine(xe0))} ${LEFT_OUT}</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
     if (crm0.length) bits.push(`<p>May already be in MC Trade: <b>${esc(crm0[0].name)}</b>. It will be added as a new contact.</p>`);
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const warn0 = xe0.length || crm0.length;
     const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Approve anyway?" : aiBusy ? "AI check not finished" : xe0.length ? "Exported before" : "May already be in MC Trade";
     // v0.4.7 #9 (data-manager L1): the title is not said again in the body
-    if (t0 === "Exported before" && bits[0] && bits[0].startsWith("<p>Exported before: ")) bits[0] = bits[0].replace("<p>Exported before: ", "<p>");
     if (t0 === "May already be in MC Trade") bits.forEach((b_, i_) => { if (b_.startsWith("<p>May already be in MC Trade: ")) bits[i_] = b_.replace("May already be in MC Trade: ", ""); });
     if (aiBusy && t0 === "AI check not finished") bits[0] = bits[0].replace("AI check not finished. ", "");   // v0.4.5 UX: the title already says it
     // v0.4.8 #12 (newcomer: stacked AI + Exported-before messages): one short message when both apply
     if (aiBusy && warn0 && status === "approved" && !needWhy) { bits.length = 0;
-      bits.push(`<p>${esc(xe0.length ? xeLine(xe0) : "May already be in MC Trade: " + crm0[0].name + ".")} The AI check isn't finished${aiWas === "queued" ? "; approving cancels it" : ""}.</p>`); }
+      bits.push(`<p>${esc(xe0.length ? xeLine(xe0) : "May already be in MC Trade: " + crm0[0].name + ".")} The AI check isn't finished${aiWas === "queued" ? "; approving cancels it" : ""}.${xe0.length ? " " + LEFT_OUT : ""}</p>`); }
     const r0 = await ask({title: t0, html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
       // v0.4.1 #1: when this person was exported before, Cancel is the default (Enter or a held key never approves through it)
@@ -621,7 +621,7 @@ async function decide_(status, btn) {
         clearTimeout(keepDraft.t); delete SS.draft; markSaved(sid, sentNow || sent);   // reviewer r8 / round 12 / round 14: no ghost draft or badge after a save
         await refreshCounts(); STATUS[sid] = saved.status;
         if (status === "approved" || status === "rejected") {
-          toast(`✓ Card #${sid} ${status} by ${who()}.` + (["queued", "checking"].includes(aiWas) ? (aiWas === "queued" ? " The waiting AI check was cancelled." : " Any AI suggestions will appear on the card later.") : ""), 3500, true);
+          const aiNote = ["queued", "checking"].includes(aiWas) ? (aiWas === "queued" ? " The waiting AI check was cancelled." : " Any AI suggestions will appear on the card later.") : "";   // v0.4.9 #10: ONE toast, below
           // round 8 (part-timer r2): 'Next' stays inside THIS card's batch, asked from the server (also when the card was opened
           // by a direct link); "All done" only when that batch has no pending card left at all
           // v0.4.7 #10: a value typed on THIS card while Approve was being sent is saved to THIS card (never carried to the next one)
@@ -635,7 +635,7 @@ async function decide_(status, btn) {
               if (s2 && s2.version) { ver_ = s2.version; if (S.cur && S.cur.id === sid) S.cur.version = s2.version; } markSaved(sid, snap_); lastSaved = true; }
             catch (e2) { keepDraft(); toast(`Card #${sid} ${status}, but your last edit was not saved: ${e2.message} It is kept as a draft on #${sid}.`, 8000); return; }
           }
-          if (lastSaved) toast(`✓ Card #${sid} ${status}. Your last edit was saved too.`, 4000, true);
+          // v0.4.9 #10 (skeptic: two toasts after Approve with an edit): the ONE message below says it, after the page moves on
           const myB = S.cur.batch || null, o = order(), i = o.indexOf(sid);
           let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "500"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}   // audit 2026-10: capped without a batch
           let nx2;
@@ -644,11 +644,11 @@ async function decide_(status, btn) {
           else { const pend = x => x !== sid && STATUS[x] === "pending"; nx2 = i >= 0 ? (o.slice(i + 1).find(pend) ?? o.slice(0, i).find(pend)) : undefined; }
           const bq = "#queue?s=pending&batch=" + encodeURIComponent(myB || "__none__");
           // v0.4.2 #9 (newcomer: no Undo on screen after Approve): the route change cleared the toast; show it again, with Undo
-          const msgU = `✓ #${sid} ${status}.` + (lastSaved ? " Your last edit was saved too." : "") + (pl && pl.length ? ` ${pl.length} left.` : "");
+          const msgU = `✓ #${sid} ${status}.` + (lastSaved ? " Your last edit was saved too." : "") + (pl && pl.length ? ` ${pl.length} left.` : "") + aiNote;
           if (nx2 !== undefined) { location.hash = "review/" + nx2; setTimeout(() => toast(msgU, 8000, true), 400); }
           else if (pl) { try { if (S.cur && S.cur.id === sid) await openCard(sid, {keep: true}); } catch {}   // round 15 (newcomer r14): the card behind the dialog shows its new status
-            const msg_ = `All done: no pending cards are left in ${S.cur.batch_label || "this batch"}.`; location.hash = bq; setTimeout(() => toast(msg_ + ` (#${sid} ${status}.)` + (lastSaved ? " Your last edit was saved too." : ""), 8000, true), 400); }   // after the route change (it clears toasts)   // round 22: a toast, not one more dialog
-          else { toast("Couldn't check what is still pending: back to the queue.", 4000); location.hash = bq; }
+            const msg_ = `All done: no pending cards are left in ${S.cur.batch_label || "this batch"}.`; location.hash = bq; setTimeout(() => toast(msg_ + ` (#${sid} ${status}.)` + (lastSaved ? " Your last edit was saved too." : "") + aiNote, 8000, true), 400); }   // after the route change (it clears toasts)   // round 22: a toast, not one more dialog
+          else { toast(`✓ #${sid} ${status}. Couldn't check what is still pending: back to the queue.`, 5000, true); location.hash = bq; }
         } else {
           const sp = saved.save_problems || {};
           toast(saved.notice || (status === "pending" ? `Card #${sid} moved back to pending.` : Object.keys(sp).length ? "Saved, but it can't be approved yet: " + Object.values(sp).join(" ") : "Changes saved."), saved.notice || Object.keys(sp).length ? 7000 : 4500, true);
@@ -705,7 +705,7 @@ async function decide_(status, btn) {
           $("#rDupQ").scrollIntoView({block: "center"}); return;
         }
         if (need === "crm_choice") {
-          const r = await ask({title: "Already in MC Trade?", html: `<p><b>${esc(e.data.match.name)}</b>, ${esc(e.data.match.organization)} looks like this person (${esc(e.data.match.why_text || "")}).</p>` + (e.data.match.sample ? `<p class="small">Test MC Trade list: the card is exported as a <b>new</b> contact.</p>` : ""),
+          const r = await ask({title: "Already in MC Trade?", html: `<p><b>${esc(e.data.match.name)}</b>, ${esc(e.data.match.organization)} looks like this person (${esc(e.data.match.why_text || "")}).</p>` + (e.data.match.sample ? `<p class="small">Practice contacts only: the card is exported as a <b>new</b> contact.</p>` : ""),
             buttons: [...(S.cur.dupes.updates_enabled ? [{label: "Same person: update their contact", cls: "primary", value: "update_existing", primary: true}] : []), {label: "Add as new contact", value: "create_new", ...(S.cur.dupes.updates_enabled ? {} : {cls: "primary", primary: true})}, {label: "Cancel", value: null}]});
           if (!r.value) { dlgStopped(r); return; } body.crm_action = r.value; continue;
         }
@@ -771,10 +771,11 @@ function blockedMsg(hard, ov) {
   const ks = Object.keys(hard || {}), isAdm = S.ME && S.ME.role === "admin", f_ = collect();
   const mis = ks.find(k => /misread|“\|”/i.test(String(hard[k]))), mv = mis ? f_[mis === "name" ? "first_name" : mis] : "";
   const what = mis && typeof mv === "string" && mv ? `"${mv}" looks misread.` : String(hard[ks[0]] || "");
-  if (isAdm) return what + " Fix it or confirm it.";
+  // v0.4.9 #8: name the real button for this role, or say plainly that it must be fixed
+  if (isAdm) return what + ($("#rErr [data-confirm]") ? " Fix it, or press Confirm in the red box." : " Fix it first.");
   // v0.4.8 #6: never "click Needs admin" when it was clicked already, or when there is no such button
   if (S.cur && S.cur.needs_admin) return what + " Waiting for an admin.";
-  return what + (ks.some(k => k !== "phones" && (ov || []).includes(k)) && $("#bNeedsAdmin") ? " Fix it, or click Needs admin." : " Fix it first.");
+  return what + (ks.some(k => k !== "phones" && (ov || []).includes(k)) && $("#bNeedsAdmin") ? " Fix it, or press Needs admin in the red box." : " Fix it first.");
 }
 function sameMsg() { const h = (S.cur && S.cur.hard) || {}; if (Object.keys(h).length) return blockedMsg(h, S.cur.overridable);
   return $("#rDupQ #dSame") ? "Same person? Answer Same or Different first." : "Pick Different first."; }

@@ -19,6 +19,7 @@
 .guide blockquote.callout{margin:1em 0;background:#fff4ee;border-left:6px solid #ef6728;padding:10px 16px;border-radius:6px} .guide blockquote.callout p{margin:.3em 0}
 .guide code{background:#eef6f8;border-radius:4px;padding:1px 5px;font-size:.88em} .guide hr{border:0;border-top:1px solid #e5e5e5;margin:1.5em 0}
 .guide .toc{background:#fff;border-radius:10px;box-shadow:0 0 0 1px #e5e5e5;padding:12px 20px;margin:1em 0} .guide .toc .toctitle{font-weight:700;color:#2b6d7c;font-size:1.1rem}
+.guide details{margin:.6em 0;background:#f6fafb;border-radius:8px;padding:6px 14px} .guide summary{cursor:pointer;font-weight:700;color:#2b6d7c}
 .guide .toc ul{columns:2;column-gap:32px;padding-left:20px;margin:.4em 0} .guide .toc li{break-inside:avoid}
 
 .guide{max-width:900px} .draftnote{background:#fff4ee;border:1px solid #ef6728;border-radius:6px;padding:8px 12px;margin:12px 0;font-size:.95rem}
@@ -35,51 +36,49 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.8</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.9</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.8</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.9</em></p>
 <blockquote class="callout">
-<p>For the person who runs the scanner and does the MC Trade import. Reviewing cards is in the <strong><a href="/static/ui/help.html">Reviewer Guide</a></strong>.</p>
+<p>For the person who runs the scanner and does the MC Trade import. Reviewing cards: <strong><a href="/static/ui/help.html">Reviewer Start Here</a></strong>. <strong><a href="https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4">Demo video</a></strong>.</p>
+<p><strong>Not yet checked against MC Trade.</strong> The import file has not been tested with MC Trade's real import template. Import <strong>2 rows first</strong> and check them in MC Trade before importing the rest.</p>
 </blockquote>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#1-install-once">1. Install (once)</a></li>
 <li><a href="#2-every-day">2. Every day</a></li>
-<li><a href="#3-backups">3. Backups</a></li>
-<li><a href="#4-who-may-export">4. Who may export</a></li>
-<li><a href="#5-export">5. Export</a></li>
-<li><a href="#6-mc-trade-import-first-time">6. MC Trade import: first time</a></li>
-<li><a href="#7-settings">7. Settings</a></li>
-<li><a href="#8-accounts">8. Accounts</a></li>
-<li><a href="#9-archive-and-audit">9. Archive and audit</a></li>
-<li><a href="#10-removal-requests">10. Removal requests</a></li>
-<li><a href="#11-problems">11. Problems</a></li>
+<li><a href="#3-who-may-do-what">3. Who may do what</a></li>
+<li><a href="#4-export">4. Export</a></li>
+<li><a href="#5-mc-trade-import-first-time">5. MC Trade import: first time</a></li>
+<li><a href="#6-settings-and-accounts">6. Settings and accounts</a></li>
+<li><a href="#7-archive-audit-removal">7. Archive, audit, removal</a></li>
+<li><a href="#8-problems">8. Problems</a></li>
 </ul>
 </div>
 <hr />
 <h2 id="1-install-once">1. Install (once)</h2>
 <ol>
-<li>Run <strong>GAC-Card-Scanner-Setup.exe</strong> (Windows) or open the <strong>.dmg</strong> (Mac: arm64 for Apple chips, x86_64 for Intel).</li>
-<li>Open <strong>GAC Card Scanner</strong>. First time: <strong>First-time setup</strong> creates the first admin.</li>
+<li>Run <strong>GAC-Card-Scanner-Setup.exe</strong> (Windows) or open the <strong>.dmg</strong> (Mac).</li>
+<li>Open <strong>GAC Card Scanner</strong>. <strong>First-time setup</strong> creates the first admin (on the scanner computer only).</li>
 <li><strong>Admin → Reviewers</strong>: add one account per person.</li>
 </ol>
 <figure><img alt="First-time setup" src="/static/ui/help-img/00_first_time_setup.webp" loading="lazy" /></figure>
-<p>First-time setup works only on the scanner computer.</p>
 <hr />
 <h2 id="2-every-day">2. Every day</h2>
 <ul>
-<li>Open <strong>GAC Card Scanner</strong>. Keep it open while people work.</li>
-<li><strong>AI check</strong> (optional): <strong>Admin → Settings → AI helper → Download</strong>, then <strong>Start</strong>. Scanning works without it.</li>
-<li><strong>Scan with phone</strong>: on <strong>Scan cards</strong>, under <strong>More</strong>. Same office Wi-Fi. The QR link expires after 15 minutes.</li>
+<li>Keep <strong>GAC Card Scanner</strong> open while people work.</li>
+<li><strong>AI check</strong> (optional): <strong>Admin → Settings → AI helper → Start</strong>. Scanning works without it.</li>
+<li><strong>Scan with phone</strong>: <strong>Scan cards → More</strong>. Same office Wi-Fi.</li>
 </ul>
-<hr />
-<h2 id="3-backups">3. Backups</h2>
+<details>
+<summary>More: backups</summary>
 <ul>
-<li>Automatic every night at 02:30. The last 7 are kept, in <code>backups/</code>.</li>
-<li>Put them on another disk: start with <code>GAC_BACKUP_DIR=&lt;folder&gt;</code>.</li>
+<li>Automatic every night at 02:30. The last 7 are kept in <code>backups/</code>.</li>
+<li>Another disk: start with <code>GAC_BACKUP_DIR=&lt;folder&gt;</code>.</li>
 <li>Restore: stop the scanner, run <code>scripts/restore_backup.sh &lt;file&gt;</code>, type <strong>YES</strong>.</li>
 </ul>
+</details>
 <hr />
-<h2 id="4-who-may-export">4. Who may export</h2>
+<h2 id="3-who-may-do-what">3. Who may do what</h2>
 <div class="tw"><table>
 <thead>
 <tr>
@@ -90,72 +89,54 @@
 <tbody>
 <tr>
 <td>Reviewer</td>
-<td>Approved cards of <strong>their own</strong> batch only</td>
+<td>Approved cards of <strong>their own</strong> batch</td>
 </tr>
 <tr>
 <td>Admin</td>
-<td>Any batch, <strong>All batches</strong>, pending or rejected cards too</td>
+<td>Any batch, or all batches</td>
 </tr>
 </tbody>
 </table></div>
-<p>The server enforces this. An admin exporting someone else's batch is asked first; <strong>Cancel</strong> is the default.</p>
-<p>Only admins may <strong>Confirm</strong> a blocked field (any field: name, title, company, department, email, website, address). Confirmations made by reviewers before v0.4.5 no longer count; those cards block again until an admin confirms them. Open the card, compare with the photo, click <strong>Confirm</strong> and give a reason. The reason is logged.</p>
+<p>Only admins can <strong>Confirm</strong> a blocked field. Open the card, compare with the photo, press <strong>Confirm</strong> in the red box and give a reason.</p>
+<p><strong>Needs admin:</strong> reviewers flag blocked cards for you. Turn on <strong>Needs admin</strong> in the Review queue to list them.</p>
 <hr />
-<h2 id="5-export">5. Export</h2>
+<h2 id="4-export">4. Export</h2>
 <ol>
-<li><strong>Export</strong>. Your current batch is chosen.</li>
-<li><strong>Preview</strong> shows the rows and what's left out.</li>
-<li><strong>Export</strong> → <strong>Ready to save</strong> → <strong>Save</strong>. Other formats are under <strong>Format</strong>.</li>
+<li><strong>Export</strong>. Pick the batch.</li>
+<li><strong>Preview</strong> shows the rows and what is left out.</li>
+<li><strong>Export</strong> → <strong>Save</strong>.</li>
 </ol>
 <figure><img alt="Export" src="/static/ui/help-img/19_export_page.webp" loading="lazy" /></figure>
-<div class="tw"><table>
-<thead>
-<tr>
-<th>On the sheet</th>
-<th>Means</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>New contacts</td>
-<td>Rows in the import file</td>
-</tr>
-<tr>
-<td>Updates</td>
-<td>Rows in the UPDATES file</td>
-</tr>
-<tr>
-<td>To check</td>
-<td>Cards with a <strong>Check</strong> line in the READ-ME</td>
-</tr>
-</tbody>
-</table></div>
+<p>After saving, the <strong>Next steps</strong> box names the ONE file to import (<strong>IMPORT-ME_…xlsx</strong>, in your Downloads). Files named <strong>NOT-FOR-IMPORT_…</strong> are for reading.</p>
+<p>The READ-ME starts with one line, e.g. <strong>Ready to import: 3 rows (2 clean, 1 to check).</strong> The same numbers show on the Export page, the batch list, the Save dialog, the summary and the dry run.</p>
 <figure><img alt="Ready to save" src="/static/ui/help-img/20_export_confirm.webp" loading="lazy" /></figure>
-<p>Import only <strong>IMPORT-ME_GAC-MCTrade-…-DATE_TIME.xlsx</strong>. <strong>IMPORT-ME-UPDATES_…</strong> (only when there are updates) is for updating existing contacts, as a separate import. Files named <strong>NOT-FOR-IMPORT_…</strong> (summary, CSV, READ-ME) are for reading. The READ-ME's first line says, for example, <strong>Ready to import: 3 rows (2 clean, 1 to check). Not in the file: 1 edited after export.</strong> Read the <strong>Check</strong> lines first.</p>
-<p>After an export the page shows a short checklist: 1. Read the READ-ME. 2. Import only the IMPORT-ME file. 3. Test 2 rows first.</p>
-<p><strong>Not in the file:</strong></p>
+<details>
+<summary>More: why a card is left out</summary>
+<p>The Export page says why in one line. The <strong>Left-out list</strong> names each card.</p>
 <ul>
-<li><strong>Edited after export:</strong> the card was changed after it went out. It is not in the next file. To send it again, tick <strong>Include anyway</strong> in the Save dialog.</li>
-<li><strong>Already exported:</strong> the same person (name and company, or email) is in an earlier IMPORT-ME file, so <strong>All approved</strong> leaves them out to avoid a duplicate in MC Trade. <strong>Include anyway</strong> puts them in.</li>
-<li><strong>Only in an earlier CSV:</strong> the card went out in a contacts CSV but never in an IMPORT-ME file, so it is included as new (the READ-ME says so).</li>
-<li><strong>Waiting for admin:</strong> cards a reviewer flagged with <strong>Needs admin</strong>.</li>
-<li><strong>Nothing new to import:</strong> no file is made and nothing is marked exported.</li>
+<li><strong>Already exported:</strong> this person (same email, or same name and company) was in an earlier IMPORT-ME file. Leaving them out avoids a duplicate in MC Trade.</li>
+<li><strong>Edited after export, so it is not in this file unless an admin includes it.</strong> Tick <strong>Include anyway</strong> in the Save dialog to send it again.</li>
+<li><strong>Waiting for admin:</strong> a reviewer pressed <strong>Needs admin</strong>.</li>
+<li>A contacts list (CSV) is not an MC Trade import. It never marks a card as sent.</li>
+<li><strong>Nothing new to import:</strong> no file is made.</li>
 </ul>
-<p><strong>Needs admin:</strong> a reviewer can flag a blocked card for you. Turn on <strong>Needs admin</strong> in the Review queue to list them (the menu badge counts them). Confirm or fix the field; the flag clears when nothing is left to confirm. The Export dialog shows how many wait for you, in this batch and in all batches (the link lists them all).</p>
+</details>
 <hr />
-<h2 id="6-mc-trade-import-first-time">6. MC Trade import: first time</h2>
+<h2 id="5-mc-trade-import-first-time">5. MC Trade import: first time</h2>
 <ol>
 <li>MC Trade <strong>Admin → Manage Codes</strong>: create <strong>CardScan-Pilot</strong>.</li>
-<li>MC Trade <strong>Admin → Import Profiles → Download Template</strong>. Upload it in <strong>Admin → Settings → MC Trade template</strong>.</li>
-<li>MC Trade <strong>Profile Selector → Export All System Columns</strong>. Upload it in <strong>Admin → Settings → MC Trade contacts</strong>.</li>
-<li><strong>Export → Look up in MC Trade</strong> (a dry run). Fix every <strong>FIX FIRST</strong> row. Decide every <strong>NEEDS REVIEW</strong> row.</li>
-<li><strong>Test 2 rows first.</strong> An import can't be undone.</li>
-<li>Import in order: organizations, individuals, then updates (separately).</li>
+<li>MC Trade <strong>Import Profiles → Download Template</strong>. Upload it in <strong>Admin → Settings → MC Trade template</strong>.</li>
+<li>MC Trade <strong>Export All System Columns</strong>. Upload it in <strong>Admin → Settings → MC Trade contacts</strong>.</li>
+<li><strong>Export → Look up in MC Trade</strong> (dry run). Fix every <strong>FIX FIRST</strong> row.</li>
+<li><strong>Import 2 rows first.</strong> An import can't be undone.</li>
+<li>Import organizations, then individuals, then updates (separately).</li>
 </ol>
-<p>Nothing is sent to MC Trade by the scanner.</p>
+<p>The scanner never sends anything to MC Trade.</p>
 <hr />
-<h2 id="7-settings">7. Settings</h2>
+<h2 id="6-settings-and-accounts">6. Settings and accounts</h2>
 <figure><img alt="Settings" src="/static/ui/help-img/24_admin_settings.webp" loading="lazy" /></figure>
+<details>
+<summary>More: settings</summary>
 <div class="tw"><table>
 <thead>
 <tr>
@@ -169,7 +150,7 @@
 <td>On when the AI helper runs</td>
 </tr>
 <tr>
-<td>Affiliation code (AffCode1)</td>
+<td>MC Trade code (AffCode1)</td>
 <td><code>CardScan-Pilot</code></td>
 </tr>
 <tr>
@@ -181,10 +162,6 @@
 <td><code>330-555-0181</code></td>
 </tr>
 <tr>
-<td>Keep corrected cards as test examples</td>
-<td>Off</td>
-</tr>
-<tr>
 <td>Delete photos after</td>
 <td>30 days (never while pending)</td>
 </tr>
@@ -194,37 +171,23 @@
 </tr>
 </tbody>
 </table></div>
-<p>Click <strong>Save settings</strong>.</p>
-<hr />
-<h2 id="8-accounts">8. Accounts</h2>
+</details>
 <figure><img alt="Reviewers" src="/static/ui/help-img/23_admin_reviewers.webp" loading="lazy" /></figure>
 <ul>
-<li><strong>Add reviewer</strong>: name, username, initials, role, temporary password (10+ characters).</li>
-<li><strong>Reset password</strong> also lifts a lock.</li>
-<li><strong>Deactivate</strong> someone who left. Their history stays.</li>
-<li>Idle sign-out: after 30 minutes with no clicks. Change it with <code>GAC_IDLE_MINUTES=&lt;minutes&gt;</code> (0 = off).</li>
+<li><strong>Reset password</strong> also lifts a lock. <strong>Deactivate</strong> someone who left.</li>
+<li>Locked out of every admin account: <code>python -m app.admin reset-password &lt;username&gt;</code>.</li>
 </ul>
-<p>Locked out of every admin account: <code>python -m app.admin reset-password &lt;username&gt;</code> in the scanner folder.</p>
 <hr />
-<h2 id="9-archive-and-audit">9. Archive and audit</h2>
+<h2 id="7-archive-audit-removal">7. Archive, audit, removal</h2>
 <ul>
-<li><strong>Archive batch</strong> (Review queue): hidden, not deleted. <strong>Undo</strong> brings it back.</li>
-<li><strong>Archive all test data</strong> (Settings): type <strong>CLEAR</strong>.</li>
-<li><strong>Admin → Audit log</strong>: who did what, when. <strong>Download as CSV</strong>.</li>
+<li><strong>Archive batch</strong> (Review queue) hides it. <strong>Undo</strong> brings it back.</li>
+<li><strong>Admin → Audit log</strong>: who did what. <strong>Download as CSV</strong>.</li>
+<li><strong>Removal request:</strong> find the card in <strong>Review queue → All</strong>, then <strong>More → Delete… → Delete permanently</strong>. Remove them from MC Trade and old export files too.</li>
 </ul>
 <figure><img alt="Audit log" src="/static/ui/help-img/26_admin_audit.webp" loading="lazy" /></figure>
 <hr />
-<h2 id="10-removal-requests">10. Removal requests</h2>
-<ol>
-<li><strong>Review queue → All</strong>: search the name or email. Open the card.</li>
-<li><strong>More → Delete…</strong> → <strong>Delete permanently</strong>. It can't be undone.</li>
-<li>Repeat for any other card of that person.</li>
-<li>Remove them from MC Trade too, and delete exported files that hold them.</li>
-</ol>
-<figure><img alt="Delete permanently" src="/static/ui/help-img/17_delete_permanently.webp" loading="lazy" /></figure>
-<hr />
-<h2 id="11-problems">11. Problems</h2>
-<p>GAC admin contact: ______________________ (name, phone or email). Write it into the Reviewer Guide too.</p>
+<h2 id="8-problems">8. Problems</h2>
+<p>GAC admin contact: ______________________ (name, phone or email)</p>
 <div class="tw"><table>
 <thead>
 <tr>
@@ -238,8 +201,8 @@
 <td>Scanning still works. <strong>Settings → AI helper → Start</strong>.</td>
 </tr>
 <tr>
-<td>Export <strong>blocked</strong></td>
-<td>Open the listed cards. Answer <strong>Same</strong> or <strong>Different</strong>.</td>
+<td>Export blocked</td>
+<td>Open the listed cards and fix them.</td>
 </tr>
 <tr>
 <td>"Something changed" on Save</td>

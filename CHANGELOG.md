@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.9 (2026-10-28)
+
+### One set of counts, a real "Sent to MC Trade" record, shorter help (from the v0.4.8 bot reports)
+- **Counts agree everywhere:** the batch list, Export page, Save dialog, "Ready to import" line, READ-ME, SUMMARY and dry run all use one computed count. When nothing can be exported the page says why in one line (e.g. "5 cards already exported. Nothing new to import.") and points to the Left-out list.
+- **Sent to MC Trade:** only IMPORT-ME files count as sent. A contacts CSV never clears "Edited after export" and never counts as an MC Trade import. The CSV Check column carries the "Already exported" notes.
+- **Same person:** company suffixes (Co / Co. / Company / Inc / LLC), punctuation, case and "+tag" emails are matched across batches.
+- **Privacy:** another person's export file name, batch or initials are never shown; "in an earlier export (date)" instead.
+- **Exported before** shows only when it applies, in one short line: "This person will be left out of the next file."
+- **One wording:** "Edited after export, so it is not in this file unless an admin includes it."
+- **Batch name:** a typed name is kept when you press New batch.
+- **Needs admin:** the blocked message names the button that really exists; "Seen before" shows once; editing an approved card into a blocked value says it moved back to Pending.
+- **Misreads:** "Rnbert" and "Vice Presdient" are blocked; "Rnjak" and "Managr Inc" are not. Run-together or misspelled company names get a "check spelling" hint.
+- **Smaller fixes:** "Reconnecting" only after a real disconnect; a plain Next steps box after export; no stale Undo after signing in; one toast after approve; audit lines capped; cut-offs end at a word; plain words in the READ-ME.
+- **Help:** shorter Reviewer Start Here and Admin guide with "More" sections, a link to the demo video, and a note that the MC Trade import has not been checked against MC Trade's real template (import 2 rows first).
+
 ## v0.4.8 (2026-10-28)
 
 ### No empty or duplicate import files, plain wording, tighter reviewer privacy (from the v0.4.7 bot reports)

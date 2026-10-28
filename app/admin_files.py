@@ -233,7 +233,8 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     if not sel: return refuse(404, "No cards to check.")
     blabel = blabel0
     from .exporting import _inc
-    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "", include_changed=_inc(request))
+    from .exporting import waiting_ids as _wids
+    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "", include_changed=_inc(request), waiting=_wids(batch) if batch else None, viewer=user)
     body, comp, summ = res[0], res[3], res[4]; view = summ.pop("_view", None) or {}
     cinfo = crm_source.info(); dec = summ["decisions"]; cnt = summ["counts"]
     why = {int(i): w for i, w in view.get("left", [])}
@@ -257,7 +258,7 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
         filecheck = "The import files read back cleanly (" + "; ".join(parts_) + ")."
     except (Exception, SystemExit) as e: filecheck = f"The import file could not be read back: {_html.escape(str(e)[:200])}"
     finally: shutil.rmtree(tmp, ignore_errors=True)
-    LBL = {"new": "CREATE (new-profiles file)", "update": "UPDATE (UPDATES file)", "review": "TO CHECK (in neither file)", "left": "LEFT OUT (merged or fix first)"}
+    LBL = {"new": "CREATE (new-profiles file)", "update": "UPDATE (UPDATES file)", "review": "TO CHECK (in neither file)", "left": "NOT IN THE FILE"}
     COL = {"new": "#d9ead3", "update": "#ddebf7", "review": "#fce4d6", "left": "#eeeeee"}
     order = {"review": 0, "left": 1, "update": 2, "new": 3}
     def nm(c): return _html.escape(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)")
@@ -271,10 +272,10 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
              f"<div style='background:#fff3cd;border:2px solid #b45309;padding:10px;margin:8px 0;font:15px sans-serif'><b>Compared against:</b> {_html.escape(cinfo['source'])}."
              + ("" if cinfo["real"] else " <b>SAMPLE DATA: this is a rehearsal; no Profile IDs are assigned.</b>")
              + f"<br><b>Cards checked:</b> {len(sel)}" + (f" · batch “{_html.escape(blabel)}”" if blabel else "")
-             + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · TO CHECK {len(tc_)} · LEFT OUT {cnt['left']}</b>"
+             + f"<br><b>{_html.escape((summ.get('ready') or {}).get('text') or '')}</b>"   # v0.4.9 #1: the headline is the Ready line (one count source)
+             + f"<br>UPDATE {cnt['update']} · CREATE {cnt['new']} · TO CHECK {(summ.get('ready') or {}).get('to_check', 0)} in the file · NOT IN THE FILE {cnt['left'] + cnt['review']}"
              + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {U._s(summ['new_rows'], 'row')}, {summ['update_rows']} update {U._s(summ['update_rows'], 'row')})"
              + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are TO CHECK, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
-             + f"<br>{_html.escape((summ.get('ready') or {}).get('text') or '')}"   # v0.4.7 #3: the same line as the README and the screen
              + f"<br>{filecheck}</div>"
              "<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>Card</th><th>Name</th><th>Company</th><th>Decision</th><th>Why</th></tr>"
              + trs + "</table></body></html>")

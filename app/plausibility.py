@@ -65,9 +65,53 @@ def _title_variants(w):
     if m_ and len(w) >= 5 and m_.group(3) in ("r", "nt", "st", "n", "l"): out.add(m_.group(1) + m_.group(3))
     return out - {w}
 _REALW = {"vile", "senor", "owner", "lice", "chef", "bnsiness"}
+def _swaps(w):
+    """v0.4.9 #9 (skeptic: 'Vice Presdient' passed): two neighbouring letters swapped, in a title word of 6+ letters."""
+    return {w[:i] + w[i + 1] + w[i] + w[i + 2:] for i in range(len(w) - 1) if w[i] != w[i + 1]} if len(w) >= 6 else set()
+TITLE_VARIANTS = set()   # v0.4.9 #9: these block in a job title only; in a company name ('Managr Inc') they are a suggestion
 for _w in _LA_TITLE:
-    for _v in _title_variants(_w):
-        if _v not in _REALW and _v not in LOOKALIKE and _v not in _LA_TITLE: LOOKALIKE[_v] = _w
+    for _v in _title_variants(_w) | _swaps(_w):
+        if _v not in _REALW and _v not in LOOKALIKE and _v not in _LA_TITLE: LOOKALIKE[_v] = _w; TITLE_VARIANTS.add(_v)
+# v0.4.9 #9: 'Rnbert' (o read as n) is a misread wherever it is; 'Rnjak', 'Nrupen' (real names) are not. A word starting with
+# Rn/Nr/Lr/Rl/Rm blocks only when one vowel in place of its 2nd letter gives a common first name.
+COMMON_NAMES = {"robert", "roberta", "roberto", "robin", "ronald", "roger", "rodney", "rosa", "rose", "roland", "rocco", "rory",
+                "ross", "roy", "ruben", "russell", "ruth", "rachel", "ralph", "randy", "raymond", "rebecca", "regina", "renee",
+                "richard", "rita", "nora", "norma", "norman", "nathan", "nancy", "nicole", "linda", "laura", "larry", "lori",
+                "lisa", "lucas", "luke", "rome", "romeo", "ronan", "ronnie", "rowan", "royce", "nolan", "noah", "noel", "lorna",
+                "lorenzo", "louis", "louise", "lucy", "lola", "rolando", "rodrigo", "robbie", "bobby", "rebekah", "ramon", "rafael"}
+def name_misread(v):
+    """The first word in v that looks like a misread common first name ('Rnbert' -> 'Robert'), as (word, fix), or None."""
+    for w in re.findall(r"[A-Za-z]{3,}", str(v or "")):
+        m_ = re.match(r"(?i)^(rn|nr|lr|rl|rm)([a-z]+)$", w)
+        if not m_: continue
+        for vw in "oaeiu":
+            g = m_.group(1)[0] + vw + m_.group(2)
+            if g.lower() in COMMON_NAMES: return w, g.capitalize()
+    return None
+# v0.4.9 #9 (coordinator: 'Highlandisguare Cofee Co' approved): a company with an obvious typo or words run together gets a
+# 'Check spelling' suggestion (never a block)
+CO_TYPOS = {"cofee": "coffee", "coffe": "coffee", "compnay": "company", "comapny": "company", "servcies": "services", "servces": "services",
+            "solutons": "solutions", "soultions": "solutions", "managment": "management", "consulitng": "consulting", "restuarant": "restaurant",
+            "resturant": "restaurant", "bakey": "bakery", "insurnace": "insurance", "intenational": "international", "assocaites": "associates",
+            "assoicates": "associates", "constuction": "construction", "contruction": "construction", "marketng": "marketing", "squre": "square",
+            "sqaure": "square", "gruop": "group", "goup": "group", "partenrs": "partners", "parnters": "partners", "techology": "technology"}
+LONG_OK = {"international", "technologies", "construction", "communications", "manufacturing", "pharmaceuticals", "entertainment",
+           "environmental", "transportation", "architecture", "professional", "professionals", "corporation", "incorporated",
+           "distribution", "distributors", "development", "developments", "engineering", "investments", "management", "consultants",
+           "photography", "laboratories", "foundation", "association", "associates", "properties", "productions", "enterprises",
+           "electronics", "healthcare", "insurance", "logistics", "restaurants", "hospitality", "landscaping", "contracting",
+           "manufacturers", "biotechnology", "telecommunications", "pharmaceutical", "orthodontics", "chiropractic", "therapeutics",
+           "accountants", "accounting", "marketplace", "warehousing", "veterinary", "philanthropy", "renaissance", "metropolitan"}
+_LONG_SUFFIX = re.compile(r"(tions?|ments?|ical|ology|ologies|ities|ings?|ances?|ences?|ness|ships?|ists?|ators?|ware|works|worldwide)$")
+def company_spelling(c):
+    """'Highlandisguare Cofee Co' -> 'Cofee' (a usual typo) or 'Highlandisguare' (13+ letters, not a known long word), or None."""
+    words = re.findall(r"[A-Za-z]+", str(c or ""))
+    for w in words:
+        if w.lower() in CO_TYPOS: return w
+    for w in words:
+        lw = w.lower()
+        if len(w) >= 13 and w[1:].islower() and lw not in LONG_OK and not _LONG_SUFFIX.search(lw): return w
+    return None
 # v0.4.8 #9: brand names with digits ('E2open', '4imprint', '4ward') are not misreads
 DIGIT_NAMES_OK = {"4imprint", "4thought", "e2open", "3com", "4kids", "3m", "7-eleven", "1-800-flowers", "g4s", "i3", "web3labs", "b2b", "b2c", "h2o", "q1", "q2", "q3", "q4",
                   "4ward", "4ever", "2go", "4sale", "4front"}
@@ -265,6 +309,9 @@ def check(f):
         rare = sum(1 for i in range(len(w_) - 1) if w_[i:i + 2].lower() in _RARE2)
         if re.search(r"[a-z]{3,}[A-Z][a-z]?$", w_) or (len(w_) >= 10 and rare >= 1) or rare >= 2 or re.search(r"[bcdfghjklmnpqrstvwxz]{5,}", w_.lower()):
             out.append(_sug("company_gibberish", "company", f"Company word “{w_}” doesn't look like a real word: check it against the photo")); break
+    if c and not any(x["field"] == "company" and x["code"] in ("company_gibberish", "ocr_lookalike") for x in out):
+        w_ = company_spelling(c)
+        if w_: out.append(_sug("company_spelling", "company", f"Company “{c}”: check spelling (“{w_}”)", re.sub(r"\b" + re.escape(w_) + r"\b", CO_TYPOS[w_.lower()].capitalize() if w_[0].isupper() else CO_TYPOS[w_.lower()], c) if w_.lower() in CO_TYPOS else None))
     if not any(x["field"] == "website" and x["code"] == "email_web" for x in out): out += website_check(f)
     seen, uniq = set(), []   # round 11 (reviewer r10): each hint once
     web_ = [x for x in out if x["field"] == "website"]   # round 20 (coordinator r19): ONE website line, not 2-3 repeats

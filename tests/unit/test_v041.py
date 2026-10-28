@@ -116,7 +116,7 @@ def test_summary_review_decisions_use_string_keys(env, monkeypatch):
         sm["_view"] = v; sm["decisions"] = {str(a): "review"}; sm["check_ids"] = []; r[4] = sm; return tuple(r)
     monkeypatch.setattr(exporting, "build_export", fake)
     s = rev.get("/api/export/summary?status=approved_new&batch=v41rv").json()
-    assert s["to_check"] == 1 and s["left_out"] == 0 and s["need_decision"] == 1, s
+    assert s["to_check"] == 0 and s["left_out"] == 0, s   # v0.4.9 #1: the counts come from the ONE ready dict built with the file (string keys read fine)
 
 
 # ---- #5 the merge preview says what the merge really does

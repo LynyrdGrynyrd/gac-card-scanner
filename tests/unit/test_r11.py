@@ -2,7 +2,7 @@
 info, 'Looks good' never next to look-alikes, strict confirm flags, undo id validation, add-back OCR-only, MC Trade
 secondary-email hold-back, full update diff, accent folding, dry-run readback of UPDATES, audit card ids once, health version."""
 import json
-from test_app import mk
+from test_app import mk, sent
 
 def _merge(rc, src, tgt):
     return rc.post(f"/api/cards/{src}", json={"status": "rejected", "merge_into": tgt, "card_id": src})
@@ -42,7 +42,7 @@ def test_merge_preview_says_replace(env):
 
 def test_review_shows_already_exported(env):
     ui, store, rc = env["ui"], env["store"], env["rev"]
-    a = mk(ui, store, first_name="Exa", last_name="Ported", emails=["exa@exp11.example"]); ui.set_meta(a, batch="r11-e1", exported=1)
+    a = mk(ui, store, first_name="Exa", last_name="Ported", emails=["exa@exp11.example"]); ui.set_meta(a, batch="r11-e1"); sent(ui, a)
     store.update(a, status="approved", reviewer="RR"); ui.log(a, "RR", "exported", detail={"file": "x.xlsx"})
     b = mk(ui, store, first_name="Exa", last_name="Ported", emails=["exa@exp11.example"]); ui.set_meta(b, batch="r11-e2")
     d = env["adm"].get(f"/api/cards/{b}").json()

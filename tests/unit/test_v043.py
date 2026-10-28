@@ -1,6 +1,6 @@
 """v0.4.3 regression tests (bot reports qa/*-v042.md). Made-up cards only."""
 import json, time
-from test_app import mk
+from test_app import mk, sent
 
 
 def _user(env, name):
@@ -65,13 +65,15 @@ def test_v043_exported_elsewhere_kept_after_different(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     a = mk(ui, st, first_name="Kira", last_name="Dove", emails=["kd@v43x.example.com"]); ui.set_meta(a, batch="v43xa", batch_label="v43xa")
     assert rev.post(f"/api/cards/{a}", json={"status": "approved", "crm_action": "create_new"}).status_code == 200
-    ui.set_meta(a, exported=time.time()); ui.log(a, "RR", "exported")
+    sent(ui, a); ui.log(a, "RR", "exported")
     b = mk(ui, st, first_name="Kira", last_name="Dove", emails=["kd@v43x.example.com"]); ui.set_meta(b, batch="v43xb", batch_label="v43xb")
     ui.set_meta(b, kept_apart=json.dumps([a]), dup_resolution="keep_both")
-    xe = env["adm"].get(f"/api/cards/{b}").json()["exported_elsewhere"]
-    assert [x["card_id"] for x in xe] == [a] and xe[0]["kept_apart"] is True
-    xe = rev.get(f"/api/cards/{b}").json()["exported_elsewhere"]
-    assert len(xe) == 1 and "card_id" not in xe[0]   # v0.4.7 #1
+    # v0.4.9 #5: 'Different person' from the exported card -> this person was NOT exported before: no notice, not held
+    assert env["adm"].get(f"/api/cards/{b}").json()["exported_elsewhere"] == []
+    assert rev.get(f"/api/cards/{b}").json()["exported_elsewhere"] == []
+    from app import exporting
+    ex, own = exporting.sent_record(st.get(b), {b: ui.meta(b) or {}}, exporting.import_index())
+    assert ex is None
 
 
 # ---- #4 possible MC Trade match: CSV Check note, preview/dry run list

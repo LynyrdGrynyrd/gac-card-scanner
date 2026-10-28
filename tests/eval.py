@@ -49,7 +49,10 @@ MIS = [("company", "Rubb3r City Robotics", 1), ("company", "Kent Partn3rs", 1), 
        # v0.4.8 #9: '4ward' / 'Owner|Founder' are real; 'Vlce', 'Managr', 'Rnbert', '4nalytics' are misreads
        ("company", "4ward Logistics", 0), ("title", "Owner|Founder", 0), ("company", "2go Couriers", 0), ("first_name", "Robert", 0),
        ("title", "Vlce President", 1), ("title", "Sales Managr", 1), ("first_name", "Rnbert", 1), ("last_name", "Rnbert", 1),
-       ("company", "4nalytics Group", 1), ("title", "Seninr Director", 1), ("title", "Vice President", 0)]
+       ("company", "4nalytics Group", 1), ("title", "Seninr Director", 1), ("title", "Vice President", 0),
+       # v0.4.9 #9: 'Rnbert' anywhere and 'Presdient' block; real names 'Rnjak', 'Nrupen' and the brand 'Managr Inc' pass
+       ("company", "Rnbert LLC", 1), ("title", "Rnbert", 1), ("title", "Vice Presdient", 1), ("last_name", "Rnjak", 0),
+       ("first_name", "Nrupen", 0), ("company", "Managr Inc", 0), ("company", "Highlandisguare Cofee Co", 0)]
 mok = 0
 for fld, val, want in MIS:
     e = _ui.hard_errors({"first_name": "Ann", "last_name": "Lee", "emails": ["a@b.example.com"], "phones": [], fld: val})

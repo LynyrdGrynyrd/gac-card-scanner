@@ -11,7 +11,7 @@ def _fmtv(v):
     if isinstance(v, dict): return f"{v.get('type', '')}: {v.get('number', '')}".strip(": ") if "number" in v else ", ".join(f"{k}: {x}" for k, x in v.items())
     return "" if v is None else str(v)
 
-NAMES = {"scanned": "scanned", "edited": "edited", "exported": "exported", "redownloaded": "re-downloaded in an export",
+NAMES = {"scanned": "scanned", "edited": "edited", "exported": "exported", "exported_list": "put in a contacts list (not MC Trade)", "redownloaded": "re-downloaded in an export",
          "merged_from": "merged details from another card", "mc_trade_choice": "MC Trade choice", "back_added": "back of card added",
          "ai_checked": "double-check", "ai_suggestion": "AI suggestion", "duplicate_kept_both": "marked as a different person"}
 def _audit_text(action, frm, to, d):
@@ -52,6 +52,7 @@ def _audit_text(action, frm, to, d):
     if action == "edited": return "edited " + ", ".join(f"{U.LABEL.get(k, k)}: “{_fmtv(v.get('from'))}” → “{_fmtv(v.get('to'))}”" for k, v in d.items() if isinstance(v, dict))
     if action == "scanned": return f"scanned {d.get('file', '')}" + (f" in batch “{d.get('batch')}”" if d.get("batch") else "") + (" (QR code found)" if d.get("qr") else "")
     if action == "exported": return f"exported in {d.get('file')}"
+    if action == "exported_list": return f"put in a contacts list ({d.get('file')}), not sent to MC Trade"   # v0.4.9 #2
     if action == "merged_from":
         add = d.get("added") or {}
         return f"merged details from card #{d.get('card')}" + (" (added " + ", ".join(U.LABEL.get(k, k.replace("_", " ")) for k in add) + ")" if add else "")
@@ -67,7 +68,7 @@ def _audit_text(action, frm, to, d):
         ch = d.get("changed") or {}
         if d.get("suggested"): return "double-check: suggestions offered for " + ", ".join(U.LABEL.get(k, k) for k in d["suggested"]) + f" ({d.get('seconds')} s)"
         return "double-check: " + (("changed " + ", ".join(f"{U.LABEL.get(k, k)} “{_fmtv(v.get('from'))}” → “{_fmtv(v.get('to'))}”" for k, v in ch.items())) if ch else "no changes needed") + f" ({d.get('seconds')} s)"
-    if action == "reexport_needed": return f"needs exporting again ({(d or {}).get('why', '')})"
+    if action == "reexport_needed": return U.EDITED_AFTER   # v0.4.9 #6: one wording everywhere
     if action == "ai_suggestion": return "AI suggestion: " + ", ".join(f"{U.LABEL.get(k, k)}: " + ("used the AI value" if v == "accept" else "kept the current value") for k, v in d.items())
     if action == "back_added" and d.get("from_card"): return f"back photo carried over from card #{d['from_card']}"
     if action == "back_added": return "added the back of the card" + (" (filled " + ", ".join(U.LABEL.get(k, k) for k in d.get("filled", [])) + ")" if d.get("filled") else "")
@@ -90,7 +91,7 @@ def audit(q: str = "", limit: int = 500, fmt: str = "json"):
     for r in U.db().execute("SELECT * FROM card_history ORDER BY id DESC LIMIT ?", (limit,)):
         d = json.loads(r["detail"]) if r["detail"] else None
         txt = _audit_text(r["action"], r["from_status"], r["to_status"], d)
-        rows.append({"ts": r["ts"], "who": r["reviewer"] or "system", "what": txt[:400], "card": r["card_id"], "kind": "card"})
+        rows.append({"ts": r["ts"], "who": r["reviewer"] or "system", "what": U.clip(txt, 240), "card": r["card_id"], "kind": "card"})   # v0.4.9 #10: audit lines are capped at a word
     for r in U.db().execute("SELECT * FROM auth_log ORDER BY id DESC LIMIT ?", (limit,)):
         ev = r["event"] or ""
         # round 17 (manager r16 L-1): refused rows are filed under what was refused, not 'account'
@@ -99,15 +100,16 @@ def audit(q: str = "", limit: int = 500, fmt: str = "json"):
                 "card" if ev.startswith(("deleted card", "Clear all test data", "confirmed as correct on card")) else "account")
         if not ev.startswith("refused export") and re.search(r"(?:^|\bon )card #\d+|^#\d+ ", ev): kind = "card"   # v0.4.7 #9 (mctrade-admin N5): card rows are 'card' and carry the id
         ids_ = list(dict.fromkeys(int(x) for x in re.findall(r"#(\d+)", ev))) if kind in ("export", "card") or ev.startswith("refused export") else []   # round 11: each card once (manager-r10)
-        rows.append({"ts": r["ts"], "who": r["username"], "what": ev + (f" (from {r['ip']})" if r["ip"] else ""), "card": ids_[0] if ids_ else None, "cards": ids_, "kind": kind})
+        if kind == "account" and ev.startswith("export ("): kind = "export"   # v0.4.9 (mctrade-admin #8): the nothing-new row is an export row
+        rows.append({"ts": r["ts"], "who": r["username"], "what": U.clip(ev, 300) + (f" (from {r['ip']})" if r["ip"] else ""), "card": ids_[0] if ids_ else None, "cards": ids_, "kind": kind})
     for r in U.db().execute("SELECT * FROM exports ORDER BY id DESC LIMIT ?", (limit,)):
         _ids = json.loads(r["card_ids"] or "[]")
-        rows.append({"ts": r["ts"], "who": r["initials"], "what": f"export {r['kind']} · {r['count']} {U._s(r['count'], 'card')} · {U.FILTERS.get(r['filter'], r['filter'])} · {r['filename']}" + (": " + ", ".join(f"#{i}" for i in _ids[:500]) if _ids else ""), "card": _ids[0] if _ids else None, "cards": _ids, "kind": "export"})
+        rows.append({"ts": r["ts"], "who": r["initials"], "what": f"export {r['kind']} · {r['count']} {U._s(r['count'], 'card')} · {U.FILTERS.get(r['filter'], r['filter'])} · {r['filename']}" + (": " + ", ".join(f"#{i}" for i in _ids[:12]) + (f" and {len(_ids) - 12} more" if len(_ids) > 12 else "") if _ids else ""), "card": _ids[0] if _ids else None, "cards": _ids, "kind": "export"})
     for r in U.db().execute("SELECT * FROM actions WHERE undone IS NOT NULL ORDER BY id DESC LIMIT ?", (limit,)):
         rows.append({"ts": r["undone"], "who": r["username"], "what": f"undo: {r['label']}", "card": None, "kind": "undo"})
     rows.sort(key=lambda x: -x["ts"])
     for r in rows: r["who"] = _w(r["who"]); r["initials"] = _u2i.get(r["who"], "")
-    if q: ql = q.lower(); rows = [r for r in rows if ql in (str(r["who"]) + " " + str(r.get("initials") or "") + " " + r["what"] + " #" + str(r["card"])).lower()]
+    if q: ql = q.lower(); rows = [r for r in rows if ql in (str(r["who"]) + " " + str(r.get("initials") or "") + " " + r["what"] + " #" + str(r["card"]) + "".join(f" #{i}" for i in (r.get("cards") or []))).lower()]   # v0.4.9: capped lines still match every card
     rows = rows[:want]
     if fmt == "csv":
         b = io.StringIO(); w = csv.writer(b); w.writerow(["time", "who", "initials", "type", "card", "what"])

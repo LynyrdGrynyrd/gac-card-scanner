@@ -129,7 +129,7 @@ def current_user(request: Request):
     # polling included), and a session ends SESSION_MAX_HOURS after sign-in however active it is
     if r["_s_exp"] < now + SESSION_HOURS * 3600 - 300:
         with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (now + SESSION_HOURS * 3600, h))
-    d = dict(r); [d.pop(k_, None) for k_ in ("_s_exp", "_s_la", "_s_cr")]; return d
+    d = dict(r); d["_signed_in"] = r["_s_cr"]; [d.pop(k_, None) for k_ in ("_s_exp", "_s_la", "_s_cr")]; return d   # v0.4.9 #10: Undo starts at sign-in
 
 def _client(request): return request.client.host if request.client else ""
 def trusted_host(request):
@@ -402,7 +402,7 @@ def backup_status():
 
 SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
                  "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples", "mctrade_updates_enabled": "Allow 'update existing MC Trade contact'",
-                 "mctrade_affcode": "MC Trade affiliation code", "phone_format": "Phone format",
+                 "mctrade_affcode": "MC Trade code (AffCode1)", "phone_format": "Phone format",
                  "phone_mode_allowed": "Scan with phone", "update_check_enabled": "Check for updates"}
 def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled", "_allowed")) else (v or "(empty)")
 
@@ -440,7 +440,7 @@ def _save_settings(request, body):
         if k in body:
             v = str(body[k]).strip()
             if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Enter whole days from 1 to 3650."}, 422)
-            if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
+            if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "MC Trade code: letters, digits, space, - _ . only (max 40)."}, 422)
             if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Choose a phone format from the list."}, 422)
             if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
             new[k] = v

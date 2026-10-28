@@ -28,6 +28,9 @@ def _set(server, cid, fields=None, status=None, exported=False, ai=None):
         if exported:
             c.execute("UPDATE card_meta SET exported=? WHERE card_id=?", (time.time(), cid))
             c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,detail) VALUES(?,?,?,?,?)", (cid, time.time(), "EA", "exported", json.dumps({"file": "x.xlsx"})))
+            # v0.4.9 #2: 'sent to MC Trade' = an IMPORT-ME (xlsx) export row
+            c.execute("INSERT INTO exports(ts, username, initials, kind, filter, count, filename, card_ids) VALUES(?,?,?,?,?,?,?,?)",
+                      (time.time(), "admin", "EA", "xlsx", "approved", 1, "x.xlsx", json.dumps([cid])))
         if ai: c.execute("UPDATE card_meta SET ai_status=? WHERE card_id=?", (ai, cid))
     c.close()
 
@@ -37,26 +40,26 @@ def _open(page, cid):
 
 
 def test_different_then_approve_warns_exported_once(new_page, server):
+    """v0.4.9 #5: 'Exported before' only when THIS person was exported. Marked Different from the exported card: no dialog."""
     page = signed_in_admin(new_page)
     a = _scan_one(page, server, "s2_04_footer-row_light.jpg", "E2E v045 first")
     b = _scan_one(page, server, "s2_02_right_light.jpg", "E2E v045 second")
     _set(server, a, fields=CLEAN, status="approved", exported=True)
     _set(server, b, fields=dict(CLEAN, title="Founder"))
     _open(page, b); expect(page.locator("#first_name")).not_to_have_value("")
-    if page.locator("#dDiff").count() and page.locator("#dDiff").is_visible():
+    diff = page.locator("#dDiff").count() and page.locator("#dDiff").is_visible()
+    if diff:
         page.locator("#dDiff").click(); page.wait_for_timeout(800)
         dl = page.locator("#dlg[open]")
         if dl.count(): dl.get_by_role("button").filter(has_text="Different").first.click(); page.wait_for_timeout(800)
     page.locator("#bApprove").click()
-    dlg = page.locator("#dlg[open]"); expect(dlg).to_be_visible(); expect(dlg.locator("h2")).to_have_text("Exported before"); expect(dlg).to_contain_text("Approve anyway?")
-    assert dlg.inner_text().count("Exported before") == 1   # v0.4.7 #9 (data-manager L1): the title is not repeated in the body
-    page.keyboard.press("Enter")                       # Cancel has the focus: Enter never approves through the warning
-    page.wait_for_timeout(800); assert card_json(page, b)["status"] == "pending"
-    page.locator("#bApprove").click()
-    dlg = page.locator("#dlg[open]"); expect(dlg).to_be_visible()
-    dlg.get_by_role("button", name="Approve anyway").click()
+    if not diff:   # the same person, exported before: ONE short dialog, Cancel is the default
+        dlg = page.locator("#dlg[open]"); expect(dlg.locator("h2")).to_have_text("Exported before")
+        expect(dlg).to_contain_text("This person will be left out of the next file."); assert dlg.inner_text().count("Exported before") == 1
+        page.keyboard.press("Enter"); page.wait_for_timeout(800); assert card_json(page, b)["status"] == "pending"
+        page.locator("#bApprove").click(); page.locator("#dlg[open]").get_by_role("button", name="Approve anyway").click()
     page.wait_for_timeout(1500)
-    expect(page.locator("#dlg[open]")).to_have_count(0)   # ONE dialog only
+    expect(page.locator("#dlg[open]")).to_have_count(0)   # no dialog (Different), or ONE dialog only
     for _ in range(20):
         if card_json(page, b)["status"] == "approved": break
         page.wait_for_timeout(500)

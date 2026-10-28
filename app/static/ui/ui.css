@@ -74,6 +74,9 @@ pre{white-space:pre-wrap;background:#f2f2f2;padding:10px;border-radius:6px;font-
 .legend{font-size:.9rem;color:var(--grey)}.lowkey{display:inline-block;width:14px;height:14px;background:var(--low);border:2px solid var(--lowb);vertical-align:middle;border-radius:3px}
 .alert{border:1px solid var(--orange);background:#fff4ee;padding:10px 12px;border-radius:6px;margin-top:10px}
 .alert.info{border-color:var(--teal);background:#eef6f8}.alert ul{margin:6px 0 0;padding-left:18px}
+.next{border:1px solid var(--teal);background:#fff;padding:8px 12px;border-radius:6px;margin-top:8px}.next ol{margin:4px 0 0;padding-left:20px}
+/* v0.4.9 #10: the preview table wraps instead of scrolling sideways */
+table.pv{table-layout:auto;width:100%}table.pv td,table.pv th{white-space:normal;word-break:break-word;max-width:14em}
 .hint{font-size:.85rem;color:var(--grey)}
 .sticky{background:#fff;padding:10px 0;border-top:1px solid var(--line)}
 .pager{display:flex;align-items:center;gap:8px}.pager span{color:var(--grey);min-width:70px;text-align:center}

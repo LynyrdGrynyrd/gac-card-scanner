@@ -19,6 +19,7 @@
 .guide blockquote.callout{margin:1em 0;background:#fff4ee;border-left:6px solid #ef6728;padding:10px 16px;border-radius:6px} .guide blockquote.callout p{margin:.3em 0}
 .guide code{background:#eef6f8;border-radius:4px;padding:1px 5px;font-size:.88em} .guide hr{border:0;border-top:1px solid #e5e5e5;margin:1.5em 0}
 .guide .toc{background:#fff;border-radius:10px;box-shadow:0 0 0 1px #e5e5e5;padding:12px 20px;margin:1em 0} .guide .toc .toctitle{font-weight:700;color:#2b6d7c;font-size:1.1rem}
+.guide details{margin:.6em 0;background:#f6fafb;border-radius:8px;padding:6px 14px} .guide summary{cursor:pointer;font-weight:700;color:#2b6d7c}
 .guide .toc ul{columns:2;column-gap:32px;padding-left:20px;margin:.4em 0} .guide .toc li{break-inside:avoid}
 
 .guide{max-width:900px} .draftnote{background:#fff4ee;border:1px solid #ef6728;border-radius:6px;padding:8px 12px;margin:12px 0;font-size:.95rem}
@@ -35,16 +36,16 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.8</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
+<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.9</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
 <h1 id="reviewer-start-here">Reviewer Start Here</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.8</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.9</em></p>
 <blockquote class="callout">
-<p>Scan, check, approve, export. Admin jobs are in the <strong><a href="/static/ui/help-admin.html">Admin Guide</a></strong>. Pictures use made-up cards.</p>
+<p>Admin jobs: <strong><a href="/static/ui/help-admin.html">Admin Guide</a></strong>. Watch the <strong><a href="https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4">2-minute demo video</a></strong>.</p>
 </blockquote>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#1-sign-in">1. Sign in</a></li>
 <li><a href="#2-scan">2. Scan</a></li>
-<li><a href="#3-review-one-card">3. Review one card</a></li>
+<li><a href="#3-review">3. Review</a></li>
 <li><a href="#4-same-person">4. Same person?</a></li>
 <li><a href="#5-export">5. Export</a></li>
 <li><a href="#6-ask-an-admin">6. Ask an admin</a></li>
@@ -52,27 +53,39 @@
 </div>
 <hr />
 <h2 id="1-sign-in">1. Sign in</h2>
-<p>Open <strong>GAC Card Scanner</strong>. Use <strong>your own</strong> username and password.</p>
+<p>Use <strong>your own</strong> username and password. The top of the page says <strong>You are: your name</strong>.</p>
 <figure><img alt="Sign in" src="/static/ui/help-img/01_sign_in.webp" loading="lazy" /></figure>
+<details>
+<summary>More</summary>
 <ul>
-<li>The top of every page says <strong>You are: your name</strong>. Not you? Click <strong>Not you?</strong>. It signs you out.</li>
-<li>After 30 minutes with no clicks you are signed out (not while photos upload). The sign-in page then says so.</li>
-<li>Locked out? Ask an admin.</li>
+<li>Not you? Click <strong>Not you?</strong>. It signs you out.</li>
+<li>After 30 minutes with no clicks you are signed out (not while photos upload).</li>
 </ul>
+</details>
 <hr />
 <h2 id="2-scan">2. Scan</h2>
 <ol>
 <li>Click <strong>Scan cards</strong>.</li>
-<li>Type a <strong>batch name</strong> (e.g. <em>After Hours</em>). The date and your initials are added.</li>
+<li>Type a <strong>batch name</strong> (e.g. <em>After Hours</em>).</li>
 <li>Drop the photos on the box, or click <strong>Scan</strong>.</li>
 </ol>
 <figure><img alt="Scan" src="/static/ui/help-img/02_scan_page.webp" loading="lazy" /></figure>
-<p>One card per photo, flat, no glare. You can review while the rest are read.</p>
-<p>On the Scan page: <strong>Needs a look</strong> = check the photo · <strong>Blocked</strong> = fix before approving · <strong>Not added</strong> = skipped · <strong>Cancelled</strong> = stopped.</p>
+<p>One card per photo, flat, no glare.</p>
+<details>
+<summary>More</summary>
+<p><strong>Needs a look</strong> = check the photo · <strong>Blocked</strong> = fix first · <strong>Not added</strong> = skipped.</p>
+</details>
 <hr />
-<h2 id="3-review-one-card">3. Review one card</h2>
-<p>Click <strong>Review batch →</strong>. Check each field against the photo.</p>
+<h2 id="3-review">3. Review</h2>
+<p>Click <strong>Review batch →</strong>. Check each field, then <strong>Approve</strong> (or <strong>Enter</strong>).</p>
 <figure><img alt="Review" src="/static/ui/help-img/06_review_card.webp" loading="lazy" /></figure>
+<ul>
+<li><strong>Yellow</strong> = check the photo.</li>
+<li><strong>Red box</strong> = fix it first. If the card really shows it, press <strong>Needs admin</strong> in the red box.</li>
+<li><strong>Undo</strong> (or <strong>Ctrl+Z</strong>) undoes your last change, in the current batch only.</li>
+</ul>
+<details>
+<summary>More</summary>
 <div class="tw"><table>
 <thead>
 <tr>
@@ -90,10 +103,6 @@
 <td>Type, then <strong>Save</strong>.</td>
 </tr>
 <tr>
-<td>Approve</td>
-<td><strong>Approve</strong>, or <strong>Enter</strong> (not while typing in a field).</td>
-</tr>
-<tr>
 <td>Reject</td>
 <td><strong>Reject</strong>, or <strong>R</strong>. It asks first.</td>
 </tr>
@@ -101,58 +110,45 @@
 <td>Next / previous card</td>
 <td><strong>Skip</strong>, <strong>J</strong> / <strong>K</strong>, or the arrow keys.</td>
 </tr>
-<tr>
-<td>Undo</td>
-<td><strong>Undo</strong> on the message after Approve, <strong>Ctrl+Z</strong>, or <strong>U</strong>. It undoes your last change in the current batch only, for up to 2 hours. The button shows what it will undo and the batch.</td>
-</tr>
 </tbody>
 </table></div>
-<ul>
-<li><strong>Yellow</strong> = check the photo.</li>
-<li><strong>changed</strong> = the scanner tidied it. Hover to see what it read.</li>
-<li><strong>Blocked</strong> = fix before approving.</li>
-<li><strong>Red box</strong>: fix the field. If the card really shows it like that, an admin must confirm it: a misread in name, title, company or department, or a block on email, website or address. Click <strong>Needs admin</strong> to flag the card.</li>
-</ul>
+<p><strong>changed</strong> = the scanner tidied it. Hover to see what it read.
+Only an admin can confirm a misread in name, title, company or department, or a block on email, website or address.
+Editing an approved card so it is blocked moves it back to <strong>Pending</strong>. The message says so.</p>
+</details>
 <hr />
 <h2 id="4-same-person">4. Same person?</h2>
 <p>If a card looks like another one, you see both side by side.</p>
 <figure><img alt="Same person?" src="/static/ui/help-img/10_dup_same_batch.webp" loading="lazy" /></figure>
 <ul>
-<li><strong>Same</strong>: one card is kept. New details are added to it.</li>
+<li><strong>Same</strong>: one card is kept, with the new details added.</li>
 <li><strong>Different</strong>: both are kept.</li>
 </ul>
-<p>Answer this first. <strong>Enter</strong> won't approve until you do.
-A card in someone else's batch shows only as a count ("Looks like 1 card in another batch"): click <strong>Different</strong> if it's not the same person, or ask an admin.
-If the same person was exported before, or may be in MC Trade, <strong>Approve</strong> asks once more and names the earlier export.</p>
-<p>If you edit a card that was already exported, the message says the edit won't be exported again unless an admin includes it.</p>
+<p>Answer this first. If the person was exported before, <strong>Approve</strong> asks once: this person will be left out of the next file.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
 <ol>
-<li>Click <strong>Export</strong>. Your current batch is chosen.</li>
+<li>Click <strong>Export</strong>. Your batch is chosen.</li>
 <li>Click <strong>Preview</strong> to check the rows.</li>
 <li>Click <strong>Export</strong>, then <strong>Save</strong>.</li>
 </ol>
 <figure><img alt="Export" src="/static/ui/help-img/19_export_page.webp" loading="lazy" /></figure>
 <ul>
-<li><strong>To check</strong> = cards to look at before the import. The READ-ME lists them.</li>
-<li>Import only the file named <strong>IMPORT-ME_…xlsx</strong>. Files named <strong>NOT-FOR-IMPORT_…</strong> are for reading.</li>
-<li>You can export <strong>only your own batch</strong>. Other batches: ask an admin.</li>
-<li>Export marks the cards as exported. <strong>Preview</strong> doesn't.</li>
-<li><strong>Export blocked:</strong> open the listed cards and fix them, or click <strong>Needs admin</strong>.</li>
-<li>The READ-ME starts with one line, for example <strong>Ready to import: 3 rows (2 clean, 1 to check). Not in the file: 1 edited after export.</strong> Test 2 rows first.</li>
-<li><strong>Nothing new to import:</strong> no file is made. The page says why (for example, the card was edited after export).</li>
-<li><strong>Edited after export:</strong> a card you change after it was exported is not in the next file. Only an admin can put it in again.</li>
-<li><strong>N waiting for admin:</strong> cards you sent with <strong>Needs admin</strong>. They are not in the file until an admin checks them.</li>
+<li>Import only the file <strong>IMPORT-ME_…xlsx</strong>. A <strong>Next steps</strong> box names it.</li>
+<li>If cards are left out, the page says why in one line. Read the <strong>Left-out list</strong>.</li>
 </ul>
+<details>
+<summary>More</summary>
+<ul>
+<li><strong>To check</strong> = rows to look at before the import. The READ-ME lists them.</li>
+<li><strong>Edited after export, so it is not in this file unless an admin includes it.</strong></li>
+<li><strong>Waiting for admin</strong> = cards you sent with <strong>Needs admin</strong>.</li>
+</ul>
+</details>
 <hr />
 <h2 id="6-ask-an-admin">6. Ask an admin</h2>
 <p>Your admin: ask the front desk.</p>
-<p>Ask an admin when:</p>
-<ul>
-<li>you are locked out;</li>
-<li>a red box says <strong>An admin needs to confirm this.</strong></li>
-<li>you need to export someone else's batch.</li>
-</ul>
+<p>Ask when you are locked out, a red box says <strong>An admin needs to confirm this</strong>, or you need someone else's batch.</p>
 </main>
 <footer class="foot"><div class="wrap">Greater Akron Chamber · Card Scanner · <strong>Internal pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a></div></footer>
 </body>

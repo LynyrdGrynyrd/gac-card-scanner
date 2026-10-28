@@ -1,6 +1,6 @@
 """v0.4.7 regression tests (bot reports qa/*-v046.md). Made-up cards only."""
 import json
-from test_app import mk
+from test_app import mk, sent
 from test_v045 import _user, _uid, _src
 
 
@@ -85,7 +85,7 @@ def test_v047_changed_after_export_not_in_next_file(env):
     ui, st = env["ui"], env["store"]
     a = _approved(ui, st, "v47chg", first_name="Edda", last_name="Twice", emails=["edda@twice47.example.com"])
     b = _approved(ui, st, "v47chg", first_name="Finn", last_name="Once", emails=["finn@once47.example.com"])
-    ui.set_meta(a, exported=time.time(), reexport=1); ui.log(a, "RR", "exported", detail={"file": "GAC_IMPORT-ME_v47.xlsx"})
+    sent(ui, a); ui.set_meta(a, reexport=1); ui.log(a, "RR", "exported", detail={"file": "GAC_IMPORT-ME_v47.xlsx"})
     with ui.db() as c_:   # v0.4.8: "exported" means: in an earlier MC Trade import file
         c_.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label,people) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    (time.time(), "rr", "RR", "xlsx", "approved_new", 1, "GAC_IMPORT-ME_v47.xlsx", json.dumps([a]), None, "", json.dumps(["e:edda@twice47.example.com"])))
@@ -96,7 +96,7 @@ def test_v047_changed_after_export_not_in_next_file(env):
     assert summ["decisions"][str(a)] != "new" and summ["decisions"][str(b)] == "new"
     assert "Not in the file: 1 edited after export." in r_["text"]
     blob = json.dumps({k: (v.decode("utf-8", "ignore") if isinstance(v, (bytes, bytearray)) else str(v)) for k, v in (res[3] or {}).items()})
-    assert ("Edited after export, so it is not in this file" in blob or "Edited after export, so it is not in this file." in blob) and "GAC_IMPORT-ME_v47.xlsx" in blob and "by hand" not in blob
+    assert ("Edited after export, so it is not in this file" in blob or "Edited after export, so it is not in this file." in blob) and "in an earlier export (" in blob and "GAC_IMPORT-ME_v47.xlsx" not in blob and "by hand" not in blob   # v0.4.9 #4: another person's file is never named
     res2 = ui.build_export("xlsx", sel, ms, "approved_new", "T (TT)", "", preview=True, include_changed=True)
     assert res2[4]["decisions"][str(a)] == "new"   # the admin's "Put it in as new anyway" (a warning goes with it)
 
@@ -213,7 +213,7 @@ def test_v047_badge_equals_own_batches_pending(env):
 def test_v047_copy(env):
     from app import ui
     rv = _src("app/static/ui/views/review.js")
-    assert 'bits[0] = bits[0].replace("<p>Exported before: ", "<p>")' in rv   # the title is not repeated in the body
+    assert "Exported before: " not in rv and 'LEFT_OUT = "This person will be left out of the next file."' in rv   # v0.4.9 #5: short body, no repeated title
     assert "idleNote" in _src("app/static/ui/login.html")
     import os
     if os.path.exists("training/build_help.py"):   # the public copy has no training/ folder

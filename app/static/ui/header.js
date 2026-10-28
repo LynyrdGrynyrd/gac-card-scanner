@@ -92,7 +92,9 @@ async function refreshCounts() {
   // round 15 (part-timer r14): the badge counts YOUR pending cards (batches you scanned), from a cheap server count; it never
   // touches the queue's tabs (those always come from the batch shown, see renderQueue)
   try {
-    const c = await call("/api/counts" + (Q.batch ? "?batch=" + encodeURIComponent(Q.batch) : ""));
+    // v0.4.9 #10 (skeptic): the batch you are working in: the open card's batch on Review, else the batch the queue shows
+    const onRev = (location.hash || "").startsWith("#review") && S.cur && S.cur.batch, vb = onRev ? S.cur.batch : Q.batch;
+    const c = await call("/api/counts" + (vb ? "?batch=" + encodeURIComponent(vb) : ""));
     const rd = S.B && S.B.uid === (S.ME && S.ME.id) ? S.B.rows.filter(r => ["wait", "up", "queued", "reading"].includes(r.state)).length : 0;
     const pb = $("#pendingBadge"); pb.hidden = !c.mine_pending && !rd;
     pb.textContent = String(c.mine_pending) + (rd ? ` · ${rd} reading` : "");   // v0.4.4 #9 (coordinator): plain words, not "63 +4"

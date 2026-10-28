@@ -15,7 +15,8 @@ FILTERS = {"approved_new": "approved, not yet exported", "approved": "all approv
 def _export_set(status, batch=""):
     cs, metas = U._active()
     mm = lambda c: metas.get(c["id"]) or {}
-    if status == "approved_new": sel = [c for c in cs if c["status"] == "approved" and (not mm(c).get("exported") or mm(c).get("reexport"))]
+    # v0.4.9 #2: 'not yet exported' = not yet in an MC Trade import file (a contacts list doesn't count), or edited since
+    if status == "approved_new": sent = sent_ids(); sel = [c for c in cs if c["status"] == "approved" and (c["id"] not in sent or mm(c).get("reexport"))]
     else: sel = [c for c in cs if status == "all" or c["status"] == status]
     if batch: sel = [c for c in sel if (mm(c).get("batch") or "__none__") == batch]
     probs = []
@@ -131,10 +132,10 @@ def export_check(request: Request, status: str = "approved_new", batch: str = ""
     if _batch_refused(batch, request.state.user): return JSONResponse({"error": BATCH_MSG, "admin_only": True}, 403)
     sel, metas, probs = _export_set(status, batch)
     flagged = [c["id"] for c in sel if (metas.get(c["id"]) or {}).get("override") or U.validate(c["fields"])]
-    rows_, held_ = None, []
+    rows_, held_, sc_ = None, [], None
     if sel and len(sel) <= 500:   # v0.4.2 #4: ONE source: the page line uses the sheet's own "to check" list
-        try: sc_ = summary_counts(sel, metas, status); flagged = sc_["check_ids"]; rows_ = sc_.get("rows"); held_ = (sc_.get("changed_ids") or []) + (sc_.get("repeat_ids") or [])
-        except Exception: pass
+        try: sc_ = counts_for(sel, metas, status, _inc(request), waiting=waiting_ids(batch) if batch else None); flagged = sc_["check_ids"]; rows_ = sc_.get("rows"); held_ = (sc_.get("changed_ids") or []) + (sc_.get("repeat_ids") or [])
+        except Exception: sc_ = None
     ok_batches = []
     if probs and not batch:   # all batches is blocked: say which single batches can be exported right now
         for b in sorted({(metas.get(c["id"]) or {}).get("batch") or "__none__" for c in sel}):
@@ -143,7 +144,13 @@ def export_check(request: Request, status: str = "approved_new", batch: str = ""
     cs_, metas_ = U._active()
     pend = [{"id": c["id"], "name": f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)"}
             for c in cs_ if c["status"] == "pending" and (not batch or ((metas_.get(c["id"]) or {}).get("batch") or "__none__") == batch)]
-    return {"count": len(sel), "rows": rows_, "held": len(held_), "duplicates": probs, "flagged": flagged, "same_names": same_names(sel), "ok_batches": ok_batches, "pending": pend[:200], "pending_count": len(pend),
+    # v0.4.9 #1: a batch whose approved cards all went out already says so (not "Approve some cards first")
+    sent_before = 0
+    if not sel and status == "approved_new":
+        sid_ = sent_ids()
+        sent_before = sum(1 for c in cs_ if c["status"] == "approved" and c["id"] in sid_ and (not batch or ((metas_.get(c["id"]) or {}).get("batch") or "__none__") == batch))
+    why_ = (f"{plural(sent_before, 'card')} already exported. Nothing new to import.") if sent_before else (why_line(sc_, len(sel)) if sc_ or not sel else "")
+    return {"count": len(sel), "rows": rows_, "held": len(held_), "sent_before": sent_before, "ready": (sc_ or {}).get("ready"), "why": why_, "duplicates": probs, "flagged": flagged, "same_names": same_names(sel), "ok_batches": ok_batches, "pending": pend[:200], "pending_count": len(pend),
             "cards": [{"id": c["id"], "name": f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip()} for c in sel[:300]],
             "admin_only": _filter_refused(status, request.state.user), "versions": export_versions(sel)}
 
@@ -197,19 +204,28 @@ def last_export_file(cid):
     try: return (json.loads(r[0] or "{}") or {}).get("file") or "" if r else ""
     except Exception: return ""
 # v0.4.8 #1-3: one plain sentence per reason a card is not in the import file
-CHANGED_WHY = "Edited after export, so it is not in this file."
+CHANGED_WHY = "Edited after export, so it is not in this file unless an admin includes it."   # v0.4.9 #6: one wording
 REPEAT_WHY = "Already exported, so it is not in this file."
 CSV_ONLY = "Sent before only in a contacts list (CSV), not to MC Trade."
 def _norm(s): return re.sub(r"[^a-z0-9@.]+", " ", str(s or "").lower()).strip()
+def _nm(s): return re.sub(r"[^a-z0-9]+", "", mctrade_sync.fold(str(s or "")).lower())
 def person_keys(first, last, company, emails):
-    """v0.4.8 #2: one person = the same email, or the same first + last name at the same company."""
-    out = {"e:" + _norm(e) for e in emails or [] if "@" in str(e or "")}
-    nm = _norm(f"{first or ''} {last or ''}"); co = _norm(company)
+    """v0.4.8 #2: one person = the same email, or the same first + last name at the same company.
+    v0.4.9 #3: case, punctuation, a '+tag' in the email and company suffixes (Co / Co. / Company / Inc / LLC ...) are ignored."""
+    out = {"e:" + mctrade_sync.norm_email(str(e)) for e in emails or [] if "@" in str(e or "")}
+    nm = _nm(f"{first or ''}{last or ''}"); co = mctrade_sync.norm_company(str(company or ""))
     if nm and co: out.add("n:" + nm + "|" + co)
     return out
+def _canon(k):
+    """A key stored by an older version, in today's form (so 'Test Co.' in an old file matches 'Test Co' today)."""
+    if k.startswith("e:"): return "e:" + mctrade_sync.norm_email(k[2:])
+    if k.startswith("n:") and "|" in k:
+        nm, co = k[2:].split("|", 1); return "n:" + _nm(nm) + "|" + mctrade_sync.norm_company(co)
+    return k
 def card_keys(c):
     f = c["fields"]; return person_keys(f.get("first_name"), f.get("last_name"), f.get("company"), f.get("emails") or [])
 _PEOPLE_CACHE = {}
+_IDX_CACHE = {"sig": None, "val": None}
 def _file_people(path):
     """Person keys of the rows of an earlier import file (older exports didn't store them)."""
     from openpyxl import load_workbook
@@ -221,19 +237,21 @@ def _file_people(path):
         out |= person_keys(g(r, "IndFirstName"), g(r, "IndLastName"), g(r, "OrgName"), [g(r, "IndEmail"), g(r, "IndEmail2")])
     wb.close(); return out
 def import_index():
-    """v0.4.8 #2: everyone already sent out in an MC Trade import file (any filter, any batch):
-    -> (people {key: export}, cards {card id: export}). Exports made before v0.4.8 are read from their stored file
-    (or, when the copy is gone, from the cards they listed)."""
+    """v0.4.9 #2: THE 'Sent to MC Trade' record. Only MC Trade import files (IMPORT-ME, xlsx) count; a contacts list (CSV)
+    never does. -> (people {key: export}, cards {card id: export}); export = {id, file, ts, user, batch, ids, keys}.
+    Exports made before v0.4.8 are read from their stored file (or, when the copy is gone, from the cards they listed)."""
+    sig = tuple(U.db().execute("SELECT COUNT(*), MAX(id) FROM exports WHERE kind='xlsx'").fetchone())
+    if _IDX_CACHE["sig"] == sig and _IDX_CACHE["val"] is not None: return _IDX_CACHE["val"]
     people, cards = {}, {}
-    rows = U.db().execute("SELECT id, ts, filename, card_ids, stored, people FROM exports WHERE kind='xlsx' ORDER BY id").fetchall()
+    rows = U.db().execute("SELECT id, ts, username, batch_label, filename, card_ids, stored, people FROM exports WHERE kind='xlsx' ORDER BY id").fetchall()
     cs = None
     for r in rows:
-        ex = {"id": r["id"], "file": r["filename"], "ts": r["ts"]}
+        ex = {"id": r["id"], "file": r["filename"], "ts": r["ts"], "user": r["username"], "batch": r["batch_label"] or ""}
         try: ids = [int(i) for i in json.loads(r["card_ids"] or "[]")]
         except Exception: ids = []
         keys = None
         if r["people"]:
-            try: keys = set(json.loads(r["people"]))
+            try: keys = {_canon(k) for k in json.loads(r["people"])}
             except Exception: keys = None
         if keys is None:
             if r["id"] in _PEOPLE_CACHE: keys = _PEOPLE_CACHE[r["id"]]
@@ -245,30 +263,54 @@ def import_index():
                     if cs is None: cs = {c["id"]: c for c in store.all_()}
                     keys = set().union(*[card_keys(cs[i]) for i in ids if i in cs]) if cs else set()
                 _PEOPLE_CACHE[r["id"]] = keys
-        for k in keys: people.setdefault(k, ex)
         if not r["people"] and keys:   # before v0.4.8 card_ids also listed cards left out of the file: keep only the people in it
             if cs is None: cs = {c["id"]: c for c in store.all_()}
             ids = [i for i in ids if i not in cs or not card_keys(cs[i]) or card_keys(cs[i]) & keys]
-        for i in ids: cards.setdefault(i, ex)
+        ex["ids"] = set(ids); ex["keys"] = keys
+        for k in keys: people.setdefault(k, ex)
+        for i in ids: cards[i] = ex   # the LATEST import file a card was in
+    _IDX_CACHE.update(sig=sig, val=(people, cards))
     return people, cards
+def sent_ids():
+    """Card ids that were in an MC Trade import file (the card itself, not just the same person)."""
+    return set(import_index()[1])
+def sent_record(c, metas, idx=None):
+    """v0.4.9 #2/#5: the earlier MC Trade import file this card or this PERSON was in, or None.
+    -> (export, own): own = this very card was in it. A look-alike the reviewer marked 'Different person' doesn't count."""
+    people, cards = idx if idx is not None else import_index()
+    if c["id"] in cards: return cards[c["id"]], True
+    kept = U._kept(metas.get(c["id"]) or {})
+    for k in sorted(card_keys(c)):
+        ex = people.get(k)
+        if not ex: continue
+        same = {i for i in ex["ids"] if i != c["id"]}
+        if same and same <= (kept | {i for i in same if c["id"] in U._kept(metas.get(i) or {})}): continue
+        return ex, False
+    return None, False
 def held_cards(sel, metas, idx=None):
     """v0.4.8 #1/#2: cards that would be a second 'create new' in MC Trade, so they are not in the import file:
-    'changed' = exported in an import file and edited since; 'repeat' = this card or this person is already in an earlier
-    import file. -> (changed [(card, export)], repeat [(card, export)], csv_only {card id})."""
-    people, cards = idx if idx is not None else import_index()
+    'changed' = THIS card was in an import file and was edited since; 'repeat' = this card or this person is already in an
+    earlier import file. -> (changed [(card, export)], repeat [(card, export)], csv_only {card id}).
+    v0.4.9 #2: only import files count; a card sent only in a contacts list (CSV) is csv_only, never 'edited after export'."""
+    idx = idx if idx is not None else import_index()
     chg, rep, csv_only = [], [], set()
     for c in sel:
         m = metas.get(c["id"]) or {}
         if m.get("crm_action") == "update_existing": continue   # an update of an existing profile is not a new row
-        ex = cards.get(c["id"]) or next((people[k] for k in sorted(card_keys(c)) if k in people), None)
-        if ex: (chg if m.get("exported") and m.get("reexport") else rep).append((c, ex))
+        ex, own = sent_record(c, metas, idx)
+        if ex: (chg if own and m.get("reexport") else rep).append((c, ex))
         elif m.get("exported"): csv_only.add(c["id"])
     return chg, rep, csv_only
+def when_where(ex, user=None):
+    """v0.4.9 #4: 'in an earlier export (Oct 28)'; the file name only for the viewer's OWN export."""
+    d = datetime.datetime.fromtimestamp(ex["ts"]).strftime("%b %-d") if ex and ex.get("ts") else ""
+    own = bool(user and ex and (ex.get("user") or "") == (user.get("username") if isinstance(user, dict) else user))
+    return (f"in {ex['file']} ({d})" if own and ex.get("file") else f"in an earlier export ({d})" if d else "in an earlier export")
 def changed_after_export(sel, metas):
     """v0.4.7 #2 (kept for callers): cards exported in an import file and edited since."""
     return [c for c, _ in held_cards(sel, metas)[0]]
 
-def build_export(kind, sel, metas, status, who, batch_label="", preview=False, include_changed=False, waiting=None, vis=None):
+def build_export(kind, sel, metas, status, who, batch_label="", preview=False, include_changed=False, waiting=None, vis=None, viewer=None):
     def flag(c):
         m = metas.get(c["id"]) or {}; ov = U._ov(m); errs = U.validate(c["fields"]); out = []
         if ov: out.append(f"APPROVED ANYWAY by {ov.get('by')}: {ov.get('reason')}")
@@ -324,7 +366,8 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
         _held = [] if include_changed else _held_all
         _chg = [c for c, _x, k in _held if k == "changed"]; _rep = [c for c, _x, k in _held if k == "repeat"]
         _chg_ids = {c["id"] for c in _chg}; _rep_ids = {c["id"] for c in _rep}; _held_ids = _chg_ids | _rep_ids
-        _chg_files = {c["id"]: _x["file"] for c, _x, _k in _held}
+        # v0.4.9 #4: an earlier export is named by its date; the file name only when it is the viewer's own export
+        _chg_files = {c["id"]: when_where(_x, viewer) for c, _x, _k in _held}
         res = mx.build([c for c in sel if c["id"] not in _held_ids], aff, style, U.hard_errors, kept=_kept_pair, confirmed=lambda f_: list(U.valid_confirmations(f_)), crm_look=lambda c: crm_look(c, _real),
                        crm_real=_real is not None, crm_hint=_hint, updates_on=auth.get_setting("mctrade_updates_enabled") == "1",
                        action=lambda c: (metas.get(c["id"]) or {}).get("crm_action") or "")
@@ -353,16 +396,11 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
             _sr = crm_source.sample_rows(); _in = {x["id"] for x, _ in rows}
             _smp = [c_["id"] for c_ in sel if c_["id"] in _in and any("email exact" in m_["why"] for m_ in mctrade_sync.match(c_["fields"], _sr))]
         # v0.4.3 #4 (mctrade-admin L3): a possible MC Trade match is a note in the CSV Check column too
-        _mcn = {i: "May already be in MC Trade (test list)" for i in _smp} | {i: "May already be in MC Trade" for i in res["possible"] if i not in _smp}   # v0.4.8 #8: capital M
+        _mcn = {i: "May already be in MC Trade (practice contacts only)" for i in _smp} | {i: "May already be in MC Trade" for i in res["possible"] if i not in _smp}   # v0.4.8 #8: capital M
         def aud(c, _a=aud):
             a_ = _a(c)
             if c["id"] in _mcn and _mcn[c["id"]] not in a_[-1]: a_[-1] = " | ".join(x for x in (a_[-1], _mcn[c["id"]][0].upper() + _mcn[c["id"]][1:]) if x)
             return a_
-        for c in sel:
-            f_ = c["fields"]; a = aud(c); em = f_.get("emails") or []
-            inimp = "updates file" if c["id"] in updids else "no" if c["id"] in why else "yes"
-            w.writerow([safe_cell(x) for x in [c["id"], inimp, why.get(c["id"], ""), mx.clean(f_.get("first_name")), mx.clean(f_.get("last_name")),
-                        em[1] if len(em) > 1 else "", mx.clean(f_.get("website"))] + [mx.clean(x) for x in more(c)[:5]] + [" ".join(f_.get("social") or []), mx.clean(_note(c))] + a[1:]])
         nflag = sum(1 for c in sel if aud(c)[-1])
         _imp_ids = {c["id"] for c, _ in rows} | {c["id"] for c, _ in upd}
         _flagged = {c["id"] for c in sel if aud(c)[-1]}
@@ -383,7 +421,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
         ovr_ = [c["id"] for c in sel if U._ov(metas.get(c["id"]) or {})]
         # v0.3.2 (newcomer v0.3.1): short and plain; empty/zero lines left out; ONE warning line per card
         _warn = {}
-        for i in _smp: _warn.setdefault(i, []).append("may already be in MC Trade (test list)")
+        for i in _smp: _warn.setdefault(i, []).append("may already be in MC Trade (practice contacts only)")
         for i in res["possible"]:
             if i not in _smp: _warn.setdefault(i, []).append("may already be in MC Trade")
         for i in xb_ids: _warn.setdefault(i, []).append("may match someone approved in another batch")
@@ -393,6 +431,19 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
         for i in sorted(_csv_only & _in_rows): _warn.setdefault(i, []).append(CSV_ONLY[0].lower() + CSV_ONLY[1:].rstrip("."))
         _cap = lambda t_: t_[:1].upper() + t_[1:]
         _wl = [f"Check #{i}: {_cap(' and '.join(v))}." for i, v in sorted(_warn.items())]
+        # v0.4.9 #2: the CSV "Check" column carries every note the READ-ME points to ('see the CSV'), the 'Already exported'
+        # and contacts-list-only notes included
+        _hw = {c_["id"]: (CHANGED_WHY if k_ == "changed" else REPEAT_WHY).replace(", so it is not in this file", f" ({_chg_files.get(c_['id']) or 'in an earlier export'}), so it is not in this file")
+               for c_, _x, k_ in _held}
+        for c in sel:
+            f_ = c["fields"]; a = list(aud(c)); em = f_.get("emails") or []
+            notes_ = [x for x in str(a[-1] or "").split(" | ") if x]
+            for t_ in [_cap(x) for x in _warn.get(c["id"], [])] + ([_hw[c["id"]].rstrip(".")] if c["id"] in _hw else []) + ([CSV_ONLY.rstrip(".")] if c["id"] in _csv_only and c["id"] not in _in_rows else []):
+                if t_.lower() not in " | ".join(notes_).lower(): notes_.append(t_)
+            a[-1] = " | ".join(notes_)
+            inimp = "updates file" if c["id"] in updids else "no" if c["id"] in why else "yes"
+            w.writerow([safe_cell(x) for x in [c["id"], inimp, why.get(c["id"], ""), mx.clean(f_.get("first_name")), mx.clean(f_.get("last_name")),
+                        em[1] if len(em) > 1 else "", mx.clean(f_.get("website"))] + [mx.clean(x) for x in more(c)[:5]] + [" ".join(f_.get("social") or []), mx.clean(_note(c))] + a[1:]])
         _named = set(_warn) | {i for i, _ in conf_[:20]} | set(ovr_) | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))} \
             | {k for k, v in res["decisions"].items() if v[0] == mx.REVIEW}
         _more = _flagged - _named
@@ -430,14 +481,14 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
             "GAC Card Scanner: MC Trade import file" if not preview else "GAC Card Scanner: MC Trade preview (not for import)",
             ready_line(_ready) if not preview else "",
             readme_totals(cnt_, len(_imp_ids & _tc), 0, notin=[] if not preview else notin_parts(_ready)),
-            *([f"{ids3(sorted(_chg_ids))}: Edited after export, so {'it is' if len(_chg) == 1 else 'they are'} not in this file"
-               + (f" (earlier file {sorted(set(_chg_files[i] for i in _chg_ids))[0]})" if len(set(_chg_files[i] for i in _chg_ids)) == 1 else "") + "."] if _chg else []),
+            *([f"{ids3(sorted(_chg_ids))}: " + (CHANGED_WHY if len(_chg) == 1 else CHANGED_WHY.replace("so it is", "so they are").replace("includes it", "includes them"))
+               + (f" Sent {sorted(set(_chg_files[i] for i in _chg_ids))[0]}." if len(set(_chg_files[i] for i in _chg_ids)) == 1 else "")] if _chg else []),   # v0.4.9 #6: one wording
             *([f"{ids3(sorted(_rep_ids))}: Already exported, so not in this file"
-               + (f" (earlier file {sorted(set(_chg_files[i] for i in _rep_ids))[0]})" if len(set(_chg_files[i] for i in _rep_ids)) == 1 else "") + "."] if _rep else []),
+               + (f", {sorted(set(_chg_files[i] for i in _rep_ids))[0]}" if len(set(_chg_files[i] for i in _rep_ids)) == 1 else "") + "."] if _rep else []),
             *([f"{ids3(_waiting)}: Waiting for an admin, so not in this file."] if _waiting else []),
             ("" if preview else ("Before importing: read the “Check” lines. " if _tc else "") + "An import can't be undone."
              + (" Import new contacts and updates separately." if upd else "")),
-            f"Created {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
+            f"Made by GAC Card Scanner {_ver()} on {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
             # v0.4.6 #7 (READ-ME said "DO NOT IMPORT" and "Import this file only"): a preview names no file to import
             (f"Import only: {rfn}" + (f" (and {comp_name(rfn, '-UPDATES.xlsx')} for updates)" if upd else "") + ". The NOT-FOR-IMPORT files are for reading."
              if not preview else "These are preview copies: import none of them."),
@@ -445,13 +496,13 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
             (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
             (f"Check: {plural(len(ovr_), 'card')} approved anyway (see the CSV)." if ovr_ else ""),
             ("Compared with MC Trade contacts: " + cinfo["source"] + "." if cinfo["real"] else
-             "Test MC Trade list: no real contacts file is loaded, so no MC Trade numbers were assigned."),
+             "No list of MC Trade contacts is loaded, so the scanner could not check who is already in MC Trade."),
             (f"Updates: {comp_name(rfn, '-UPDATES.xlsx')} ({plural(len(upd), 'row')}). MemberSince is left blank so it can't overwrite a member's real date."
              if upd else ""),
             (f"Template columns the scanner leaves blank: {', '.join(res['unknown_cols'])}." if res["unknown_cols"] else
-             "" if tpl_real else "Columns not checked against MC Trade's template."),
+             "" if tpl_real else "The column names have not been checked against MC Trade's own import template: test 2 rows first."),
             (f"Not in this template (CSV only): {', '.join(res['unfilled'])}." if res["unfilled"] else ""),
-            f"Affiliation code: '{aff}' (it must already exist in MC Trade).",
+            (f"Every row gets the group code '{aff}'. It must already exist in MC Trade." if aff else ""),
             ("" if _has_web else "Websites: this template has no website column, so websites are only in the CSV."),
             (f"Combined with another row: {ids3(sorted(_merged_in))}." if _merged_in else ""),
             (f"To fix first, not in this file: {ids3(sorted(_fix - _held_ids))}. The CSV says why." if _fix - _held_ids else ""),
@@ -481,7 +532,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
                     *([["Edited after export (not in this file)", len(_chg)]] if _chg else []), *([["Already exported (not in this file)", len(_rep)]] if _rep else []),
                     *([["Waiting for admin", len(_waiting)]] if _waiting else []), [],
                     ["Card", "Why to check it"], *[[f"#{i}", _cap("; ".join(dict.fromkeys(_why.get(i, []))) or (_mcn.get(i) or "a note in the CSV Check column"))] for i in sorted(_tc)],
-                    *([[], ["Card", "Not in this file", "Earlier file"]] + [[f"#{c['id']}", CHANGED_WHY if k == "changed" else REPEAT_WHY, _chg_files.get(c["id"]) or ""] for c, _x, k in _held] if _held else [])):
+                    *([[], ["Card", "Not in this file", "Earlier export"]] + [[f"#{c['id']}", CHANGED_WHY if k == "changed" else REPEAT_WHY, _chg_files.get(c["id"]) or ""] for c, _x, k in _held] if _held else [])):
             _ss.append([safe_cell(x) if isinstance(x, str) else x for x in rw_])
         for rw in _ss.iter_rows():
             for cell in rw:
@@ -518,6 +569,10 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False, i
         return body_x, MT["xlsx"], fn, comp, summ
     raise HTTPException(404)
 
+def _ver():
+    try:
+        from . import updates; return updates.current_version()
+    except Exception: return ""
 def notin_parts(r):
     """v0.4.8 #1: why cards are not in the file, one short reason each ('1 edited after export')."""
     return [x for x in (f"{r['changed']} edited after export" if r.get("changed") else "", f"{r['repeat']} already exported" if r.get("repeat") else "",
@@ -615,7 +670,8 @@ def export_summary(request: Request, status: str = "approved_new", batch: str = 
     w_ = waiting_ids(batch); u_ = request.state.user or {}
     # v0.4.8 #12: an admin also sees how many wait in ALL batches (one list across batches)
     na_all = len(waiting_ids("")) if u_.get("role") == "admin" else None
-    return {"blocked": bool(probs), "needs_admin": len(w_), "needs_admin_all": na_all} | summary_counts(sel, metas, status, _inc(request), waiting=w_)
+    sc_ = counts_for(sel, metas, status, _inc(request), waiting=w_ if batch else None)
+    return {"blocked": bool(probs), "needs_admin": len(w_), "needs_admin_all": na_all, "why": why_line(sc_, len(sel))} | sc_
 
 def summary_counts(sel, metas, status, include_changed=False, waiting=None):
     """v0.4.2 #4: the one count source for the Export page line, the sheet, the README and the CSV Check column."""
@@ -629,12 +685,42 @@ def summary_counts(sel, metas, status, include_changed=False, waiting=None):
         rv = {x[0] for x in left if dz.get(str(x[0])) == "review"}
         chk = set(sm.get("check_ids") or [])
         out["ready"] = sm.get("ready")
-        out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": len(chk | rv), "left_out": len(left) - len(rv),
-                "need_decision": len(rv), "check_ids": sorted(chk | rv), "changed_ids": sm.get("changed_ids") or [],
+        rd = sm.get("ready") or {}; inf = set(sm.get("in_file_ids") or [])
+        # v0.4.9 #1: 'to check' = rows IN the file to check (the Ready line's number); cards to decide are counted apart
+        out |= {"new": len(view.get("rows") or []), "updated": len(view.get("updates") or []), "to_check": rd.get("to_check", 0), "left_out": len(left) - len(rv),
+                "need_decision": rd.get("outside", 0), "check_ids": sorted(i for i in set(sm.get("to_check_ids") or []) if i in inf), "decide_ids": sorted(rv), "changed_ids": sm.get("changed_ids") or [],
                 "repeat_ids": sm.get("repeat_ids") or [], "held_files": sm.get("held_files") or {}, "rows": (sm.get("ready") or {}).get("rows", 0),
                 "changed_file": next((x for x in ((sm.get("held_files") or {}).get(str(i)) for i in (sm.get("changed_ids") or [])[:5]) if x), "")}
     return out
 
+_RC = {}; _RCL = threading.Lock()
+def counts_for(sel, metas, status, include_changed=False, waiting=None):
+    """v0.4.9 #1: THE count source (batch list, Export page, Save dialog, README, SUMMARY, dry run): summary_counts,
+    cached per exact card set + template + contacts + earlier import files + cards waiting for an admin."""
+    v = export_versions(sel); sig = _IDX_CACHE["sig"] or tuple(U.db().execute("SELECT COUNT(*), MAX(id) FROM exports WHERE kind='xlsx'").fetchone())
+    # card metadata (kept apart, needs admin, re-export ...) and the newest history row (cross-batch confirms) are part of the key
+    mh = hashlib.sha256(json.dumps([metas.get(c["id"]) for c in sorted(sel, key=lambda c: c["id"])], default=str, sort_keys=True).encode()).hexdigest()[:12]
+    hmax = U.db().execute("SELECT MAX(id) FROM card_history").fetchone()[0]
+    k = (status, v["cards"], v["template"], v["contacts"], tuple(sig), tuple(waiting or []), bool(include_changed), len(sel), mh, hmax)
+    with _RCL:
+        if k in _RC: return _RC[k]
+    out = summary_counts(sel, metas, status, include_changed, waiting=waiting)
+    with _RCL:
+        if len(_RC) > 300: _RC.clear()
+        _RC[k] = out
+    return out
+def why_line(sc, count):
+    """v0.4.9 #1 / data-manager: one short line saying why nothing (or less) goes into the import file, and what to do."""
+    r = (sc or {}).get("ready") or {}
+    if not count: return "Nothing to export yet. Approve some cards first."
+    if r.get("rows"): 
+        p = notin_parts(r)
+        return ("Not in the file: " + ", ".join(p) + ". See the Left-out list in the Save dialog." ) if p else ""
+    held = (r.get("changed") or 0) + (r.get("repeat") or 0)
+    if held and held == count:
+        return f"{plural(held, 'card')} already exported. Nothing new to import."
+    p = notin_parts(r)
+    return ("Nothing new to import: " + ", ".join(p) + ". Open those cards to fix or decide them.") if p else "Nothing new to import."
 def _inc(request):
     """v0.4.7 #2: an admin may put cards exported before back in the import file as new (the dialog's option)."""
     return request.query_params.get("include_changed") == "1" and (request.state.user or {}).get("role") == "admin"
@@ -681,7 +767,7 @@ def do_export(kind: str, request: Request, status: str = "approved_new", batch: 
         try: return _do_export_real(kind, request, status, batch, sel, metas, user, seen_)
         finally: _export_release(xkey)
     blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
-    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, preview=preview, include_changed=_inc(request), waiting=waiting_ids(batch) if batch else None, vis=U.visible_ids(user))
+    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, preview=preview, include_changed=_inc(request), waiting=waiting_ids(batch) if batch else None, vis=U.visible_ids(user), viewer=user)
     body, mt, fn = res[:3]; extras = res[3] if len(res) > 3 else {}
     view = res[4].pop("_view", None) if len(res) > 4 else None
     if len(res) > 4: res[4].pop("people", None)
@@ -722,7 +808,7 @@ def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
         drift = [k for k, v in seen.items() if v and v != built_v[k]]
         if drift: return _stale_export(kind, batch, user, sel, drift, built_v, "since the sign-off was shown")
     blabel = next(((metas.get(c["id"]) or {}).get("batch_label") or "" for c in sel), "") if batch else ""
-    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, include_changed=_inc(request), waiting=waiting_ids(batch) if batch else None, vis=U.visible_ids(user))
+    res = build_export(kind, sel, metas, status, f"{user['display']} ({user['initials']})", blabel, include_changed=_inc(request), waiting=waiting_ids(batch) if batch else None, vis=U.visible_ids(user), viewer=user)
     body, mt, fn = res[:3]; extras = res[3] if len(res) > 3 else {}
     if len(res) > 4: res[4].pop("_view", None)
     people_ = res[4].pop("people", []) if len(res) > 4 else []   # stored with the export, not sent back in a header
@@ -759,9 +845,12 @@ def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
                 m = curm.get(x["id"]) or {}
                 c.execute("INSERT INTO card_meta(card_id) VALUES(?) ON CONFLICT(card_id) DO NOTHING", (x["id"],))
                 if not m.get("exported"): c.execute("UPDATE card_meta SET exported=? WHERE card_id=?", (now, x["id"]))
-                if m.get("reexport"): c.execute("UPDATE card_meta SET reexport=NULL WHERE card_id=?", (x["id"],))
+                # v0.4.9 #2: only an MC Trade import file is 'sent to MC Trade'. A contacts list (CSV/vCard) never clears
+                # 'Edited after export' and is logged as its own kind of export.
+                if kind == "xlsx" and m.get("reexport"): c.execute("UPDATE card_meta SET reexport=NULL WHERE card_id=?", (x["id"],))
                 c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
-                          (x["id"], now, user["initials"], "exported", None, None, json.dumps({"file": fn, "template_version": tv})))
+                          (x["id"], now, user["initials"], "exported" if kind == "xlsx" else "exported_list", None, None,
+                           json.dumps({"file": fn, "template_version": tv} if kind == "xlsx" else {"file": fn, "kind": kind})))
     return Response(body, media_type=mt, headers={"Content-Disposition": f'attachment; filename="{fn}"', "X-Card-Count": str(len(msel)),
                                                   "X-Export-Id": str(eid), "X-Companions": ",".join(extras)} | summ_h)
 

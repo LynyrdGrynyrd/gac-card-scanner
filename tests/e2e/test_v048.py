@@ -19,7 +19,7 @@ def test_edited_after_export_alone_says_nothing_new(new_page, server):
     c = _db(server); assert c.execute("SELECT exported FROM card_meta WHERE card_id=?", (a,)).fetchone()[0]; c.close()
     _open(page, a); page.locator("#title").fill("Boss")
     page.locator("#bSave").click()
-    expect(page.locator("#toast")).to_contain_text("won't be exported again unless an admin includes it"); _shot(page, "01_exported_edit_notice")
+    expect(page.locator("#toast")).to_contain_text("Edited after export, so it is not in the next file unless an admin includes it"); _shot(page, "01_exported_edit_notice")
     page.goto("/ui#export")
     expect(page.locator("#exBigT")).to_have_text("Nothing new to import.", timeout=15000); _shot(page, "02_nothing_new")
     expect(page.locator("#exBigT")).not_to_contain_text("ready")
@@ -27,7 +27,7 @@ def test_edited_after_export_alone_says_nothing_new(new_page, server):
     assert c.execute("SELECT reexport FROM card_meta WHERE card_id=?", (a,)).fetchone()[0]   # the warning stays
     c.close()
     expect(go).to_be_enabled()   # an admin may still include it
-    go.click(); dlg = page.locator("#dlg[open]"); expect(dlg).to_contain_text("Edited after export, so not in this file"); expect(dlg).not_to_contain_text("combined with another row"); expect(dlg).to_contain_text("no file is made")
+    go.click(); dlg = page.locator("#dlg[open]"); expect(dlg).to_contain_text("Edited after export, so it is not in this file unless an admin includes it"); expect(dlg).not_to_contain_text("combined with another row"); expect(dlg).to_contain_text("no file is made")
     expect(dlg.locator("#exIncChg")).to_be_visible(); _shot(page, "02b_save_dialog_left_out")
     dlg.get_by_role("button", name="Save", exact=True).click()
     expect(page.locator("#exDone")).to_contain_text("Nothing new to import."); expect(page.locator("#exDone")).to_contain_text("No file was made.")

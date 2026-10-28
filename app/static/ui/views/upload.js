@@ -211,8 +211,11 @@ async function poll() {
   if (!S.B || AUTH_PAUSED) return;   // audit 2026-10: resumed by authCheck()
   const live = S.B.rows.filter(r => ["queued", "reading", "splitting"].includes(r.state) && r.job);
   if (!live.length) return;
+  // v0.4.9 #10: "Reconnecting…" only when the request itself failed (a real disconnect), never for a bug in handling the answer
+  let j;
+  try { j = await call("/api/jobs?ids=" + live.map(r => r.job).join(",")); }
+  catch (e) { if (e instanceof TypeError) conn(false); pollT = setTimeout(poll, document.hidden ? 5000 : 1200); return; }
   try {
-    const j = await call("/api/jobs?ids=" + live.map(r => r.job).join(","));
     const byJob = new Map(S.B.rows.filter(x => x.job).map(x => [x.job, x]));   // audit 2026-10: no O(n²) find on big batches
     for (const job of j.jobs) {
       const r = byJob.get(job.id); if (!r) continue;
@@ -238,7 +241,7 @@ async function poll() {
     S.B.avg = fin ? (Date.now() / 1000 - S.B.t0) / fin : (j.avg_seconds ? j.avg_seconds * Math.max(1, S.B.rows.filter(r => r.state === "queued").length) / Math.max(1, S.B.rows.length) : null);
     saveB(); renderBatch();
     if (j.jobs.some(x => x.state === "done" || x.state === "error")) { refreshCounts(); if (!$("#v-queue").hidden && Q.batch && Q.batch === S.B.id) loadQueue(); }   // round 15: newly read cards of the batch shown appear without a reload
-  } catch (e) { if (e instanceof TypeError) conn(false); }   // network error: say "Reconnecting…" and keep trying
+  } catch (e) { console.warn(e); }
   pollT = setTimeout(poll, document.hidden ? 5000 : 1200);   // audit 2026-10: slower while the tab is hidden
 }
 const ST = {splitting: "Reading PDF…", wait: "Waiting to upload", up: "Uploading…", queued: "In line to be read", reading: "Reading card…", done: "Added", rej: "Not added", dup: "Not added", err: "Failed", cancel: "Cancelled"};
@@ -314,7 +317,11 @@ $("#cancelBatch").onclick = async () => {
   const cn = S.B.rows.filter(r => r.state === "cancel").length; S.B.stopMsg = `Stopped. ${ok} kept, ${cn} not scanned.`; saveB(); renderBatch();
   toast(S.B.stopMsg, 4500);
 };
-$("#clearBatch").onclick = () => { if (S.B) S.B.rows.forEach(dropThumb); S.B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
+// v0.4.9 #7 (coordinator: typed name, then New batch, then upload -> "Oct 28 · QC 3:06 PM"): a name typed for the NEW batch is
+// kept; only the old batch's own name is cleared
+$("#clearBatch").onclick = () => { const nm_ = $("#batchName").value.replace(/\s+/g, " ").trim().toLowerCase(), old_ = ((S.B && S.B.label) || "").toLowerCase();
+  if (S.B) S.B.rows.forEach(dropThumb); S.B = null; SS.removeItem("batch"); if (!nm_ || (old_ && old_.startsWith(nm_))) $("#batchName").value = "";
+  renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast($("#batchName").value.trim() ? `Ready for a new batch: “${$("#batchName").value.trim()}”.` : "Ready for a new batch."); };
 function restoreBatch() {
   // v0.4.2 #12: after a reload a photo that was still waiting is no longer in the page (its file is gone): say so, never "Waiting" forever
   if (S.B) S.B.rows.forEach(r => { if (r.state === "wait" && !r.blob) { r.state = "rej"; r.msg = "Not sent before the page reloaded. Add this photo again."; } });

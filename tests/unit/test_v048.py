@@ -96,7 +96,7 @@ def test_v048_save_notice_on_exported_card(env):
     a = _appr(ui, st, "v48e", first_name="Jo", last_name="Saved", company="Saved Co", emails=["jo@v48e.example.com"])
     adm.get("/api/export/xlsx?status=approved&batch=v48e")
     r = adm.post(f"/api/cards/{a}", json={"fields": {"title": "Chief"}}).json()
-    assert r["notice"] == "Saved. This card was exported before, so this edit won't be exported again unless an admin includes it."
+    assert r["notice"] == "Saved. Edited after export, so it is not in the next file unless an admin includes it."   # v0.4.9 #6: one wording
     src = "\n".join(open(f"app/{n}", encoding="utf-8").read() for n in ("ui.py", "exporting.py")) + open("app/static/ui/views/export.js", encoding="utf-8").read()
     assert "MC Trade by hand" not in src and "Changed after export: export it again" not in src
 

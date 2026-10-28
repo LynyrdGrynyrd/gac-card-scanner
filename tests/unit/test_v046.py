@@ -116,7 +116,7 @@ def test_v046_reviewer_confirm_refused_is_audited_and_needs_admin_flag(env):
     assert adm.post(f"/api/cards/{cid}/needs-admin", json={"clear": True}).json()["needs_admin"] is None
     assert cid not in {c["id"] for c in adm.get("/api/cards?needs_admin=1").json()}
     js = _src("app/static/ui/views/review.js")
-    assert 'An admin needs to confirm this.' in js and 'id="bNeedsAdmin">Needs admin<' in js and "Ask an admin." in js
+    assert 'An admin needs to confirm this.' in js and 'id="bNeedsAdmin">Needs admin<' in js and '<span class="askadm">Ask an admin.</span>' not in js   # v0.4.9 #8
     assert _src("app/static/ui/views/queue.js").count("needs admin") >= 1 and 'id="fNa"' in _src("app/static/ui/index.html")
 
 
@@ -152,7 +152,7 @@ def test_v046_x_department_alias_checked(env):
 # ---- #6 exported before: one count, Different remembered per pair, short words
 def test_v046_exported_before_dialog_wording():
     js = _src("app/static/ui/views/review.js")
-    assert "<p>${esc(xeLine(xe0))} Approve anyway?</p>" in js and "<b>${esc(xeLine(xe))}</b>" in js and "`Exported before (${" not in js   # v0.4.8 #5
+    assert "xeLine(xe0)" in js and "<b>${esc(xeLine(xe))}</b>" in js and "`Exported before (${" not in js   # v0.4.8 #5; v0.4.9 #5 below
     assert '"Marked different."' in js and "Different from ${" not in js
     assert "(e.data.other ? [" in js
 
@@ -215,5 +215,5 @@ def test_v046_blocked_toast_names_misread_and_badge_grammar():
     import pathlib
     ui = pathlib.Path(__file__).resolve().parents[2] / "app" / "static" / "ui"
     js = (ui / "views" / "review.js").read_text(encoding="utf-8"); hd = (ui / "header.js").read_text(encoding="utf-8")
-    assert '`"${mv}" looks misread.`' in js and '" Fix it, or click Needs admin."' in js and '" Waiting for an admin."' in js   # v0.4.8 #6
+    assert '`"${mv}" looks misread.`' in js and '" Fix it, or press Needs admin in the red box."' in js and '" Waiting for an admin."' in js   # v0.4.8 #6
     assert 'c.needs_admin === 1 ? "needs" : "need"' in hd
