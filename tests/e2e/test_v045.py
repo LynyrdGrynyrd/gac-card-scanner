@@ -5,8 +5,9 @@ from playwright.sync_api import expect
 from test_flows import card_json, scan, signed_in_admin, wait_card
 
 SYN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "synth2")
+# made-up 555-09xx numbers: the 555-01xx ones are on the tests/cards photos other e2e files scan (a phone match opens "Same person?")
 CLEAN = {"first_name": "Tessa", "last_name": "Quill", "company": "Quill Labs", "title": "Owner", "emails": ["tessa@quill-labs.com"],
-         "phones": [{"type": "work", "number": "(330) 555-0142"}], "website": "quill-labs.com", "address": "", "confidence": {}}
+         "phones": [{"type": "work", "number": "(330) 555-0961"}], "website": "quill-labs.com", "address": "", "confidence": {}}
 
 
 def _db(server):
@@ -65,7 +66,7 @@ def test_nothing_exported_no_dialog(new_page, server):
     page = signed_in_admin(new_page)   # each card its own photo: a photo scanned twice opens 'Same person?' and Approve waits for that answer
     c = _scan_one(page, server, "s2_06_logo-band_light.jpg", "E2E v045 plain")
     _set(server, c, fields=dict(CLEAN, first_name="Ulrich", last_name="Vance", emails=["uv@vance-co.com"], website="vance-co.com",
-                                phones=[{"type": "work", "number": "(330) 555-0177"}], company="Vance Co"))
+                                phones=[{"type": "work", "number": "(330) 555-0972"}], company="Vance Co"))
     _open(page, c); expect(page.locator("#first_name")).not_to_have_value("")
     page.locator("#bApprove").click()
     for _ in range(20):
@@ -79,7 +80,7 @@ def test_ai_dialog_cancel_focused_enter_never_approves(new_page, server):
     page = signed_in_admin(new_page)
     c = _scan_one(page, server, "s2_08_center_light.jpg", "E2E v045 ai")
     _set(server, c, fields=dict(CLEAN, first_name="Wanda", last_name="Xu", emails=["wx@xu-studio.com"], website="xu-studio.com",
-                                phones=[{"type": "work", "number": "(330) 555-0188"}], company="Xu Studio"), ai="queued")
+                                phones=[{"type": "work", "number": "(330) 555-0983"}], company="Xu Studio"), ai="queued")
     _open(page, c); expect(page.locator("#first_name")).not_to_have_value("")
     page.locator("#bApprove").click()
     dlg = page.locator("#dlg[open]"); expect(dlg).to_contain_text("AI check not finished")
