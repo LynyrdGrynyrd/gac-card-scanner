@@ -80,8 +80,12 @@ async function exportInfo() {
         toast(`${ok} pair(s) marked as different people` + (bad ? `, ${bad} not changed (open them)` : "") + ".", 4000, ok > 0); exportInfo(); };
     }
     $("#exDup").querySelectorAll("[data-xbatch]").forEach(a => a.onclick = e => { e.preventDefault(); $("#exBatch").value = a.dataset.xbatch; exportInfo(); });
-    $$(".tile").forEach(t => t.disabled = !r.count || r.duplicates.length > 0); loadExportHistory();
-    if ($("#exBig")) { $("#exBig").textContent = r.count; $("#exBigT").textContent = r.count === 1 ? "card ready" : "cards ready"; }
+    // v0.4.8 #1: the big number is the rows really going into the import file (never "1 card ready" over an empty file)
+    const xl_ = (($("input[name=exKind]:checked") || {}).value || "xlsx") === "xlsx" && typeof r.rows === "number" && r.count > 0;
+    const none_ = xl_ && r.rows === 0, admHeld = none_ && r.held > 0 && S.ME && S.ME.role === "admin";
+    $$(".tile").forEach(t => t.disabled = !r.count || r.duplicates.length > 0 || (none_ && !admHeld)); loadExportHistory();
+    if ($("#exBig")) { const n_ = xl_ ? r.rows : r.count; $("#exBig").textContent = n_;
+      $("#exBigT").textContent = none_ ? "Nothing new to import." : xl_ ? (n_ === 1 ? "row ready" : "rows ready") : (n_ === 1 ? "card ready" : "cards ready"); }
     return r;
   } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; if ($("#exBigT") && $("#exBigT").textContent === "Loading…") $("#exBigT").textContent = "Couldn't check"; }
 }
@@ -114,7 +118,7 @@ $("#exPreview").onclick = async () => {
         const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p>` +
           // v0.4.3 #4: possible MC Trade matches get their own "Needs review" list, as in the dry run and the CSV Check column
           // v0.4.4 #3: the same 'To check' list (and number) as the page, the Save dialog and the READ-ME
-          ((v.to_check_ids || []).length ? `<p><b>To check (${v.to_check_ids.length})</b></p><ul>${v.to_check_ids.map(i => `<li><a href="#review/${esc(i)}" aria-label="Open card #${esc(i)}">#${esc(i)}</a>${(v.mc_possible || {})[i] ? " " + esc((v.mc_possible || {})[i]) : ""}</li>`).join("")}</ul>` : "") +
+          ((v.to_check_ids || []).length ? `<p><b>To check (${v.to_check_ids.length})</b></p><ul>${v.to_check_ids.map(i => `<li><a href="#review/${esc(i)}" aria-label="Open card #${esc(i)}">#${esc(i)}</a>${(v.mc_possible || {})[i] ? ": " + esc((v.mc_possible || {})[i]) : ""}</li>`).join("")}</ul>` : "") +
           `<p><b>New profiles (${plural(v.rows.length, "row")})</b></p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
           `<p><b>Left out (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
@@ -129,6 +133,7 @@ $("#exPreview").onclick = async () => {
 $("#exDryrun").onclick = () => { window.open(`/api/export/dryrun?status=${encodeURIComponent($("#exStatus").value)}&batch=${encodeURIComponent($("#exBatch").value)}`, "_blank", "noopener"); };
 $("#exShowAll") && ($("#exShowAll").onchange = () => exportInfo());
 $("#exStatus").onchange = exportInfo;
+$$("input[name=exKind]").forEach(x => x.onchange = () => exportInfo());   // v0.4.8 #1: rows for Excel, cards for CSV/vCard
 $("#exBatch").onchange = () => { if ($("#exDone").dataset.batch !== $("#exBatch").value) $("#exDone").hidden = true;   // round 23 (newcomer r22): no stale success box for another batch
  if ($("#exBatch").value === "__more__") { if ($("#exShowAll")) $("#exShowAll").checked = true; exportInfo.more = true; $("#exBatch").value = exportInfo.last ?? ""; exportInfo.picked = true; exportInfo(); return; } exportInfo.picked = true; exportInfo(); };
 function filterExBatch() { const t = ($("#exBatchQ")?.value || "").toLowerCase().trim();
@@ -172,10 +177,11 @@ async function tileExport(t) {
         `<li><b>${v.rows.length}</b> new contact${(v.rows.length) === 1 ? "" : "s"}${shw(v.rows.length, esc(v.rows.map(nm).join(", ")))}</li>` +
         (v.updates.length ? `<li><b>${v.updates.length}</b> update${(v.updates.length) === 1 ? "" : "s"} to existing contacts: ${esc(v.updates.map(nm).join(", "))}</li>` : "") +
         ((v.update_diff || []).length ? `<li><b>What the updates change in MC Trade</b> (an import overwrites non-blank cells and can't be undone):<div style="overflow:auto;max-height:30vh"><table class="aidiff" data-updiff="1"><thead><tr><th>Card</th><th>Profile</th><th>Field</th><th>Now in MC Trade</th><th>After import</th></tr></thead><tbody>${v.update_diff.map(u => u.fields.map(x => `<tr${x.changes ? ' class="chg"' : ""}><td><a href="#review/${u.card}" aria-label="Open card #${u.card}">#${u.card}</a></td><td>${esc(u.profile_id)}</td><td>${esc(x.field)}</td><td>${x.old === null ? "<i>not in the contacts export: check in MC Trade</i>" : esc(x.old)}</td><td>${x.changes || x.changes === null ? "<b>" + esc(x.new) + "</b>" : esc(x.new)}</td></tr>`).join("")).join("")}</tbody></table></div></li>` : "") +
-        ((v.sample_email_matches || []).length ? `<li>${v.sample_email_matches.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")} may already be in MC Trade (test list).</li>` : "") +
-        (() => { const dz = v.decisions || {}, rv = v.left.filter(x => dz[String(x[0])] === "review"), lo = v.left.filter(x => dz[String(x[0])] !== "review");   // same classification as the export + dry run
+        ((v.sample_email_matches || []).length ? `<li>${v.sample_email_matches.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}: May already be in MC Trade (test list).</li>` : "") +
+        (() => { const dz = v.decisions || {}, rv = v.left.filter(x => dz[String(x[0])] === "review"), HW = /^(Edited after export|Already exported)/, hd = v.left.filter(x => HW.test(x[1] || "")), lo = v.left.filter(x => dz[String(x[0])] !== "review" && !HW.test(x[1] || ""));   // v0.4.8 #1: the real reason for a held card   // same classification as the export + dry run
           return (rv.length ? `<li><b>${rv.length}</b> card${(rv.length) === 1 ? "" : "s"} to review (in neither file)${shw(rv.length, rv.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : "") +
-                 (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
+                 [...new Set(hd.map(x => x[1]))].map(w => { const xs = hd.filter(x => x[1] === w); return `<li><b>${xs.length}</b> ${esc(w.replace(/, so it is not in this file\.$/, "").toLowerCase())} (not in this file)${shw(xs.length, xs.map(x => `<a href="#review/${x[0]}">#${x[0]}</a>`).join(", "))}</li>`; }).join("") +
+                 (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (combined with another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
         (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}" aria-label="Open card #${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
         `</ul></div>`; } } catch {} }
   // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
@@ -183,19 +189,26 @@ async function tileExport(t) {
   const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
   const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat(kind === "xlsx" ? "Of these, to check" : "To check", sum.to_check, true) +   /* v0.4.7 #9: not a third group */
     (kind === "xlsx" && sum.ready ? `<p class="small" id="exReady">${esc(sum.ready.text)}</p>` : "") +
-    // v0.4.7 #2: cards exported before and edited since are not in the import file (they would be added twice)
-    (kind === "xlsx" && (sum.changed_ids || []).length ? `<p class="small" id="exChanged">${plural(sum.changed_ids.length, "card")} already exported earlier; not in this file. Update ${sum.changed_ids.length === 1 ? "it" : "them"} in MC Trade by hand${sum.changed_file ? ` (earlier file: ${esc(sum.changed_file)})` : ""}: ${sum.changed_ids.slice(0, 5).map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.` +
-      (S.ME && S.ME.role === "admin" ? ` <label><input type="checkbox" id="exIncChg"> Put ${sum.changed_ids.length === 1 ? "it" : "them"} in as new anyway</label>` : "") + `</p>` : "") +
+    // v0.4.8 #1-3: cards already in an earlier import file are not in this one (MC Trade would add them twice); one plain line each
+    (kind === "xlsx" && ((sum.changed_ids || []).length || (sum.repeat_ids || []).length) ? `<p class="small" id="exChanged">` +
+      [[sum.changed_ids || [], "Edited after export, so not in this file"], [sum.repeat_ids || [], "Already exported, so not in this file"]].filter(x => x[0].length)
+        .map(([ids, t_]) => `${t_}: ${ids.slice(0, 5).map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}${ids.length > 5 ? " …" : ""}.`).join(" ") +
+      (S.ME && S.ME.role === "admin" ? ` <label><input type="checkbox" id="exIncChg"> Include anyway</label>` : "") + `</p>` : "") +
     // v0.4.7 #4: admins see what is still waiting for them
-    (sum.needs_admin ? `<p class="small" id="exNA"><a href="#queue?s=pending&amp;batch=all&amp;na=1">${sum.needs_admin} waiting for admin</a> (not in this export).</p>` : "") : "";
+    (sum.needs_admin || sum.needs_admin_all ? `<p class="small" id="exNA"><a href="#queue?s=pending&amp;batch=all&amp;na=1">${sum.needs_admin} waiting for admin</a> (not in this export)` +
+      (sum.needs_admin_all && sum.needs_admin_all > sum.needs_admin ? ` · <a href="#queue?s=pending&amp;batch=all&amp;na=1">${sum.needs_admin_all} in all batches</a>` : "") + `.</p>` : "") : "";
   const bl_ = (exportInfo.list || []).find(b => b.batch === $("#exBatch").value);
-  const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${(sum && sum.ready && sum.ready.files) || (nUpd ? 5 : 4)} files. Import only IMPORT-ME${nUpd ? " (updates separately)" : ""}.</b> NOT-FOR-IMPORT files are for reading.` : "You'll get one file."}</p></details>`,
+  const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" && sum && !sum.new && !sum.updated ? `<b>Nothing new to import: no file is made${S.ME && S.ME.role === "admin" && ((sum.changed_ids || []).length || (sum.repeat_ids || []).length) ? " unless you tick Include anyway" : ""}.</b>` : kind === "xlsx" ? `<b>You'll get ${(sum && sum.ready && sum.ready.files) || (nUpd ? 5 : 4)} files. Import only IMPORT-ME${nUpd ? " (updates separately)" : ""}.</b> NOT-FOR-IMPORT files are for reading.` : "You'll get one file."}</p></details>`,
     buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
   if (!r.value) return;
   t.setAttribute("aria-busy", "true");
   try {
     const sv = seenV ? Object.entries(seenV).map(([k, x]) => `&seen_${k}=${encodeURIComponent(x)}`).join("") : "";
     const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv + (incChg ? "&include_changed=1" : ""));
+    if ((res.headers.get("Content-Type") || "").includes("application/json")) {   // v0.4.8 #1: nothing new: no file is made, nothing is marked
+      const j = await res.json(); $("#exDone").hidden = false; $("#exDone").className = "alert";
+      $("#exDone").innerHTML = `<b>${esc(j.message || "Nothing new to import.")}</b> No file was made.` + (j.ready && j.ready.text && j.ready.text !== j.message ? `<br><span class="small">${esc(j.ready.text.replace(/^Nothing new to import\.\s*/, ""))}</span>` : "");
+      $("#exDone").dataset.batch = $("#exBatch").value; exportInfo.picked = true; exportInfo(); return; }   // v0.4.8 #12: one message (the box), no toast
     const name = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "export." + kind, n = res.headers.get("X-Card-Count");
     const outs = [await saveBlob(await res.blob(), name)];
     $("#exDone").hidden = false;
@@ -215,7 +228,9 @@ async function tileExport(t) {
     const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
     if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
     $("#exDone").dataset.batch = $("#exBatch").value;
-    toast(savedText(outs) + (kind === "xlsx" && !lost.length ? " Read the READ-ME first." : ""), lost.length ? 9000 : 5000); exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
+    // v0.4.8 #12 (newcomer: two messages per export): the download line goes in the same box; a toast only when a file was not saved
+    if (!lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<p class="small" id="exSaved">${esc(savedText(outs))}</p>`); else toast(savedText(outs), 9000);
+    exportInfo.picked = true; exportInfo(); refreshCounts();   // round 24 (newcomer r23): stay on the exported batch   // round 20 (newcomer r19)
   } catch (e) { $("#exDone").hidden = false; $("#exDone").className = "alert bad"; $("#exDone").textContent = "Export failed: " + e.message; }
   finally { t.removeAttribute("aria-busy"); }
 }

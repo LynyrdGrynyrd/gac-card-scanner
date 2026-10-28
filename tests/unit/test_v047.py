@@ -86,14 +86,17 @@ def test_v047_changed_after_export_not_in_next_file(env):
     a = _approved(ui, st, "v47chg", first_name="Edda", last_name="Twice", emails=["edda@twice47.example.com"])
     b = _approved(ui, st, "v47chg", first_name="Finn", last_name="Once", emails=["finn@once47.example.com"])
     ui.set_meta(a, exported=time.time(), reexport=1); ui.log(a, "RR", "exported", detail={"file": "GAC_IMPORT-ME_v47.xlsx"})
+    with ui.db() as c_:   # v0.4.8: "exported" means: in an earlier MC Trade import file
+        c_.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label,people) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (time.time(), "rr", "RR", "xlsx", "approved_new", 1, "GAC_IMPORT-ME_v47.xlsx", json.dumps([a]), None, "", json.dumps(["e:edda@twice47.example.com"])))
     cs, ms = ui._active(); sel = [c for c in cs if c["id"] in (a, b)]
     res = ui.build_export("xlsx", sel, ms, "approved_new", "T (TT)", "", preview=True)
     summ = res[4]; r_ = summ["ready"]
     assert a in summ["changed_ids"] and r_["changed"] == 1 and r_["clean"] + r_["to_check"] == r_["rows"]
     assert summ["decisions"][str(a)] != "new" and summ["decisions"][str(b)] == "new"
-    assert "1 already exported earlier; not in this file." in r_["text"]
+    assert "Not in the file: 1 edited after export." in r_["text"]
     blob = json.dumps({k: (v.decode("utf-8", "ignore") if isinstance(v, (bytes, bytearray)) else str(v)) for k, v in (res[3] or {}).items()})
-    assert "already exported earlier" in blob and "GAC_IMPORT-ME_v47.xlsx" in blob
+    assert ("Edited after export, so it is not in this file" in blob or "Edited after export, so it is not in this file." in blob) and "GAC_IMPORT-ME_v47.xlsx" in blob and "by hand" not in blob
     res2 = ui.build_export("xlsx", sel, ms, "approved_new", "T (TT)", "", preview=True, include_changed=True)
     assert res2[4]["decisions"][str(a)] == "new"   # the admin's "Put it in as new anyway" (a warning goes with it)
 
@@ -102,8 +105,8 @@ def test_v047_ready_line_never_impossible():
     from app import exporting as E
     assert E.ready_line({"rows": 3, "clean": 2, "to_check": 1, "outside": 0, "changed": 0}) == "Ready to import: 3 rows (2 clean, 1 to check). Test 2 rows first."
     t = E.ready_line({"rows": 1, "clean": 1, "to_check": 0, "outside": 2, "changed": 1})
-    assert t == "Ready to import: 1 row (1 clean, 0 to check). 2 more to decide, not in the file. 1 already exported earlier; not in this file."
-    assert E.ready_line({"rows": 0, "clean": 0, "to_check": 0}) == "Nothing to import."
+    assert t == "Ready to import: 1 row (1 clean, 0 to check). Not in the file: 1 edited after export, 2 to decide."
+    assert E.ready_line({"rows": 0, "clean": 0, "to_check": 0}) == "Nothing new to import."
 
 
 # ---- #4 Needs admin
@@ -160,7 +163,7 @@ def test_v047_undo_names_batch_and_stays_in_current_batch(env):
     assert not p or p.get("batch") != "v47u1"   # no batch given: an older batch's action is not offered
     rc.post(f"/api/cards/{b}", json={"fields": {"title": "Undo B"}})
     p = rc.get("/api/undo").json(); assert p.get("batch") == "v47u2" and p.get("batch_label") == "New U"
-    hd = _src("app/static/ui/header.js"); assert "↶ Undo (${bl ? bl + \", \" : \"\"}${hm})" in hd
+    hd = _src("app/static/ui/header.js"); assert "u.batch_short" in hd and "in this batch only" in hd
 
 
 # ---- #6 misreads: real names allowed, real misreads still flagged
@@ -197,7 +200,11 @@ def test_v047_badge_equals_own_batches_pending(env):
         for k in range(n_): i = mk(ui, st, first_name=f"G{b_}{k}", last_name="Badge", emails=[f"g{k}@{b_}.example.com"], by=_ini("bdg47")); ui.set_meta(i, batch=b_)
     o = mk(ui, st, first_name="Other", last_name="Badge", emails=["o@g47.example.com"], by="ZQ"); ui.set_meta(o, batch="v47gx")
     bs = rc.get("/api/batches").json(); c = rc.get("/api/counts").json()
-    assert c["mine_pending"] == sum(b.get("pending") or 0 for b in bs) == 3
+    assert c["own_pending"] == sum(b.get("pending") or 0 for b in bs) == 3
+    # v0.4.8 #7: the badge itself = the batch the queue shows (default: the newest own batch), the same number as the list
+    assert c["mine_pending"] == 1 and c["badge_batch"] == "v47g2"
+    assert rc.get("/api/counts?batch=v47g1").json()["mine_pending"] == 2 == len(rc.get("/api/cards?status=pending&batch=v47g1").json())
+    assert rc.get("/api/counts?batch=v47gx").json()["mine_pending"] == 1   # another person's batch never counts: back to the newest own
     q = _src("app/static/ui/views/queue.js"); assert "All my batches" not in q and "no All batches for reviewers" in q
     assert 'id="exHistEveryoneL" hidden' in _src("app/static/ui/index.html")
 
@@ -206,7 +213,7 @@ def test_v047_badge_equals_own_batches_pending(env):
 def test_v047_copy(env):
     from app import ui
     rv = _src("app/static/ui/views/review.js")
-    assert 'bits[0] = "<p>Approve anyway?</p>"' in rv                   # the title is not repeated in the body
+    assert 'bits[0] = bits[0].replace("<p>Exported before: ", "<p>")' in rv   # the title is not repeated in the body
     assert "idleNote" in _src("app/static/ui/login.html")
     import os
     if os.path.exists("training/build_help.py"):   # the public copy has no training/ folder

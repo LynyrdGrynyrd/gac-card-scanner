@@ -106,6 +106,15 @@ def scrub_history(hist, vis):
                     if n_: dt[k_ + "_hidden"] = n_
             if "note" in dt and isinstance(dt["note"], str): dt["note"] = re.sub(r"#\d+", lambda m_: m_.group(0) if int(m_.group(0)[1:]) in vis else "a card", dt["note"])
             if "card" in dt and isinstance(dt["card"], int) and dt["card"] not in vis: dt["card"] = None; h["text"] = h.get("text") or (h.get("action") or "").replace("_", " ")
+            # v0.4.8 #4 (skeptic N4): every other card number in the detail data too ("details merged from #35", undo "Merge card #266 into #1")
+            for k_, v_ in list(dt.items()):
+                if k_ in ("cards", "kept", "others", "note", "card") or k_.endswith("_hidden"): continue
+                if isinstance(v_, int) and not isinstance(v_, bool) and any(w in k_ for w in ("card", "target", "into", "merge", "other", "src", "dst")) and v_ not in vis: dt[k_] = None
+                elif isinstance(v_, list) and v_ and all(isinstance(i, int) and not isinstance(i, bool) for i in v_) and any(w in k_ for w in ("card", "ids", "other", "merge")):
+                    keep = [i for i in v_ if i in vis]; dt[k_] = keep
+                    if len(keep) < len(v_): dt[k_ + "_hidden"] = len(v_) - len(keep)
+                elif isinstance(v_, str) and h.get("action") not in _TEXT_HAS_VALUES:
+                    dt[k_] = re.sub(r"#(\d+)", lambda m_: m_.group(0) if int(m_.group(1)) in vis else "another card", v_)
         if h.get("action") not in _TEXT_HAS_VALUES: h["text"] = _scrub_ids_text(h.get("text"), vis)   # v0.4.7 #1: the ready-made text too (it listed 22 ids)
     return hist
 
@@ -158,6 +167,10 @@ def _init_ui(c):
       filter TEXT, count INTEGER, filename TEXT, card_ids TEXT, stored TEXT)""")
     if "batch_label" not in {r[1] for r in c.execute("PRAGMA table_info(exports)")}:
         try: c.execute("ALTER TABLE exports ADD COLUMN batch_label TEXT")
+        except Exception as e:
+            if "duplicate column" not in str(e): raise
+    if "people" not in {r[1] for r in c.execute("PRAGMA table_info(exports)")}:   # v0.4.8 #2: who is in each MC Trade import file
+        try: c.execute("ALTER TABLE exports ADD COLUMN people TEXT")
         except Exception as e:
             if "duplicate column" not in str(e): raise
     if "refused" not in {r[1] for r in c.execute("PRAGMA table_info(actions)")}:   # v0.4.4 #10: an action Undo can no longer take back
@@ -223,6 +236,8 @@ def log(cid, reviewer, action, frm=None, to=None, detail=None):
     with db() as c:
         c.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
                   (cid, time.time(), reviewer, action, frm, to, json.dumps(detail) if detail is not None else None))
+
+EXPORTED_EDIT_NOTE = "Saved. This card was exported before, so this edit won't be exported again unless an admin includes it."
 
 def history(cid):
     out = [dict(r) | {"detail": json.loads(r["detail"]) if r["detail"] else None}
@@ -398,7 +413,7 @@ def name_garbled(v, allow_digits=False):
         if m: return m.group(0)
     return None
 # v0.4.7 #6 (skeptic F2): real names that have a digit in a word
-DIGIT_NAMES_OK = {"4imprint", "4thought", "e2open", "3com", "4kids", "3m", "7-eleven", "1-800-flowers", "g4s", "i3", "web3labs", "b2b", "b2c", "h2o", "q1", "q2", "q3", "q4"}
+from .plausibility import DIGIT_NAMES_OK, digit_brand_ok   # v0.4.8 #9: one list
 _DIG_IN_WORD = re.compile(r"(?<=[a-z])(\d)(?=[a-z])|\b[A-Z](\d)(?=[a-z]{2,})|\b(\d)(?!(?:st|nd|rd|th)\b)(?=[a-z]{3,})")
 def digit_for_letter(v):
     """v0.4.6 #5 (reviewer/skeptic): 'Rubb3r', 'Partn3rs', 'L3gal', 'Own3r', '4nalytics': a digit inside a word is a misread.
@@ -408,7 +423,7 @@ def digit_for_letter(v):
         a_, b_ = m_.start(), m_.end()
         while a_ > 0 and (v[a_ - 1].isalnum() or v[a_ - 1] == "-"): a_ -= 1
         while b_ < len(v) and (v[b_].isalnum() or v[b_] == "-"): b_ += 1
-        if v[a_:b_].lower() in DIGIT_NAMES_OK: continue
+        if v[a_:b_].lower() in DIGIT_NAMES_OK or digit_brand_ok(v[a_:b_]): continue
         return next(g for g in m_.groups() if g)
     return None
 # v0.4.7 #6: OCR look-alike words with one clear correction ('Rnbber' -> 'Rubber') block, like a digit misread. Words that are
@@ -431,9 +446,12 @@ def garbled_errors(f):
         if k in ("company", "department"): v_ = re.sub(r"!+\s*$", "", str(v_ or ""))   # 'Yahoo!' is a real name
         if k in ("company", "department"): v_ = re.sub(r"(?<=[A-Za-z])\*(?=[A-Za-z])", "", v_)   # round 23 (mctrade-admin r22 M1): 'E*Trade' is a real name
         if k in ("title", "company", "department"): v_ = re.sub(r"(?<=\S) \| (?=\S)", " ", str(v_ or ""))   # v0.4.7 #6: 'Manager | Sales' (a separator), not 'Sa|es'
+        if k in ("title", "company", "department"): v_ = re.sub(r"(?<=[a-z])\|(?=[A-Z][a-z])", " ", str(v_ or ""))   # v0.4.8 #9: 'Owner|Founder' is a separator too
         bad = name_garbled(v_, allow_digits=(k == "title"))
         if not bad and k in ("first_name", "last_name"):   # round 23 (part-timer r22 HIGH): 'Morg4n': a digit in a name is always a misread
             m_ = re.search(r"\d", str(v_ or "")); bad = m_.group(0) if m_ else None
+        if not bad and k in ("first_name", "last_name"):   # v0.4.8 #9: 'Rnbert' (o read as n): no name starts with Rn/Nr/Lr/Rl
+            m_ = re.match(r"\s*((?:Rn|Nr|Lr|Rl|Rm)[a-z])", str(v_ or "")); bad = m_.group(1)[:2] if m_ else None
         if not bad and k in ("title", "company", "department"):   # v0.4.6 #5: a digit standing in for a letter ('Rubb3r', 'L3gal', 'Own3r')
             bad = digit_for_letter(v_)
         if not bad and k == "title":   # round 22 (newcomer r21): 'Acc0unt Manager' (a 0/1 inside a word); '1st', 'Level 3' are fine
@@ -939,7 +957,7 @@ def attention(c, d, cards=None, names=None):
         if rj: r.append({"code": "ai_overridden", "field": None, "text": "AI suggested a different " + ", ".join(rj) + " (you kept the current value): check against the photo"})
     if c["status"] == "approved" and m.get("override"):
         r.append({"code": "override", "text": "Approved anyway: " + (_ov(m).get("reason") or "")})
-    if m.get("reexport"): r.append({"code": "reexport", "text": "Changed after export: export it again"})
+    if m.get("reexport"): r.append({"code": "reexport", "text": "Edited after export: not exported again unless an admin includes it"})
     # round 15 (reviewer r14): each reason once (duplicate reasons used to repeat themselves)
     seen_t, uniq = set(), []
     for x in r:
@@ -1036,16 +1054,36 @@ def enrich(c, cards, metas, full=False, names=None, vis=None):
             om_ = metas.get(q_["card_id"]) or {}
             if q_["card_id"] not in _have and om_.get("exported") and om_.get("batch") != _bx and not om_.get("archived"):
                 xb.append({"card_id": q_["card_id"], "why": list(q_.get("why") or []), "exported": True}); _have.add(q_["card_id"])
+        # v0.4.8 #5 (coordinator: "Exported before (32)" on every card): only when it is really this person: same email or
+        # photo, or the exact same name with the same phone or a matching company. A phone or a similar name alone is not enough.
+        _byid = {o["id"]: o for o in cards}
+        def _nmk(ff): return re.sub(r"[^a-z]", "", f"{ff.get('first_name') or ''}{ff.get('last_name') or ''}".lower())
+        def _cok(a_, b_):
+            a_, b_ = (re.sub(r"[^a-z0-9]", "", (x_ or "").lower()) for x_ in (a_, b_))
+            return bool(a_ and b_ and (a_ == b_ or (min(len(a_), len(b_)) >= 4 and (a_ in b_ or b_ in a_))))
+        def _strong(x):
+            w_ = set(x.get("why") or []); o_ = _byid.get(x["card_id"]); of_ = (o_ or {}).get("fields") or {}
+            if {"same email", "same photo"} & w_: return True
+            if not o_ or not _nmk(f) or _nmk(f) != _nmk(of_): return False
+            ph_ = {re.sub(r"\D", "", p_.get("number") or "")[-10:] for p_ in f.get("phones") or [] if p_.get("number")}
+            oph_ = {re.sub(r"\D", "", p_.get("number") or "")[-10:] for p_ in of_.get("phones") or [] if p_.get("number")}
+            return bool(ph_ & oph_ - {""}) or _cok(f.get("company"), of_.get("company"))
+        xb = [x for x in xb if _strong(x)]
         for x in xb: x["name"] = _nm.get(x["card_id"], "")
         with db() as conn:
             nexp = {x["card_id"]: conn.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='exported'", (x["card_id"],)).fetchone()[0] for x in xb}
+            for x in xb:   # name WHICH export: its date and file
+                r_ = conn.execute("SELECT ts, detail FROM card_history WHERE card_id=? AND action='exported' ORDER BY id DESC LIMIT 1", (x["card_id"],)).fetchone()
+                try: fl_ = (json.loads(r_[1] or "{}") or {}).get("file") if r_ else None
+                except Exception: fl_ = None
+                x["last_ts"] = r_[0] if r_ else (metas.get(x["card_id"]) or {}).get("exported"); x["last_file"] = fl_
         _kx = _kept(m)   # round 21: after 'Different person' (or for kept-apart cards) the 'already exported' warning is silent
         # v0.4.3 #3 (reviewer/data-manager): kept after 'Different' too, flagged, so Approve still says "exported before" once;
         # the page box itself stays quiet for those (decided)
         # v0.4.6 #6: a 'Different' answer is remembered for the PAIR (either card's list), so the same pair never warns again
         out["exported_elsewhere"] = [] if c["status"] != "pending" else [x | {"times": nexp.get(x["card_id"], 1), "kept_apart": x["card_id"] in _kx or c["id"] in _kept(metas.get(x["card_id"]) or {}) or m.get("dup_resolution") == "keep_both"} for x in xb]
         if vis is not None:   # v0.4.6 #1: other people's cards are a count (no id, no name)
-            out["exported_elsewhere"] = [x if x["card_id"] in vis else {"hidden": True, "times": x["times"], "kept_apart": x["kept_apart"], "why": x.get("why") or []} for x in out["exported_elsewhere"]]
+            out["exported_elsewhere"] = [x if x["card_id"] in vis else {"hidden": True, "times": x["times"], "kept_apart": x["kept_apart"], "why": x.get("why") or [], "last_ts": x.get("last_ts")} for x in out["exported_elsewhere"]]
         out["dup_decided"] = m.get("dup_resolution") == "keep_both"
         out["kept_n"] = len(_kept(m))   # v0.4.4 #3 (reviewer: page 34 vs History 12): the page counts what History logged
         try:   # round 22: hard blocks + which of them 'This is correct' may confirm, so the card shows them (and the button) on open
@@ -1054,7 +1092,7 @@ def enrich(c, cards, metas, full=False, names=None, vis=None):
             _cm = f.get("confirmed_meta") if isinstance(f.get("confirmed_meta"), dict) else {}   # round 23: confirmed values are marked on Review
             out["confirmed"] = {k: {"by": _cm[k].get("by"), "reason": _cm[k].get("reason")} for k in valid_confirmations(f)}
         except Exception: pass
-        out |= {"version": card_version(c), "card": c | {"fields": f | {"confidence": calibrated_conf(f)}}, "dupes": d, "history": scrub_history(history(c["id"]), vis), "errors": validate(f), "low": _low_after_ai(f, src, m), "sources": src}
+        out |= {"version": card_version(c), "card": c | {"fields": f | {"confidence": calibrated_conf(f)}}, "dupes": d, "history": scrub_history(history(c["id"]), panel_vis(c, vis)), "errors": validate(f), "low": _low_after_ai(f, src, m), "sources": src}
         for x in d["queue"]:
             o = store.get(x["card_id"])
             if o: x |= {"name": f"{o['fields'].get('first_name','')} {o['fields'].get('last_name','')}".strip(),
@@ -1244,7 +1282,11 @@ async def create_job(request: Request, image: UploadFile = File(...), engine: st
         if oid is not None and oid != u_.get("id"):
             return JSONResponse({"error": "This batch belongs to someone else. Start your own batch on Scan.", "need": "not_your_batch"}, 403)
     if not batch and clean_batch_label(batch_label or ""):   # v0.4.7 #7 (mctrade-admin N6): a name with no batch id makes (or reuses) a batch
-        batch = "B" + time.strftime("%Y%m%d") + "-" + hashlib.sha1(f"{u_.get('id')}|{clean_batch_label(batch_label).lower()}".encode()).hexdigest()[:8]
+        # v0.4.8 #12 (skeptic N7): your OWN batch with this name is reused (no "(2)" twin); otherwise a new one
+        lb_ = clean_batch_label(batch_label).lower()
+        own_ = db().execute("""SELECT m.batch FROM card_meta m JOIN batch_owners o ON o.batch=m.batch WHERE o.user_id=? AND lower(m.batch_label)=?
+                               ORDER BY m.card_id DESC LIMIT 1""", (u_.get("id"), lb_)).fetchone()
+        batch = own_[0] if own_ else "B" + time.strftime("%Y%m%d") + "-" + hashlib.sha1(f"{u_.get('id')}|{clean_batch_label(batch_label).lower()}".encode()).hexdigest()[:8]
     batch = batch_for(batch, batch_label, _who(request))
     claim_batch(batch, u_)
     if _cancelled_since(_who(request), batch, t0):   # round 21: landed just after Cancel -> not scanned
@@ -1940,7 +1982,7 @@ def needs_admin(cid: CardId, request: Request, body: dict = Body(default={})):
         cur = _na(meta(cid))
         if body.get("clear") is True:
             if cur and not is_admin(u) and cur.get("user") != u.get("username"): return JSONResponse({"error": "Only an admin can take this off."}, 403)
-            if cur: set_meta(cid, needs_admin=None); log(cid, u["initials"], "needs_admin_cleared"); auth.alog(u.get("username"), f"cleared 'Needs admin' on card #{cid}")
+            if cur: set_meta(cid, needs_admin=None); log(cid, u["initials"], "needs_admin_cleared")   # v0.4.8 #6: one audit row (the card history)
             return {"ok": True, "needs_admin": None}
         if c["status"] != "pending": return JSONResponse({"error": "Only a pending card can be sent to an admin."}, 409)
         hard = hard_errors(c["fields"])
@@ -1950,8 +1992,7 @@ def needs_admin(cid: CardId, request: Request, body: dict = Body(default={})):
         if cur and why in [x.strip() for x in str(cur.get("reason") or "").split(" · ")]: return {"ok": True, "needs_admin": cur, "already": True}
         if cur and cur.get("reason"): why = (cur["reason"] + " · " + why)[:1000]
         v = {"reason": why, "by": u["initials"], "user": u.get("username"), "ts": time.time(), "fields": sorted(set(hard) | set((cur or {}).get("fields") or []))}
-        set_meta(cid, needs_admin=json.dumps(v)); log(cid, u["initials"], "needs_admin", detail={"reason": why})
-        auth.alog(u.get("username"), f"card #{cid} sent to an admin: {why[:120]}")
+        set_meta(cid, needs_admin=json.dumps(v)); log(cid, u["initials"], "needs_admin", detail={"reason": why})   # v0.4.8 #6: one audit row
         return {"ok": True, "needs_admin": v}
 
 def na_reason(hard, f=None):
@@ -1967,11 +2008,24 @@ def na_settle(cid, who="system"):
     """v0.4.7 #4 (mctrade-admin N3, skeptic F3): 'Needs admin' comes off by itself once nothing blocks the card any more
     (an admin confirmed it, or someone fixed it). Returns True when it was cleared."""
     m_ = meta(cid)
-    if not m_.get("needs_admin") or not (_na(m_) or {}).get("fields"): return False   # a flag set without a block stays until someone takes it off
+    na_ = _na(m_) or {}
+    if not m_.get("needs_admin"): return False
+    # a flag set without a block stays until someone takes it off; v0.4.8 #6 (#906): an OLD flag (v0.4.6, no "fields" kept) goes once nothing blocks
+    if not na_.get("fields") and "fields" in na_: return False
     c_ = store.get(cid)
     if not c_ or hard_errors(c_["fields"]): return False
     set_meta(cid, needs_admin=None); log(cid, who, "needs_admin_cleared", detail={"why": "nothing left to confirm"})
     return True
+
+def na_sweep():
+    """v0.4.8 #6 (mctrade-admin: #906 still counted in "4 waiting for admin"): at start, flags with nothing left to confirm come off."""
+    n = 0
+    try:
+        for (cid,) in db().execute("SELECT m.card_id FROM card_meta m JOIN cards c ON c.id=m.card_id WHERE m.needs_admin IS NOT NULL AND c.status='pending'").fetchall():
+            with WRITE_LOCK, store.tx():
+                if na_settle(cid): n += 1
+    except Exception as e: print("needs-admin sweep skipped:", e)
+    return n
 
 def confirmed_lines(f):
     """Round 23: '#621 Email confirmed by QA: x (reason)' lines for the READ-ME / extra columns: only confirmations that
@@ -2065,7 +2119,18 @@ def counts(request: Request, batch: str = ""):
             if c_ and not (meta(c_["id"]) or {}).get("archived"): out["batch"][c_["status"]] = out["batch"].get(c_["status"], 0) + 1; out["batch"]["all"] += 1
     if sc_ and nob:   # v0.4.7 #8: the badge = the pending cards in the batch list (your batches + your cards with no batch)
         out["mine_pending"] += sum(1 for c_ in (store.get(i) for i in nob) if c_ and c_["status"] == "pending" and not (meta(c_["id"]) or {}).get("archived"))
-    if sc_: out.pop("everyone_pending")   # v0.4.6 #1: a reviewer gets no totals for other people's batches
+    if sc_:   # v0.4.8 #7: a reviewer's badge = the pending cards of the ONE batch the queue shows (that batch, else the newest own one)
+        out["own_pending"] = out["mine_pending"]
+        bb_ = batch if batch and batch != "\x00" and (batch in mine or batch == "__none__") else None
+        if bb_ is None and mine:
+            r_ = db().execute(f"SELECT m.batch FROM card_meta m JOIN cards c ON c.id=m.card_id WHERE m.batch IN ({','.join('?' * len(mine))}) AND COALESCE(m.archived,0)=0 GROUP BY m.batch ORDER BY MAX(c.created) DESC LIMIT 1", tuple(mine)).fetchone()
+            bb_ = r_[0] if r_ else None
+        if bb_ == "__none__": out["mine_pending"] = sum(1 for c_ in (store.get(i) for i in (nob or [])) if c_ and c_["status"] == "pending" and not (meta(c_["id"]) or {}).get("archived"))
+        elif bb_: out["mine_pending"] = next((r["n"] for r in rows if r["b"] == bb_ and r["s"] == "pending"), 0)
+        else: out["mine_pending"] = 0
+        out["badge_batch"] = bb_
+        out["badge_label"] = (db().execute("SELECT batch_label FROM card_meta WHERE batch=? AND batch_label IS NOT NULL LIMIT 1", (bb_,)).fetchone() or [None])[0] if bb_ and bb_ != "__none__" else None
+        out.pop("everyone_pending")   # v0.4.6 #1: a reviewer gets no totals for other people's batches
     if is_admin(u_): out["needs_admin"] = db().execute("SELECT COUNT(*) FROM card_meta m JOIN cards c ON c.id=m.card_id WHERE m.needs_admin IS NOT NULL AND c.status='pending' AND COALESCE(m.archived,0)=0").fetchone()[0]
     return out
 
@@ -2412,6 +2477,8 @@ def _update(cid, request, body, internal=False):
     note_changed = "note" in body and (note or "") != (c.get("note") or "")
     if (changes or note_changed) and st in (None, "approved") and c["status"] == "approved" and meta(cid).get("exported"):   # skeptic R7-5, R8-3 (note too)
         set_meta(cid, reexport=time.time()); log(cid, rv, "reexport_needed", detail={"why": "edited after export"})
+        exp_notice = True   # v0.4.8 #3: say it at save time
+    else: exp_notice = False
     moved = _recheck_approved(cid, f, rv, "edited after approval") if changes and not st and c["status"] == "approved" else False
     if not st and (note or "") != (c.get("note") or ""):
         with db() as conn: conn.execute("UPDATE cards SET note=? WHERE id=?", (note, cid))
@@ -2424,6 +2491,7 @@ def _update(cid, request, body, internal=False):
     if st in ("approved", "rejected") and meta(cid).get("needs_admin"): set_meta(cid, needs_admin=None)   # v0.4.6 #3: decided = handled
     out = card(cid, None if internal else request.state.user)   # (audit 2026-10 P2: a never-firing "stale after save" check was removed; the check under WRITE_LOCK above is the real one)
     if not st and changes: out["save_problems"] = validate(f) | hard_errors(f)   # saved, but tell the person what still blocks approval
+    if exp_notice and not moved: out["notice"] = EXPORTED_EDIT_NOTE
     if moved: out["notice"] = "This approved card now has problems, so it was moved back to pending: " + "; ".join(validate(f).values())
     return out
 
@@ -2910,13 +2978,20 @@ def _current_batch(user):
                      list(mine)).fetchone()
     return r[0] if r else None
 
+def _admin_undo_batch(user):
+    """v0.4.8 #11 (mctrade-admin F5): an admin in the All view undoes only in the batch of their newest open action."""
+    r = db().execute("SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL AND ts>=? ORDER BY id DESC LIMIT 1",
+                     (user["id"], time.time() - UNDO_WINDOW)).fetchone()
+    bs = _undo_batches(r) if r else set()
+    return bs if len(bs) == 1 else {None}
+
 def _undo_pick(user, batch, aid=None, peek=False):
     """v0.4.5 #6 (skeptic L1: Undo reached back hours into other batches): the newest open action of this person from the
     last UNDO_WINDOW, and, when a batch is given, only one whose cards are all in that batch. Exported-since ones are closed.
     v0.4.6 #2: the button (peek) and the click use the SAME rule (window + batch), also when the click names an action id."""
     # v0.4.7 #5 (skeptic F4): no batch given (the "All" view, or a hand-made request naming an id) is NOT "any batch":
     # a reviewer gets their current batch (newest own batch) and their no-batch cards only
-    allow = {batch} if batch else ({_current_batch(user), None} if scoped(user) else None)
+    allow = {batch} if batch else ({_current_batch(user), None} if scoped(user) else _admin_undo_batch(user))
     q = ("SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL AND ts>=?" + (" AND id=?" if aid is not None else "")
          + " ORDER BY id DESC LIMIT 50")
     args = (user["id"], time.time() - UNDO_WINDOW) + ((aid,) if aid is not None else ())
@@ -2937,6 +3012,9 @@ def undo_peek(request: Request, batch: str = ""):
     bs = _undo_batches(r); b = next(iter(bs)) if len(bs) == 1 else None
     out = {"id": r["id"], "ts": r["ts"], "label": r["label"], "batch": b, "age_min": max(0, int((time.time() - r["ts"]) // 60))}
     out["batch_label"] = (metas_one(b) if b else None) or b or ""   # v0.4.7 #5: the batch name for everyone (only your own actions are listed)
+    out["short"] = re.sub(r"\bcards? #", "#", r["label"] or "")[:40]   # v0.4.8 #11: 'Approve #935' on the button
+    out["batch_short"] = (out["batch_label"] or "").split(" · ")[0].strip()[:24]
+    out["window_min"] = UNDO_WINDOW // 60
     return out
 
 def metas_one(batch):
@@ -2969,7 +3047,7 @@ def undo(request: Request, body: dict = Body(default={})):
         a = _undo_pick(user, batch_, aid)   # v0.4.6 #2: a named action is checked for the batch and the 2-hour window too
         if a is not None and _undo_exported(a):
             with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), a["id"]))
-            return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in _undo_exported(a))} was exported after this. Change it by hand; it is then marked for re-export.", "need": "exported", "cards": _undo_exported(a)}, 409)
+            return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in _undo_exported(a))} was exported after this. Edit the card instead.", "need": "exported", "cards": _undo_exported(a)}, 409)
     else:
         a = _undo_pick(user, batch_)
     if not a: return JSONResponse({"error": "Nothing to undo in this batch from the last 2 hours."}, 404)
@@ -2984,11 +3062,11 @@ def undo(request: Request, body: dict = Body(default={})):
     xp = _undo_exported(a)
     if xp:
         with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), a["id"]))   # v0.4.4 #10: never offered again
-        return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Change it by hand; it is then marked for re-export.",
+        return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Edit the card instead.",
                              "need": "exported", "cards": xp}, 409)
     with WRITE_LOCK:
         if any("after" not in s_ for s_ in snap):
-            return JSONResponse({"error": "This action can't be undone safely. Change the card by hand.", "need": "legacy_action"}, 409)
+            return JSONResponse({"error": "This can't be undone safely. Edit the card instead.", "need": "legacy_action"}, 409)
         with db() as c:
             for s_ in snap:
                 b_c, b_m = s_["card"], s_["meta"] or {}; a_c, a_m = s_["after"]["card"] or {}, s_["after"]["meta"] or {}

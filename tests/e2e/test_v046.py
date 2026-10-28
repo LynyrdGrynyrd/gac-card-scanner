@@ -48,8 +48,10 @@ def test_reviewer_blocked_card_says_admin_and_needs_admin_flag(new_page, server)
                                 company="Pike Co", phones=[{"type": "work", "number": "(330) 555-0993"}]))
     _open(rv, c)
     expect(rv.locator("#rErr")).to_contain_text("Morg4n"); _shot(rv, "03_misread_blocked")
-    rv.locator("#bApprove").click(); expect(rv.locator("#toast")).to_contain_text('An admin needs to confirm this. "Morg4n" looks misread. Fix it or click Needs admin.'); _shot(rv, "04_approve_blocked_toast")
+    rv.locator("#bApprove").click(); expect(rv.locator("#toast")).to_contain_text('"Morg4n" looks misread. Fix it, or click Needs admin.'); _shot(rv, "04_approve_blocked_toast")
     assert card_json(rv, c)["status"] == "pending"
-    rv.locator("#bNeedsAdmin").click(); expect(rv.locator("#toast")).to_contain_text("Flagged for an admin.")
-    expect(rv.locator("#rErr")).to_contain_text("Flagged for an admin."); _shot(rv, "05_flagged")
+    rv.locator("#bNeedsAdmin").click(); expect(rv.locator("#toast")).to_contain_text("Sent to an admin.")
+    expect(rv.locator("#rErr")).to_contain_text("Waiting for an admin."); _shot(rv, "05_flagged")
+    rv.wait_for_timeout(2700); rv.locator("#bApprove").click()   # v0.4.8 #6: Approve after the flag never says "click Needs admin" again
+    expect(rv.locator("#toast")).to_contain_text("Waiting for an admin."); expect(rv.locator("#toast")).not_to_contain_text("click Needs admin")
     adm.goto("/ui#queue"); expect(adm.locator("#naBadge")).to_contain_text("1 needs admin"); _shot(adm, "06_admin_badge")

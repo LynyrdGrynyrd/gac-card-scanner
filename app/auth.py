@@ -296,7 +296,7 @@ def policy(): return {"image_retention_days": get_setting("image_retention_days"
 @router.get("/api/auth/state")
 def state(request: Request):
     u = current_user(request)
-    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "setup_allowed": trusted_host(request) and (_client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1")}
+    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "idle_minutes": idle_minutes(), "setup_allowed": trusted_host(request) and (_client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1")}
 
 @router.post("/api/auth/setup")
 def setup(request: Request, body: dict = Body(...)):

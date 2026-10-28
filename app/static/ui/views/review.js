@@ -49,8 +49,8 @@ async function openCard(id, opts = {}) {
     el.hidden = !xe.length || c.status !== "pending";
     // v0.4.6 #6: the same count as the Approve dialog ("Exported before (N)"); other people's cards are a count, never a link
     const xv = xe.filter(x => !x.hidden);
-    if (xe.length) el.innerHTML = `<b>Exported before (${xe.length}).</b> Same person? Merge, or approve only if it's an update.` +
-      (xv.length ? ` <details class="more small"><summary>Show</summary><ul>${xv.map(x => `<li><a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a> (${esc(x.why.join(", "))})</li>`).join("")}</ul></details>` : ""); }
+    if (xe.length) el.innerHTML = `<b>${esc(xeLine(xe))}</b> Same person? Merge, or approve only if it's an update.` +
+      (xv.length ? ` <details class="more small"><summary>More</summary><ul>${xv.map(x => `<li><a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a> ${esc(x.name || "")} (${esc(x.why.join(", "))})${x.last_ts ? ", exported " + esc(when(x.last_ts)) : ""}${x.last_file ? ` <span class="sub">${esc(x.last_file)}</span>` : ""}</li>`).join("")}</ul></details>` : ""); }
   $("#rConf").innerHTML = "Scan " + confBar(d.conf ?? f.overall_confidence, d.status === "pending" && Object.keys(d.hard || {}).length > 0);   // newcomer r9 N5: same number as the queue
   ["first_name", "last_name", "title", "company", "website", "address"].forEach(x => $("#" + x).value = f[x] || "");
   $("#emails").value = (f.emails || []).join(", "); $("#social").value = (f.social || []).join(" ");
@@ -140,6 +140,12 @@ const normV = (i, v) => { let x = String(v ?? "").replace(/\s*&\s*/g, " & ");
 // recomputeDirty() in that window (leaving the page = beforeunload, the AI box, a click) compared them again, so the badge
 // and the leave prompt came back and a stale draft was written. Now the saved values become the baseline the moment the
 // server says "saved".
+// v0.4.8 #5: name WHICH earlier export (person + date), never a bare count
+function xeLine(xe) {
+  const x = [...xe].sort((a, b) => (b.last_ts || 0) - (a.last_ts || 0))[0], w = x.last_ts ? when(x.last_ts) : "";
+  const who_ = x.hidden ? "this person, in another batch" : `#${x.card_id}${x.name ? " " + x.name : ""}`;
+  return `Exported before: ${who_}${w ? ", " + w : ""}` + (xe.length > 1 ? ` (and ${xe.length - 1} more)` : "") + ".";
+}
 function formSnap() { const o = {}; $$("#rForm input[id], #rForm textarea[id]").forEach(el => { if (el.type !== "file") o[el.id] = el.value; }); return o; }
 function markSaved(sid, sent) {
   // round 14 (LOST SAVE, reviewer r12 #325): the baseline is what was SENT, not what the form holds now. Typing that
@@ -187,11 +193,11 @@ $("#rForm").addEventListener("input", e => {
   { const f_ = e.target.closest && e.target.closest(".f"); if (f_ && f_.querySelector(".fhint")) { f_.querySelectorAll(".fhint").forEach(x => x.remove()); f_.classList.remove("hinted");
       const lab = (f_.querySelector("label")?.getAttribute("for")) || ""; $$("#rRisk li[data-f]").forEach(li => { if (li.dataset.f === lab) li.remove(); });
       const n_ = $$("#rRisk li").length, b_ = $("#rRisk b"); if (!n_) $("#rRisk").hidden = true; else if (b_) b_.textContent = `To check (${n_}):`; } }
-  recomputeDirty(); clearTimeout(keepDraft.t); { const id_ = S.cur && S.cur.id; keepDraft.t = setTimeout(() => { if (S.cur && S.cur.id === id_) keepDraft(); }, 400); }   // v0.4.7 #10: a draft goes to the card it was typed on
+  S.lastInput = Date.now(); recomputeDirty(); clearTimeout(keepDraft.t); { const id_ = S.cur && S.cur.id; keepDraft.t = setTimeout(() => { if (S.cur && S.cur.id === id_) keepDraft(); }, 400); }   // v0.4.7 #10: a draft goes to the card it was typed on
   clearTimeout(vT);
   if (S.cur) { const b = $("#rAI .flag.bad"); if (b && !S.dirty) b.remove(); }
   // v0.4.1 #8 (newcomer #7): typing re-checks the form, so "Morg4n" in Last name warns at once (it only re-checked while a problem showed)
-  vT = setTimeout(async () => { try { const r = await post("/api/validate", {fields: collect(), card_id: S.cur && S.cur.id}); showErrors({...r.errors, ...r.hard}, !$("#rErr").hidden); if (!recomputeDirty()) confirmBtn(r.overridable, S.cur && S.cur.id, r.hard); } catch {} }, 300); });
+  vT = setTimeout(async () => { try { const r = await post("/api/validate", {fields: collect(), card_id: S.cur && S.cur.id}); showErrors({...r.errors, ...r.hard}, !$("#rErr").hidden, r.admin_can || r.overridable); if (!recomputeDirty()) confirmBtn(r.overridable, S.cur && S.cur.id, r.hard); } catch {} }, 300); });
 function renderAI(d) {
   const s = d.ai_status, x = d.ai_detail || {}, box = $("#rAI"); clearTimeout(rPoll);
   const canAsk = d.status === "pending" && !d.image_deleted && s !== "checking";   // reviewer r7: also while waiting in line (moves it up)
@@ -281,7 +287,7 @@ function histText(h) {
   if (h.action === "exported") return "exported to " + (h.detail && h.detail.file || "file");
   return h.action;
 }
-function showErrors(errs, loud) {
+function showErrors(errs, loud, ovNow) {
   ["name", "emails", "phones"].forEach(k => { $("#e_" + k).textContent = (errs && errs[k]) || ""; });
   $$("#fields .f").forEach(b => b.classList.remove("err"));
   if (errs) { if (errs.name) $("#first_name").closest(".f").classList.add("err"); if (errs.emails) $("#emails").closest(".f").classList.add("err"); if (errs.phones) $("#phones").closest(".f").classList.add("err"); }
@@ -291,12 +297,12 @@ function showErrors(errs, loud) {
   ["name", "emails", "phones"].forEach(k => { $("#e_" + k).textContent = ""; });
   const n = errs ? Object.keys(errs).length : 0;
   // v0.4.5 #7: for a reviewer, each confirmable problem says what to do, on its own line
-  const adm_ = S.ME && S.ME.role === "admin", ov_ = (S.cur && S.cur.overridable) || [];
+  const adm_ = S.ME && S.ME.role === "admin", ov_ = [...new Set([...((S.cur && S.cur.overridable) || []), ...(ovNow || [])])];   // v0.4.8 #6: typed (unsaved) misreads get the button too
   // v0.4.6 #8: the "ask an admin" line shows ONCE under the list; #3: a reviewer can flag the card for an admin in one click
   const askN = !adm_ && Object.keys(errs || {}).some(k => k !== "phones" && ov_.includes(k)), na_ = S.cur && S.cur.needs_admin;
   // v0.4.7 #4: when an admin could confirm it, a reviewer reads that FIRST
   $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? (askN ? `<p class="askadm1"><b>An admin needs to confirm this.</b> Or fix it:</p><ul>` : `<b>Fix before approving:</b><ul>`) + `${Object.entries(errs).map(([k, m]) => `<li data-err="${esc(k)}">${esc(m)}</li>`).join("")}</ul>` +
-    (askN ? `<p class="small askadm">${na_ ? `<span id="naDone">Flagged for an admin.</span>` : `<button type="button" class="btn small" id="bNeedsAdmin">Needs admin</button>`}</p>` : "") : "";
+    (askN ? `<p class="small askadm">${na_ ? `<span id="naDone">Waiting for an admin.</span>` : `<button type="button" class="btn small" id="bNeedsAdmin">Needs admin</button>`}</p>` : "") : "";
   if ($("#bNeedsAdmin")) $("#bNeedsAdmin").onclick = () => flagNeedsAdmin(S.cur.id);
 }
 // round 23 (datamanager/coordinator/newcomer r22): 'This is correct' confirms ONE field at a time, shows the value and needs a
@@ -313,7 +319,10 @@ function confirmBtn(ov, sid, hardNow) {
   $$("#rErr [data-confirm]").forEach(b => b.onclick = () => doConfirm(b.dataset.confirm, sid));
 }
 async function flagNeedsAdmin(id) {   // v0.4.6 #3: one click; the reason is the red list (an admin sees it as a badge and a filter)
-  try { await post(`/api/cards/${id}/needs-admin`, {}); toast("Flagged for an admin.", 3500); if (S.cur && S.cur.id === id) await openCard(id, {keep: true}); refreshCounts(); }
+  try { if (recomputeDirty() && S.cur && S.cur.id === id) {   // v0.4.8 #6: typed values are saved first, so the admin sees what you see
+          const s_ = await post("/api/cards/" + id, {fields: collect(), note: $("#note").value, reviewer: who(), card_id: id, version: S.cur.version});
+          if (s_ && s_.version) S.cur.version = s_.version; markSaved(id, formSnap()); }
+    await post(`/api/cards/${id}/needs-admin`, {}); toast("Sent to an admin. An admin will see it.", 3500); if (S.cur && S.cur.id === id) await openCard(id, {keep: true}); refreshCounts(); }
   catch (e) { toast(e.message, 5000); }
 }
 async function doConfirm(k, sid) {
@@ -469,20 +478,27 @@ async function act(btn, extra, okMsg, sid = S.cur && S.cur.id) {
   }); } finally { S.SAVING = false; recomputeDirty(); }   // round 21: never a stuck 'Saving…' after a refused save
 }
 function waitForAI(sid) {
-  // v0.4.5 #5 (newcomer: stuck 8+ min on #840, two messages): Approve had stopped the card's AI poll, so nothing ever
-  // noticed the check finishing. Wait now runs its OWN check every 4 s and continues when the AI is done (one message).
+  // v0.4.5 #5: Wait runs its OWN check every 4 s and continues when the AI is done (one message).
+  // v0.4.8 #12 (newcomer: the line vanished after ~1 min with no word): the line stays (put back after a re-render), shows the
+  // minutes waited, and every way out says what happened.
   S.WAIT_AI = sid; $("#aiWait")?.remove(); clearTimeout(waitForAI.t);
-  $("#bApprove").insertAdjacentHTML("beforebegin", `<span id="aiWait" class="small" role="status">Waiting for the AI check…</span> `);
-  const t0 = Date.now();
+  const t0 = Date.now(), line = () => { const m = Math.floor((Date.now() - t0) / 60000), t = `Waiting for the AI check…${m ? " " + m + " min" : ""}`;
+    if (!$("#aiWait") && $("#bApprove")) $("#bApprove").insertAdjacentHTML("beforebegin", `<span id="aiWait" class="small" role="status"></span> `);
+    if ($("#aiWait")) $("#aiWait").textContent = t; };
+  line();
   const tick = async () => {
-    if (S.WAIT_AI !== sid || !S.cur || S.cur.id !== sid) return;
+    if (S.WAIT_AI !== sid) return;
+    if (!S.cur || S.cur.id !== sid) { S.WAIT_AI = null; toast(`Stopped waiting for the AI on card #${sid}: you opened another card.`, 6000); return; }
     let n = null; try { n = await call("/api/cards/" + sid); } catch {}
-    if (S.WAIT_AI !== sid || !S.cur || S.cur.id !== sid) return;
-    const done = n && !["queued", "checking"].includes(n.ai_status), late = Date.now() - t0 > 5 * 60000;
-    if (!done && !late) { waitForAI.t = setTimeout(tick, 4000); return; }
+    if (S.WAIT_AI !== sid || !S.cur || S.cur.id !== sid) { if (S.WAIT_AI === sid) { S.WAIT_AI = null; toast(`Stopped waiting for the AI on card #${sid}: you opened another card.`, 6000); } return; }
+    const st_ = n && n.ai_status, done = n && !["queued", "checking"].includes(st_), late = Date.now() - t0 > 15 * 60000;
+    if (!done && !late) { line(); waitForAI.t = setTimeout(tick, 4000); return; }
     if ($("#dlg").open || DECIDING || S.SAVING) { waitForAI.t = setTimeout(tick, 2000); return; }
     S.WAIT_AI = null; $("#aiWait")?.remove(); await openCard(sid, {keep: true});
-    toast(done ? "AI check finished. Check it, then Approve." : "The AI check is taking too long. You can approve without it.", 6000, true); $("#bApprove")?.focus();
+    const msg = !done ? "The AI check is taking too long (15 min). You can approve without it."
+      : /fail|error|off/.test(String(st_ || "")) ? "The AI check could not run on this card. Check it yourself, then Approve."
+      : "AI check finished. Check it, then Approve.";
+    toast(msg, 8000, true); $("#bApprove")?.focus();
   };
   waitForAI.t = setTimeout(tick, 4000);
 }
@@ -526,7 +542,7 @@ async function decide_(status, btn) {
   // the refusal lists every problem at once
   let soft0 = {};   // round 22: soft problems known up front, so the reason is asked in the SAME dialog (at most one dialog)
   if (status === "approved") { let goOn = false; try { const v_ = await post("/api/validate", {fields: collect(), card_id: sid}), hard_ = v_.hard || {}; soft0 = v_.errors || {};
-    if (Object.keys(hard_).length) { const all_ = {...(v_.errors || {}), ...hard_}; showErrors(all_, true);
+    if (Object.keys(hard_).length) { const all_ = {...(v_.errors || {}), ...hard_}; showErrors(all_, true, v_.admin_can || v_.overridable);
       // round 21 (mctrade-admin r20): a 'looks misread' check can be wrong. When every blocker is that kind and the form is saved, the reviewer may confirm it
       const ov = v_.overridable || [], canOv = ov.length && Object.keys(hard_).every(k => ov.includes(k)) && !recomputeDirty();
       // round 22: the refusal shows once (inline + one summary line), no dialog; 'This is correct' sends field + exact value + version
@@ -564,16 +580,19 @@ async function decide_(status, btn) {
     const bits = [];
     // v0.4.3 #8 (newcomer): ONE wording for the AI not being finished
     if (aiBusy) bits.push(`<p>AI check not finished.${aiWas === "queued" ? " Deciding now <b>cancels</b> it." : " Its suggestions appear later."}</p>`);
-    if (status === "approved" && xe0.length) bits.push(`<p>Exported before (${xe0.length}). Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
+    if (status === "approved" && xe0.length) bits.push(`<p>${esc(xeLine(xe0))} Approve anyway?</p>`);   // round 23 (datamanager/reviewer r22): asked even while the AI is checking
     if (crm0.length) bits.push(`<p>May already be in MC Trade: <b>${esc(crm0[0].name)}</b>. It will be added as a new contact.</p>`);
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const warn0 = xe0.length || crm0.length;
-    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : xe0.length ? `Exported before (${xe0.length})` : "May already be in MC Trade";
+    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Approve anyway?" : aiBusy ? "AI check not finished" : xe0.length ? "Exported before" : "May already be in MC Trade";
     // v0.4.7 #9 (data-manager L1): the title is not said again in the body
-    if (t0.startsWith("Exported before") && bits[0] && bits[0].startsWith("<p>Exported before")) bits[0] = "<p>Approve anyway?</p>";
+    if (t0 === "Exported before" && bits[0] && bits[0].startsWith("<p>Exported before: ")) bits[0] = bits[0].replace("<p>Exported before: ", "<p>");
     if (t0 === "May already be in MC Trade") bits.forEach((b_, i_) => { if (b_.startsWith("<p>May already be in MC Trade: ")) bits[i_] = b_.replace("May already be in MC Trade: ", ""); });
     if (aiBusy && t0 === "AI check not finished") bits[0] = bits[0].replace("AI check not finished. ", "");   // v0.4.5 UX: the title already says it
+    // v0.4.8 #12 (newcomer: stacked AI + Exported-before messages): one short message when both apply
+    if (aiBusy && warn0 && status === "approved" && !needWhy) { bits.length = 0;
+      bits.push(`<p>${esc(xe0.length ? xeLine(xe0) : "May already be in MC Trade: " + crm0[0].name + ".")} The AI check isn't finished${aiWas === "queued" ? "; approving cancels it" : ""}.</p>`); }
     const r0 = await ask({title: t0, html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
       // v0.4.1 #1: when this person was exported before, Cancel is the default (Enter or a held key never approves through it)
@@ -606,11 +625,17 @@ async function decide_(status, btn) {
           // round 8 (part-timer r2): 'Next' stays inside THIS card's batch, asked from the server (also when the card was opened
           // by a direct link); "All done" only when that batch has no pending card left at all
           // v0.4.7 #10: a value typed on THIS card while Approve was being sent is saved to THIS card (never carried to the next one)
-          if (S.cur && S.cur.id === sid && recomputeDirty()) {
-            try { const s2 = await post("/api/cards/" + sid, {fields: collect(), note: $("#note").value, reviewer: who(), card_id: sid, version: saved.version});
-              if (s2 && s2.version && S.cur && S.cur.id === sid) S.cur.version = s2.version; markSaved(sid, formSnap()); toast(`✓ Card #${sid} ${status}. Your last edit was saved to #${sid} too.`, 4000, true); }
+          // v0.4.8 #10 (skeptic N3: "TYPED" saved as "TYPE"): wait until typing stops, save, and repeat while it still differs
+          let lastSaved = false, ver_ = saved.version;
+          for (let k = 0; k < 4 && S.cur && S.cur.id === sid; k++) {
+            const t1 = Date.now(); while (Date.now() - (S.lastInput || 0) < 700 && Date.now() - t1 < 4000) await new Promise(r_ => setTimeout(r_, 100));
+            if (!recomputeDirty()) break;
+            const snap_ = formSnap();
+            try { const s2 = await post("/api/cards/" + sid, {fields: collect(), note: $("#note").value, reviewer: who(), card_id: sid, version: ver_});
+              if (s2 && s2.version) { ver_ = s2.version; if (S.cur && S.cur.id === sid) S.cur.version = s2.version; } markSaved(sid, snap_); lastSaved = true; }
             catch (e2) { keepDraft(); toast(`Card #${sid} ${status}, but your last edit was not saved: ${e2.message} It is kept as a draft on #${sid}.`, 8000); return; }
           }
+          if (lastSaved) toast(`✓ Card #${sid} ${status}. Your last edit was saved too.`, 4000, true);
           const myB = S.cur.batch || null, o = order(), i = o.indexOf(sid);
           let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "500"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}   // audit 2026-10: capped without a batch
           let nx2;
@@ -619,10 +644,10 @@ async function decide_(status, btn) {
           else { const pend = x => x !== sid && STATUS[x] === "pending"; nx2 = i >= 0 ? (o.slice(i + 1).find(pend) ?? o.slice(0, i).find(pend)) : undefined; }
           const bq = "#queue?s=pending&batch=" + encodeURIComponent(myB || "__none__");
           // v0.4.2 #9 (newcomer: no Undo on screen after Approve): the route change cleared the toast; show it again, with Undo
-          const msgU = `✓ #${sid} ${status}.` + (pl && pl.length ? ` ${pl.length} left.` : "");
+          const msgU = `✓ #${sid} ${status}.` + (lastSaved ? " Your last edit was saved too." : "") + (pl && pl.length ? ` ${pl.length} left.` : "");
           if (nx2 !== undefined) { location.hash = "review/" + nx2; setTimeout(() => toast(msgU, 8000, true), 400); }
           else if (pl) { try { if (S.cur && S.cur.id === sid) await openCard(sid, {keep: true}); } catch {}   // round 15 (newcomer r14): the card behind the dialog shows its new status
-            const msg_ = `All done: no pending cards are left in ${S.cur.batch_label || "this batch"}.`; location.hash = bq; setTimeout(() => toast(msg_ + ` (#${sid} ${status}.)`, 8000, true), 400); }   // after the route change (it clears toasts)   // round 22: a toast, not one more dialog
+            const msg_ = `All done: no pending cards are left in ${S.cur.batch_label || "this batch"}.`; location.hash = bq; setTimeout(() => toast(msg_ + ` (#${sid} ${status}.)` + (lastSaved ? " Your last edit was saved too." : ""), 8000, true), 400); }   // after the route change (it clears toasts)   // round 22: a toast, not one more dialog
           else { toast("Couldn't check what is still pending: back to the queue.", 4000); location.hash = bq; }
         } else {
           const sp = saved.save_problems || {};
@@ -747,7 +772,9 @@ function blockedMsg(hard, ov) {
   const mis = ks.find(k => /misread|“\|”/i.test(String(hard[k]))), mv = mis ? f_[mis === "name" ? "first_name" : mis] : "";
   const what = mis && typeof mv === "string" && mv ? `"${mv}" looks misread.` : String(hard[ks[0]] || "");
   if (isAdm) return what + " Fix it or confirm it.";
-  return (ks.some(k => (ov || []).includes(k)) ? "An admin needs to confirm this. " : "") + what + " Fix it or click Needs admin.";
+  // v0.4.8 #6: never "click Needs admin" when it was clicked already, or when there is no such button
+  if (S.cur && S.cur.needs_admin) return what + " Waiting for an admin.";
+  return what + (ks.some(k => k !== "phones" && (ov || []).includes(k)) && $("#bNeedsAdmin") ? " Fix it, or click Needs admin." : " Fix it first.");
 }
 function sameMsg() { const h = (S.cur && S.cur.hard) || {}; if (Object.keys(h).length) return blockedMsg(h, S.cur.overridable);
   return $("#rDupQ #dSame") ? "Same person? Answer Same or Different first." : "Pick Different first."; }

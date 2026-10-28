@@ -52,6 +52,32 @@ LOOKALIKE = {"rnbber": "rubber", "rubbcr": "rubber", "mian": "main", "akrn": "ak
              "hcalth": "health", "heaith": "health", "rnedical": "medical", "medlcal": "medical", "dental": None, "bnak": "bank",
              "credlt": "credit", "unlon": "union", "lnsurance": "insurance", "realtv": "realty", "propertles": "properties"}
 LOOKALIKE = {k: v for k, v in LOOKALIKE.items() if v}
+# v0.4.8 #9 (reviewer/skeptic: 'Vlce', 'Managr' passed): common job-title words read with i->l, o->n or a dropped last vowel
+_LA_TITLE = ["manager", "director", "president", "vice", "senior", "officer", "engineer", "executive", "assistant", "coordinator",
+               "specialist", "consultant", "owner", "founder", "partner", "accountant", "supervisor", "administrator", "principal",
+               "analyst", "advisor", "representative", "associate", "chief", "marketing", "operations", "business", "development"]
+def _title_variants(w):
+    out = set()
+    for i, ch in enumerate(w):
+        if ch == "i": out.add(w[:i] + "l" + w[i + 1:])
+        if ch == "o" and 0 < i: out.add(w[:i] + "n" + w[i + 1:])
+    m_ = re.match(r"^(.{3,})([aeio])([a-z]{1,2})$", w)
+    if m_ and len(w) >= 5 and m_.group(3) in ("r", "nt", "st", "n", "l"): out.add(m_.group(1) + m_.group(3))
+    return out - {w}
+_REALW = {"vile", "senor", "owner", "lice", "chef", "bnsiness"}
+for _w in _LA_TITLE:
+    for _v in _title_variants(_w):
+        if _v not in _REALW and _v not in LOOKALIKE and _v not in _LA_TITLE: LOOKALIKE[_v] = _w
+# v0.4.8 #9: brand names with digits ('E2open', '4imprint', '4ward') are not misreads
+DIGIT_NAMES_OK = {"4imprint", "4thought", "e2open", "3com", "4kids", "3m", "7-eleven", "1-800-flowers", "g4s", "i3", "web3labs", "b2b", "b2c", "h2o", "q1", "q2", "q3", "q4",
+                  "4ward", "4ever", "2go", "4sale", "4front"}
+def digit_brand_ok(w):
+    """'4ward', '4ever', '2go': a leading 2/4 read as to/for (four-ward); '4nalytics' (a 4 for an A) is still a misread."""
+    w = (w or "").lower()
+    if w in DIGIT_NAMES_OK: return True
+    m_ = re.match(r"^([24])([a-z]{2,})$", w)
+    return bool(m_ and (m_.group(1) == "4" and re.match(r"^(ward|ever|sale|front|most|cast|tune|sight|word|real|good|life|you|u|all|get|thought|imprint)", m_.group(2))
+                        or m_.group(1) == "2" and re.match(r"^(go|day|morrow|gether|you|u)", m_.group(2))))
 GLUE = ["coffee", "bank", "group", "law", "park", "street", "suite", "city", "robotics", "hardware", "health", "partners", "services",
         "solutions", "company", "realty", "insurance", "dental", "medical", "market", "events", "analytics"]
 CAMEL_OK = {"iPhone", "eBay", "YouTube", "LinkedIn", "PayPal", "FedEx", "WordPress", "JavaScript", "McDonald", "PowerPoint", "HubSpot"}
@@ -227,6 +253,7 @@ def check(f):
         out.append(_sug("company_sanity", "company", f"Company “{c}” contains an email or phone number"))
     # round 13 (manager r11 L-r11-1): a digit/letter mix-up inside a company word ("R1O Testworks": 1 / O)
     for w_ in re.findall(r"[A-Za-z0-9]+", c):
+        if digit_brand_ok(w_): continue   # v0.4.8 #9 (part-timer: 'E2open' flagged)
         if re.search(r"[A-Za-z]", w_) and re.search(r"\d", w_) and re.search(r"(?<=\d)[OoIlS]|[OoIlS](?=\d)|(?<=[A-Za-z])[015](?=[A-Za-z])|[01](?=[OoIl])|(?<=[OoIl])[01]", w_):
             fx = _digit_reading(w_)
             alt = re.sub(r"(?<=[A-Za-z])0|0(?=[A-Za-z])", "O", re.sub(r"(?<=[A-Za-z])1|1(?=[A-Za-z])", "I", w_))

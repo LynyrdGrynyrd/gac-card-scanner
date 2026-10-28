@@ -56,8 +56,8 @@ def test_readme_totals_match_counts():
     src = "\n".join(open(os.path.join(os.path.dirname(U.__file__), n), encoding="utf-8").read() for n in ("ui.py", "exporting.py", "admin_files.py", "privacy.py", "pages.py", "audit_log.py"))   # audit 2026-10 P2: ui.py was split
     assert "v_ == k_" not in src
     cnt = MX.counts({1: (MX.NEW, ""), 2: (MX.NEW, ""), 3: (MX.REVIEW, ""), 4: (MX.LEFT, "")})
-    assert U.readme_totals(cnt) == "Totals: 2 new · 0 updates · 1 left out · 1 to decide."   # v0.4.7 #3: no total that reads like extra cards
-    assert U.readme_totals(cnt, to_check=1, outside=0) == "Totals: 2 new · 0 updates · 1 left out. To check: 1 of the rows."
+    assert U.readme_totals(cnt) == "In the file: 2 new contacts. Not in the file: 1 left out, 1 to decide."   # v0.4.8 #8: plain totals   # v0.4.7 #3: no total that reads like extra cards
+    assert U.readme_totals(cnt, to_check=1, outside=0) == "In the file: 2 new contacts (1 to check). Not in the file: 1 left out."
 
 def test_readme_totals_match_dry_run(env):
     ui, st, adm = env["ui"], env["store"], env["adm"]

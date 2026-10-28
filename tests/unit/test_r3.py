@@ -17,6 +17,10 @@ def test_formula_injection_csv_and_xlsx(env):
     assert not [v for v in row if v[:1] in ("=", "+", "@", "-", "\t", "\r")], row
     assert "'=HYPERLINK" in r.text and "o2@strand.io" in row                                  # email2 column
     r = adm.get("/api/export/xlsx?status=approved&batch=fx"); assert r.status_code == 200
+    assert r.json()["nothing"] and "1 to fix first" in r.json()["ready"]["text"]          # v0.4.8 #1: no empty IMPORT-ME file
+    ok = mk(ui, st, first_name="Clean", last_name="Row", company="Fine Co", emails=["clean@row.io"]); ui.set_meta(ok, batch="fx", batch_label="FX Event")
+    st.update(ok, status="approved", reviewer="OLD", note="")
+    r = adm.get("/api/export/xlsx?status=approved&batch=fx"); assert r.status_code == 200
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(r.content)); assert wb.sheetnames == ["Sheet1"]; ws = wb.active   # template only (round 4)
     for row in ws.iter_rows(min_row=2):

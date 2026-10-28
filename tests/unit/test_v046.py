@@ -88,7 +88,7 @@ def test_v046_undo_window_batch_and_named_id(env):
     assert rc.post("/api/undo", json={"id": pa["id"], "batch": "v46u1"}).status_code == 404
     assert st.get(a)["fields"]["title"] == "Undo A"
     assert rc.post("/api/undo", json={"id": pb["id"], "batch": "v46u2"}).status_code == 200
-    hd = _src("app/static/ui/header.js"); assert "refreshUndo.t = setTimeout(refreshUndo, 60000)" in hd and '$("#undoBtn").hidden = !u.id' in hd
+    hd = _src("app/static/ui/header.js"); assert "refreshUndo.t = setTimeout(refreshUndo, 60000)" in hd and "btn.hidden = !u.id" in hd
 
 
 def test_v046_undo_label_has_batch_for_admins_only(env):
@@ -152,7 +152,7 @@ def test_v046_x_department_alias_checked(env):
 # ---- #6 exported before: one count, Different remembered per pair, short words
 def test_v046_exported_before_dialog_wording():
     js = _src("app/static/ui/views/review.js")
-    assert "<p>Exported before (${xe0.length}). Approve anyway?</p>" in js and "Exported before (${xe.length}).</b>" in js
+    assert "<p>${esc(xeLine(xe0))} Approve anyway?</p>" in js and "<b>${esc(xeLine(xe))}</b>" in js and "`Exported before (${" not in js   # v0.4.8 #5
     assert '"Marked different."' in js and "Different from ${" not in js
     assert "(e.data.other ? [" in js
 
@@ -215,5 +215,5 @@ def test_v046_blocked_toast_names_misread_and_badge_grammar():
     import pathlib
     ui = pathlib.Path(__file__).resolve().parents[2] / "app" / "static" / "ui"
     js = (ui / "views" / "review.js").read_text(encoding="utf-8"); hd = (ui / "header.js").read_text(encoding="utf-8")
-    assert '`"${mv}" looks misread.`' in js and '"An admin needs to confirm this. "' in js and '" Fix it or click Needs admin."' in js
+    assert '`"${mv}" looks misread.`' in js and '" Fix it, or click Needs admin."' in js and '" Waiting for an admin."' in js   # v0.4.8 #6
     assert 'c.needs_admin === 1 ? "needs" : "need"' in hd

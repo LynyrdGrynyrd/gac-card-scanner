@@ -131,7 +131,7 @@ def test_readme_checklist_and_428(env):
     r = adm.get("/api/export/csv", params={"batch": "b1", "_nov": "1"})
     if r.status_code == 428: assert "now" not in r.json()
     src = "\n".join(open(os.path.join(os.path.dirname(U.__file__), n), encoding="utf-8").read() for n in ("ui.py", "exporting.py", "admin_files.py", "privacy.py", "pages.py", "audit_log.py"))   # audit 2026-10 P2: ui.py was split
-    assert src.count("Test with two rows") == 0 and "Totals: " in src and "Before importing" in src
+    assert src.count("Test with two rows") == 0 and "In the file: " in src and "Before importing" in src
 
 def test_real_huge_page_pdf_fixture():
     """Round 21: the skeptic's actual huge-page PDF file (qa/fixtures/huge-page.pdf), not only the generated copy."""

@@ -35,9 +35,9 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.7</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
+<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.8</span>. <a href="/static/ui/GAC-Card-Scanner-Reviewer-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help-admin.html"><b>Admins: Admin &amp; MC Trade Guide →</b></a></p>
 <h1 id="reviewer-start-here">Reviewer Start Here</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.7</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.8</em></p>
 <blockquote class="callout">
 <p>Scan, check, approve, export. Admin jobs are in the <strong><a href="/static/ui/help-admin.html">Admin Guide</a></strong>. Pictures use made-up cards.</p>
 </blockquote>
@@ -47,7 +47,7 @@
 <li><a href="#3-review-one-card">3. Review one card</a></li>
 <li><a href="#4-same-person">4. Same person?</a></li>
 <li><a href="#5-export">5. Export</a></li>
-<li><a href="#6-ask-an-admin-when">6. Ask an admin when</a></li>
+<li><a href="#6-ask-an-admin">6. Ask an admin</a></li>
 </ul>
 </div>
 <hr />
@@ -56,7 +56,7 @@
 <figure><img alt="Sign in" src="/static/ui/help-img/01_sign_in.webp" loading="lazy" /></figure>
 <ul>
 <li>The top of every page says <strong>You are: your name</strong>. Not you? Click <strong>Not you?</strong>. It signs you out.</li>
-<li>After 30 minutes with no clicks you are signed out (not while photos upload).</li>
+<li>After 30 minutes with no clicks you are signed out (not while photos upload). The sign-in page then says so.</li>
 <li>Locked out? Ask an admin.</li>
 </ul>
 <hr />
@@ -103,7 +103,7 @@
 </tr>
 <tr>
 <td>Undo</td>
-<td><strong>Undo</strong> on the message after Approve, <strong>Ctrl+Z</strong>, or <strong>U</strong>. It undoes your last change in the current batch only (the button shows the batch and time).</td>
+<td><strong>Undo</strong> on the message after Approve, <strong>Ctrl+Z</strong>, or <strong>U</strong>. It undoes your last change in the current batch only, for up to 2 hours. The button shows what it will undo and the batch.</td>
 </tr>
 </tbody>
 </table></div>
@@ -123,7 +123,8 @@
 </ul>
 <p>Answer this first. <strong>Enter</strong> won't approve until you do.
 A card in someone else's batch shows only as a count ("Looks like 1 card in another batch"): click <strong>Different</strong> if it's not the same person, or ask an admin.
-If the card was exported before, or may be in MC Trade, <strong>Approve</strong> asks once more.</p>
+If the same person was exported before, or may be in MC Trade, <strong>Approve</strong> asks once more and names the earlier export.</p>
+<p>If you edit a card that was already exported, the message says the edit won't be exported again unless an admin includes it.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
 <ol>
@@ -138,11 +139,15 @@ If the card was exported before, or may be in MC Trade, <strong>Approve</strong>
 <li>You can export <strong>only your own batch</strong>. Other batches: ask an admin.</li>
 <li>Export marks the cards as exported. <strong>Preview</strong> doesn't.</li>
 <li><strong>Export blocked:</strong> open the listed cards and fix them, or click <strong>Needs admin</strong>.</li>
-<li>The READ-ME says <strong>Ready to import: X of Y clean, Z to check.</strong> Test 2 rows first.</li>
+<li>The READ-ME starts with one line, for example <strong>Ready to import: 3 rows (2 clean, 1 to check). Not in the file: 1 edited after export.</strong> Test 2 rows first.</li>
+<li><strong>Nothing new to import:</strong> no file is made. The page says why (for example, the card was edited after export).</li>
+<li><strong>Edited after export:</strong> a card you change after it was exported is not in the next file. Only an admin can put it in again.</li>
+<li><strong>N waiting for admin:</strong> cards you sent with <strong>Needs admin</strong>. They are not in the file until an admin checks them.</li>
 </ul>
 <hr />
-<h2 id="6-ask-an-admin-when">6. Ask an admin when</h2>
+<h2 id="6-ask-an-admin">6. Ask an admin</h2>
 <p>Your admin: ask the front desk.</p>
+<p>Ask an admin when:</p>
 <ul>
 <li>you are locked out;</li>
 <li>a red box says <strong>An admin needs to confirm this.</strong></li>

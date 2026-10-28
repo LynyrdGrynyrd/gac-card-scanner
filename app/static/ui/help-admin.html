@@ -35,9 +35,9 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.7</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 28, 2026 · version <span data-ver>0.4.8</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.7</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.8</em></p>
 <blockquote class="callout">
 <p>For the person who runs the scanner and does the MC Trade import. Reviewing cards is in the <strong><a href="/static/ui/help.html">Reviewer Guide</a></strong>.</p>
 </blockquote>
@@ -131,8 +131,17 @@
 </tbody>
 </table></div>
 <figure><img alt="Ready to save" src="/static/ui/help-img/20_export_confirm.webp" loading="lazy" /></figure>
-<p>Import only <strong>IMPORT-ME_GAC-MCTrade-…-DATE_TIME.xlsx</strong>. <strong>IMPORT-ME-UPDATES_…</strong> (only when there are updates) is for updating existing contacts, as a separate import. Files named <strong>NOT-FOR-IMPORT_…</strong> (summary, CSV, READ-ME) are for reading. The READ-ME's first line says <strong>Ready to import: X of Y clean, Z to check.</strong> Read the <strong>Check</strong> lines first.</p>
-<p><strong>Needs admin:</strong> a reviewer can flag a blocked card for you. Turn on <strong>Needs admin</strong> in the Review queue to list them (the menu badge counts them). Confirm or fix the field; the flag clears when nothing is left to confirm. The Export dialog shows how many wait for you.</p>
+<p>Import only <strong>IMPORT-ME_GAC-MCTrade-…-DATE_TIME.xlsx</strong>. <strong>IMPORT-ME-UPDATES_…</strong> (only when there are updates) is for updating existing contacts, as a separate import. Files named <strong>NOT-FOR-IMPORT_…</strong> (summary, CSV, READ-ME) are for reading. The READ-ME's first line says, for example, <strong>Ready to import: 3 rows (2 clean, 1 to check). Not in the file: 1 edited after export.</strong> Read the <strong>Check</strong> lines first.</p>
+<p>After an export the page shows a short checklist: 1. Read the READ-ME. 2. Import only the IMPORT-ME file. 3. Test 2 rows first.</p>
+<p><strong>Not in the file:</strong></p>
+<ul>
+<li><strong>Edited after export:</strong> the card was changed after it went out. It is not in the next file. To send it again, tick <strong>Include anyway</strong> in the Save dialog.</li>
+<li><strong>Already exported:</strong> the same person (name and company, or email) is in an earlier IMPORT-ME file, so <strong>All approved</strong> leaves them out to avoid a duplicate in MC Trade. <strong>Include anyway</strong> puts them in.</li>
+<li><strong>Only in an earlier CSV:</strong> the card went out in a contacts CSV but never in an IMPORT-ME file, so it is included as new (the READ-ME says so).</li>
+<li><strong>Waiting for admin:</strong> cards a reviewer flagged with <strong>Needs admin</strong>.</li>
+<li><strong>Nothing new to import:</strong> no file is made and nothing is marked exported.</li>
+</ul>
+<p><strong>Needs admin:</strong> a reviewer can flag a blocked card for you. Turn on <strong>Needs admin</strong> in the Review queue to list them (the menu badge counts them). Confirm or fix the field; the flag clears when nothing is left to confirm. The Export dialog shows how many wait for you, in this batch and in all batches (the link lists them all).</p>
 <hr />
 <h2 id="6-mc-trade-import-first-time">6. MC Trade import: first time</h2>
 <ol>

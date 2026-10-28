@@ -169,9 +169,9 @@ function renderQueue() {
     <td><input type="checkbox" class="sel" aria-label="Select card #${c.id} ${esc(c.name)}" ${Q.sel.has(c.id) ? "checked" : ""}></td>
     <td><img src="/img/${esc(c.image)}?w=160" alt="" loading="lazy" decoding="async"></td>
     <td><a href="#review/${c.id}">${esc(c.name) || "<em>(no name)</em>"}</a><div class="sub">#${c.id}${c.qr ? ' <span class="src qr">QR</span>' : ""}${c.batch_label ? " · " + esc(c.batch_label) : ""}</div></td>
-    <td>${esc(c.company)}</td><td>${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
+    <td>${esc(c.company)}</td><td class="em">${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
     <td class="att">${c.attention.length ? `<ul class="reasons">${c.attention.map(a => `<li><span class="flag ${a.code.startsWith("dup") ? "dup" : a.code === "invalid" ? "bad" : "low"}">${esc(a.text)}</span></li>`).join("")}</ul>` : `<span class="flag ok">Looks good</span>`}</td>
-    <td><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.needs_admin && c.status === "pending" ? ` <span class="pill needsadm" title="${esc("Needs admin: " + (c.needs_admin.reason || "") + (c.needs_admin.by ? " (" + c.needs_admin.by + ")" : ""))}">needs admin</span>` : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
+    <td class="st"><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.needs_admin && c.status === "pending" ? ` <span class="pill needsadm" title="${esc("Needs admin: " + (c.needs_admin.reason || "") + (c.needs_admin.by ? " (" + c.needs_admin.by + ")" : ""))}">needs admin</span>` : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
   if (fId) { const tr = $(`#qBody tr[data-id="${+fId}"]`), el = tr && (tr.querySelector(fSel) || tr.querySelector("a")); if (el) el.focus({preventScroll: true}); }
   const anyFilter = Q.na || Q.att || Q.nx || Q.dup || Q.text || Q.batch;
   $("#qEmpty").hidden = rows.length > 0;

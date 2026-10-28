@@ -25,6 +25,12 @@ const nextUrl=()=>{let n=new URLSearchParams(location.search).get('next')||'';
       if(!ok){sw.disabled=false;$('#lead').textContent='Could not sign out. Reload the page and try again.';return}
       location.replace('/login'+location.search+location.hash)};
     d.append(go,' ',sw);$('#f').after(d);go.focus();return}
+  // v0.4.8 #12: the real number of minutes, and why you are on this page after a sign-out
+  {const im=s.idle_minutes,out=new URLSearchParams(location.search).get('out');
+   if(im)$('#idleNote').textContent='You are signed out after '+im+' minutes with no use.';else $('#idleNote').hidden=true;
+   if(!s.needs_setup&&out){const m=document.createElement('p');m.className='alert';m.setAttribute('role','status');m.id='outMsg';
+     m.textContent=out==='idle'?'You were signed out after '+(im||30)+' minutes with no use.':out==='expired'?'Your sign-in ended. Sign in again.':'You are signed out.';
+     $('#f').before(m)}}
   if(s.needs_setup){
     $('#h').textContent='First-time setup';$('#lead').textContent='Create the first administrator account. Admins can add the other reviewers.';
     ['#setupOnly','#setupOnly2','#pwHint'].forEach(x=>$(x).hidden=false);$('#go').textContent='Create admin and sign in';

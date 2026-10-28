@@ -12,6 +12,7 @@ async def _lifespan(_app):
     from . import ai_helper as _aih, demo as _demo
     _startup_checks(); _ai_banner(); _aih.autostart()
     if _demo.enabled(): _demo.start()
+    _ui.na_sweep()   # v0.4.8 #6: old 'Needs admin' flags with nothing left to confirm come off
     _ui.start_workers(); _updates.check_in_background()
     yield
     try: _phone.stop_server()   # shutdown: close the phone LAN listener if one is open

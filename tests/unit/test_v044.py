@@ -61,7 +61,7 @@ def test_v044_one_to_check_wording(env):
     ui = env["ui"]
     from app import mctrade_export as MX
     cnt = MX.counts({1: (MX.NEW, ""), 2: (MX.REVIEW, ""), 3: (MX.REVIEW, "")})
-    assert "2 to decide" in ui.readme_totals(cnt) and "To check: 2 of the rows" in ui.readme_totals(cnt, to_check=2)
+    assert "2 to decide" in ui.readme_totals(cnt) and "(2 to check)" in ui.readme_totals(cnt, to_check=2)
     af = _src("app/admin_files.py"); assert "TO CHECK" in af and "NEEDS REVIEW 0" not in af
     assert "May already be in MC Trade" in _src("app/static/ui/views/review.js") and "May already be in MC Trade" in _src("app/static/ui/views/export.js")
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.8 (2026-10-28)
+
+### No empty or duplicate import files, plain wording, tighter reviewer privacy (from the v0.4.7 bot reports)
+- **Nothing new to import:** an export whose only cards were edited after export makes no IMPORT-ME file and marks nothing. The card keeps its "Changed after export" warning and is not listed as exported. The page says "Nothing new to import." and gives the reason. With other cards, the file holds only the real rows.
+- **No duplicates from "All approved":** each row is checked against all earlier IMPORT-ME files by person (name and company, or email), whatever the filter. Repeats are listed as "Already exported", not put in the file; admins can tick "Include anyway". Cards that only went out in an earlier contacts CSV are included as new, and the READ-ME says so.
+- **Plain wording:** "Edited after export, so it is not in this file." everywhere (dialog, More, READ-ME, SUMMARY, checklist). Saving an already-exported card says the edit won't be exported again unless an admin includes it. "Update it in MC Trade by hand" is gone.
+- **Privacy:** the CSV Check column and History details list only card numbers from the reviewer's own batch.
+- **Exported before** shows only when the same person was exported, and names the person and date (no bare count on every card).
+- **Needs admin:** a real Needs admin button on the card. Approve stops saying "click Needs admin" once it was clicked. Old flags with nothing left to confirm clear at start. One audit row per action.
+- **Review badge** counts the pending cards of the batch the queue shows.
+- **Typing during Approve:** the last keystroke is saved too ("Your last edit was saved too.").
+- **Misreads:** E2open and 4ward Logistics pass, "Owner|Founder" is a separator, and Vlce, Managr, Accountnt and Rnbert are caught. The misread eval has 34 cases.
+- **Undo** shows the action and a short batch name ("Undo Approve #935 (Spring Fair)"). The hover gives the real minutes and the 2-hour limit. An admin in the All view also undoes only in the current batch.
+- **Smaller fixes:** one short AI + exported-before message. "Wait for the AI" always ends with a message. The export page shows one message, not two. Uploading with your own batch name reuses that batch. The sign-in page says "30 minutes" and why you were signed out. The queue Status column no longer clips. Buttons scrolled into view stay below the top bar. Capital "May already be in MC Trade". Guides updated.
+
 ## v0.4.7 (2026-10-28)
 
 ### Look-alikes only from the current batch, no double imports after edits, Needs admin fixes (from the v0.4.6 bot reports)

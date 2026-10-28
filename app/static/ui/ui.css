@@ -9,6 +9,8 @@ html{font-size:16px}body{margin:0;font-family:Lato,system-ui,-apple-system,"Sego
 main{flex:1;padding-top:20px;padding-bottom:40px;outline:none}
 .skip{position:absolute;left:-999px}.skip:focus{left:8px;top:8px;background:#fff;padding:8px;z-index:9}
 .top{background:#fff;border-bottom:4px solid var(--teal);position:sticky;top:0;z-index:5}
+/* v0.4.8 #12 (data-manager L1: 'Different' under the top bar): anything scrolled into view stops below the sticky bar */
+html{scroll-padding-top:120px}#rDupQ,#rDupC,#rDupQ button,#rDupC button{scroll-margin-top:120px}
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-weight:700;font-size:1.15rem}
 .brand img{height:48px;width:auto}
@@ -111,6 +113,8 @@ dialog{border:0;border-radius:10px;padding:10px;max-width:95vw}dialog img{max-wi
 .hist{font-size:.85rem;padding-left:18px;margin:6px 0}.hist li{margin:3px 0}
 .reasons{margin:0;padding-left:16px;font-size:.85rem}.reasons li{margin:1px 0}
 .q td.att{min-width:180px}
+/* v0.4.8 #12 (coordinator: Status column clipped): status pills stack in a column that keeps its width; long emails wrap */
+.q td.st{min-width:8.5em}.q td.st .pill{display:block;width:max-content;margin:2px 0}.q td.em{overflow-wrap:anywhere;max-width:16em}
 dialog#dlg{max-width:520px;width:92vw;padding:20px}dialog#dlg.wide{max-width:min(1000px,96vw)}dialog#dlg.wide .aidiff td,dialog#dlg.wide .aidiff th{overflow-wrap:anywhere}dialog#dlg h2{margin-top:0}
 .pill.archived{background:#e5e5e5;color:#444}
 .pill.needsadm{background:#fde68a;color:#5b3b00}
@@ -157,7 +161,7 @@ a{color:var(--teal-d);text-underline-offset:2px}a:visited{color:var(--teal-d)}
 .who{white-space:nowrap}
 .q tbody tr:focus-within{background:#eef6f8}
 @media (max-width:820px){
- .top{position:static}
+ .top{position:static}html{scroll-padding-top:0}
  .bar{row-gap:4px}
  .who{flex-wrap:wrap;white-space:normal}.who>*{white-space:nowrap}
  nav{width:100%;gap:2px}nav a{white-space:nowrap;padding:8px 6px;font-size:.9rem}nav .badge{margin-left:2px;padding:1px 6px}

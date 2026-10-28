@@ -45,7 +45,11 @@ MIS = [("company", "Rubb3r City Robotics", 1), ("company", "Kent Partn3rs", 1), 
        ("department", "Level 3 Support", 0), ("company", "H2O Labs", 0), ("first_name", "Morgan", 0),
        # v0.4.7 #6: real names with digits and a '|' separator pass; mid-word '|' and look-alikes with a close fix are still caught
        ("company", "4imprint", 0), ("company", "E2open", 0), ("company", "4thought Marketing", 0), ("company", "Q3 Partners", 0),
-       ("title", "Manager | Sales", 0), ("title", "Manag|ng Director", 1), ("department", "Sa|es", 1), ("company", "Rnbber City Robotics", 1)]
+       ("title", "Manager | Sales", 0), ("title", "Manag|ng Director", 1), ("department", "Sa|es", 1), ("company", "Rnbber City Robotics", 1),
+       # v0.4.8 #9: '4ward' / 'Owner|Founder' are real; 'Vlce', 'Managr', 'Rnbert', '4nalytics' are misreads
+       ("company", "4ward Logistics", 0), ("title", "Owner|Founder", 0), ("company", "2go Couriers", 0), ("first_name", "Robert", 0),
+       ("title", "Vlce President", 1), ("title", "Sales Managr", 1), ("first_name", "Rnbert", 1), ("last_name", "Rnbert", 1),
+       ("company", "4nalytics Group", 1), ("title", "Seninr Director", 1), ("title", "Vice President", 0)]
 mok = 0
 for fld, val, want in MIS:
     e = _ui.hard_errors({"first_name": "Ann", "last_name": "Lee", "emails": ["a@b.example.com"], "phones": [], fld: val})

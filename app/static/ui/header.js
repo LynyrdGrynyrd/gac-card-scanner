@@ -63,18 +63,22 @@ $("#logout").onclick = async () => {
   clearDrafts();   // reviewer r8/r9, v0.4.4 #10: no draft stays in the browser after any sign-out (an idle one keeps it on the server)
   const back = location.hash && !location.hash.startsWith("#upload") ? location.hash.replace(/^#queue\?.*$/, "#queue") : "#queue";   // reviewer r7: signing back in returns here (newcomer r9: without a remembered batch)
   ["lastBatch", "lastBatchUid", "lastBatchAt", "batchChosen", "batchChosenUid", "queueHash", "order", "draft", "batch"].forEach(k => { try { delete SS[k]; } catch {} });
-  await post("/api/auth/logout", {}); location.href = "/login?next=" + encodeURIComponent("/ui" + back); };
+  // v0.4.8 #12 (newcomer: a blank sign-in page after sign-out): the sign-in page says why
+  await post("/api/auth/logout", {}); location.href = "/login?out=" + (window.gacIdleOut ? "idle" : "1") + "&next=" + encodeURIComponent("/ui" + back); };
 /* ---------- undo ---------- */
 // v0.4.5 #6: Undo works on the batch you are in, from the last 2 hours, and says what it will undo
 const undoBatch = () => (S.cur && !$("#v-review").hidden && S.cur.batch) || ($("#fBatch") && !$("#v-queue").hidden && $("#fBatch").value) || (S.B && S.B.id) || "";
 // v0.4.6 #2: the server answers with the SAME rule the click uses (this batch, last 2 hours); nothing undoable = no button
-async function refreshUndo() { try { const b = undoBatch(), u = await call("/api/undo" + (b ? "?batch=" + encodeURIComponent(b) : "")); $("#undoBtn").hidden = !u.id;
-  const what = u.id ? `${u.label} · ${u.age_min < 1 ? "just now" : u.age_min + " min ago"}${u.batch_label ? " · " + u.batch_label : ""}` : "";
-  clearTimeout(refreshUndo.t); if (u.id) refreshUndo.t = setTimeout(refreshUndo, 60000);   // the "N min ago" never goes stale
-  // v0.4.7 #5: the batch and a short time are VISIBLE on the button, not only in the tooltip
-  const hm = u.id ? new Date(u.ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}) : "", bl = (u.batch_label || "").length > 18 ? u.batch_label.slice(0, 17) + "…" : (u.batch_label || "");
-  $("#undoBtn").textContent = u.id ? `↶ Undo (${bl ? bl + ", " : ""}${hm})` : "↶ Undo";
-  $("#undoBtn").title = u.id ? "Undo: " + what + " (U)" : ""; $("#undoBtn").setAttribute("aria-label", u.id ? "Undo: " + what : "Undo"); $("#undoBtn").dataset.label = u.label || ""; $("#undoBtn").dataset.id = u.id || ""; } catch { $("#undoBtn").hidden = true; $("#undoBtn").dataset.id = ""; } }
+async function refreshUndo() { try { const b = undoBatch(), u = await call("/api/undo" + (b ? "?batch=" + encodeURIComponent(b) : "")); const btn = $("#undoBtn"); btn.hidden = !u.id;
+  clearTimeout(refreshUndo.t); if (u.id) refreshUndo.t = setTimeout(refreshUndo, 60000);
+  // v0.4.8 #11: the action and a short batch name on the button; the hover gives the true minutes and the 2-hour limit
+  btn.textContent = u.id ? `↶ Undo ${u.short || u.label}${u.batch_short ? " (" + u.batch_short + ")" : ""}` : "↶ Undo";
+  btn.dataset.ts = u.ts || ""; btn.dataset.what = u.id ? `${u.label}${u.batch_label ? " · " + u.batch_label : ""}` : ""; btn.dataset.win = u.window_min || 120;
+  undoTitle(); btn.setAttribute("aria-label", u.id ? "Undo: " + btn.dataset.what : "Undo"); btn.dataset.label = u.label || ""; btn.dataset.id = u.id || ""; } catch { $("#undoBtn").hidden = true; $("#undoBtn").dataset.id = ""; } }
+function undoTitle() { const btn = $("#undoBtn"), ts = Number(btn.dataset.ts); if (!ts) { btn.title = ""; return; }
+  const m = Math.max(0, Math.floor((Date.now() / 1000 - ts) / 60)), h = Math.round(Number(btn.dataset.win) / 60);
+  btn.title = `Undo: ${btn.dataset.what} · ${m < 1 ? "less than a minute ago" : m + " min ago"}. Works for ${h} hours, in this batch only. (U)`; }
+$("#undoBtn").addEventListener("mouseenter", undoTitle);
 async function doUndo() {
   try { const id_ = Number($("#undoBtn").dataset.id) || null, b = undoBatch(); const r = await post("/api/undo", {...(id_ ? {id: id_} : {}), ...(b ? {batch: b} : {})}); refreshCounts();
     // v0.4.3 #8 (newcomer): a short "Undone" that survives the move to the card (a route change clears the message)
@@ -92,7 +96,8 @@ async function refreshCounts() {
     const rd = S.B && S.B.uid === (S.ME && S.ME.id) ? S.B.rows.filter(r => ["wait", "up", "queued", "reading"].includes(r.state)).length : 0;
     const pb = $("#pendingBadge"); pb.hidden = !c.mine_pending && !rd;
     pb.textContent = String(c.mine_pending) + (rd ? ` · ${rd} reading` : "");   // v0.4.4 #9 (coordinator): plain words, not "63 +4"
-    const lbl = `${c.mine_pending} to review in your batches` + (rd ? `, ${rd} still being read` : "");
+    // v0.4.8 #7: a reviewer's badge is the batch the queue shows (same number as the list)
+    const lbl = `${c.mine_pending} to review in ${"badge_batch" in c ? (c.badge_label ? c.badge_label : "this batch") : "your batches"}` + (rd ? `, ${rd} still being read` : "");
     pb.setAttribute("aria-label", lbl); pb.title = lbl;
     const na = $("#naBadge"); if (na) { na.hidden = !c.needs_admin; na.textContent = `${c.needs_admin || 0} ${c.needs_admin === 1 ? "needs" : "need"} admin`; }   // v0.4.6 #3 (admins only)
     if ($("#v-queue").hidden) $$("#statusTabs button span").forEach(x => x.textContent = "");

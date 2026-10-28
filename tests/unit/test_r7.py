@@ -106,7 +106,7 @@ def test_no_real_crm_never_assigns_profile_ids(env, monkeypatch):
     r = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1"); assert "updates.xlsx" not in r.headers["X-Companions"]
     s = json.loads(r.headers["X-Summary"]); assert s["possible"] == [cid] and s["new_rows"] == 0 and not s["crm_real"]
     rd = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&companion=readme.txt").text
-    assert "Test MC Trade list" in rd and "may already be in MC Trade" in rd
+    assert "Test MC Trade list" in rd and "May already be in MC Trade" in rd
     v = adm.get("/api/export/xlsx?status=approved&batch=r7s&preview=1&view=1").json(); assert v["rows"] == [] and v["left"][0][0] == cid
 
 def test_contacts_upload_used_by_export_and_dryrun(env):

@@ -168,12 +168,12 @@
   <label for="exStatus">Cards</label>
   <select id="exStatus"><option value="approved_new">Ready to export</option><option value="approved">All approved</option><option value="all">All cards</option><option value="pending">Pending only</option><option value="rejected">Rejected only (admin)</option></select>
   <label for="exBatch">Batch</label>
-  <input id="exBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="14"> <select id="exBatch"><option value="">All batches</option></select>
-  <label class="small chk" id="exShowAllL"><input type="checkbox" id="exShowAll"><span> Show everyone's batches</span></label>
+  <input id="exBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="14"> <select id="exBatch"><option value="__choose__">Loading…</option></select>
+  <label class="small chk" id="exShowAllL"><input type="checkbox" id="exShowAll"><span> Show all my batches</span></label>
   <p id="exInfo" class="muted" aria-live="polite"></p>
   <div id="exDup" class="alert bad" hidden></div>
   <div class="exgo"><div class="big" id="exBig" aria-hidden="true"></div><p class="muted" id="exBigT">Loading…</p>
-    <button type="button" class="btn primary lg tile" id="exGo" data-ex="xlsx">Export</button></div>
+    <button type="button" class="btn primary lg tile" id="exGo" data-ex="xlsx" disabled>Export</button></div>
   <details class="more small"><summary>Format</summary>
     <label class="chk"><input type="radio" name="exKind" value="xlsx" checked> MC Trade import (Excel)</label>
     <label class="chk"><input type="radio" name="exKind" value="csv"> Spreadsheet (CSV)</label>

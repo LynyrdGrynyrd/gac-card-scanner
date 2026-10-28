@@ -35,7 +35,7 @@ async function call(u, o = {}) {
 function handleAuth(status, j) {
   if (status !== 401) return (j && (j.error || j.detail)) || null;
   if (upPending()) { authPause(); return "Your sign-in expired. Sign in again: the waiting photos upload after that."; }
-  saveDraft(); S.dirty = false; location.href = "/login?next=" + encodeURIComponent("/ui" + location.hash); return "Please sign in.";
+  saveDraft(); S.dirty = false; location.href = "/login?out=expired&next=" + encodeURIComponent("/ui" + location.hash); return "Please sign in.";
 }
 async function fetchOk(u) {   // audit 2026-10: downloads need the raw Response (a Blob), but errors are handled like call()'s
   const r = await fetch(u, {credentials: "same-origin"}); if (r.ok) return r;
