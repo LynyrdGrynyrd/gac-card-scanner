@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.10 (2026-10-28)
+
+### Windows fix
+- **Windows:** the Export check, the "Exported before" line and the left-out list crashed in the Windows app when a card had already been sent to MC Trade (the date of the earlier export used a format Windows does not support). The date is now built the same way on Windows, macOS and Linux.
+- Version, help, guides and demo video updated to 0.4.10. No other changes from 0.4.9.
+
 ## v0.4.9 (2026-10-28)
 
 ### One set of counts, a real "Sent to MC Trade" record, shorter help (from the v0.4.8 bot reports)

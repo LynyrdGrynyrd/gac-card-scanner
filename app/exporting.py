@@ -303,7 +303,8 @@ def held_cards(sel, metas, idx=None):
     return chg, rep, csv_only
 def when_where(ex, user=None):
     """v0.4.9 #4: 'in an earlier export (Oct 28)'; the file name only for the viewer's OWN export."""
-    d = datetime.datetime.fromtimestamp(ex["ts"]).strftime("%b %-d") if ex and ex.get("ts") else ""
+    t = datetime.datetime.fromtimestamp(ex["ts"]) if ex and ex.get("ts") else None
+    d = f"{t:%b} {t.day}" if t else ""   # no "%-d": it is glibc-only and raises on Windows
     own = bool(user and ex and (ex.get("user") or "") == (user.get("username") if isinstance(user, dict) else user))
     return (f"in {ex['file']} ({d})" if own and ex.get("file") else f"in an earlier export ({d})" if d else "in an earlier export")
 def changed_after_export(sel, metas):

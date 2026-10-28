@@ -8,7 +8,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
-**Current version: 0.4.9.** One set of counts on every export screen and file, a separate "Sent to MC Trade" record (a contacts CSV never counts as an MC Trade import), better same-person matching, shorter help. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
+**Current version: 0.4.10.** Fixes an Export check crash in the Windows app (v0.4.9). Since 0.4.9: one set of counts on every export screen and file, a separate "Sent to MC Trade" record (a contacts CSV never counts as an MC Trade import), better same-person matching, shorter help. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
 
 **Live demo:** a public demo on Hugging Face Spaces (synthetic cards only) is planned; its link will be added here when it is published. Until then you can run the same demo mode locally (see [Public demo](#public-demo)).
 

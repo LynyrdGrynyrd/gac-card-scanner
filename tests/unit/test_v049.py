@@ -230,7 +230,7 @@ def test_v049_10_copy_and_guides():
     poll = up.split("async function poll")[1].split("\n}\n")[0] if "async function poll" in up else up
     assert "conn(false)" in poll
     import os
-    rd = open("README.md", encoding="utf-8").read(); assert "0.4.9" in rd
+    V = open("VERSION").read().strip(); rd = open("README.md", encoding="utf-8").read(); assert V in rd
     src = open("app/exporting.py", encoding="utf-8").read() + open("app/static/ui/views/review.js", encoding="utf-8").read()
     for w in ("Affiliation code", "Columns not checked", "Test MC Trade list", "Test list"):
         assert w not in src, w
@@ -244,6 +244,6 @@ def test_v049_10_help_lengths():
     def words(p):
         s = open(p, encoding="utf-8").read(); s = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", s); s = re.sub(r"\]\([^)]*\)", "]", s)
         return len(re.findall(r"[A-Za-z0-9][\w'’.-]*", s)), s
-    n, s = words("training/REVIEWER-GUIDE.md"); assert n <= 450 and "demo video" in s and "0.4.9" in s
+    n, s = words("training/REVIEWER-GUIDE.md"); assert n <= 450 and "demo video" in s and open("VERSION").read().strip() in s
     vis = len(re.findall(r"[A-Za-z0-9][\w'’.-]*", re.sub(r"<details.*?</details>", "", s, flags=re.S))); assert vis <= 400
     n, s = words("training/ADMIN-GUIDE.md"); assert n <= 800 and "2 rows first" in s
