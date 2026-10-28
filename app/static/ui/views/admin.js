@@ -81,7 +81,7 @@ let aT; $("#aQ").oninput = () => { clearTimeout(aT); aT = setTimeout(loadAudit, 
 async function loadAudit() {
   const q = $("#aQ").value.trim(), rows = await call("/api/admin/audit?limit=300&q=" + encodeURIComponent(q));
   $("#aCsv").href = "/api/admin/audit?fmt=csv&limit=5000&q=" + encodeURIComponent(q);
-  $("#aBody").innerHTML = rows.map(r => `<tr><td>${esc(when(r.ts))}</td><td>${esc(r.who)}</td><td>${esc(r.kind)}</td><td>${r.card ? `<a href="#review/${r.card}">#${r.card}</a>` : ""}</td><td>${esc(r.what)}</td></tr>`).join("") || `<tr><td colspan="5">Nothing found.</td></tr>`;
+  $("#aBody").innerHTML = rows.map(r => `<tr><td>${esc(when(r.ts))}</td><td>${esc(r.who)}</td><td>${esc(r.kind)}</td><td>${r.card ? `<a href="#review/${r.card}" aria-label="Open card #${r.card}">#${r.card}</a>` : ""}</td><td>${esc(r.what)}</td></tr>`).join("") || `<tr><td colspan="5">Nothing found.</td></tr>`;
 }
 
 // ---- Desktop "AI helper" download/start/stop (Admin > Settings). Shown only in the packaged desktop app.

@@ -39,15 +39,15 @@ def test_confirm_correct_versioned_archived_role_audit(env):
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
     cid = mk(ui, st, first_name="Ann", last_name="Lee", company="Acme Gr0up", emails=["ann@acme.com"])
     v = rev.get(f"/api/cards/{cid}").json()["version"]
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up"}).status_code == 409   # no version
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Group", "version": v}).status_code == 409   # other value
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": "x"}).status_code == 409   # stale
-    r = rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": v, "reason": "printed like this"}); assert r.status_code == 200, r.text
-    r2 = rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": r.json()["version"]}); assert r2.json().get("already")
+    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up"}).status_code == 403   # no version (admin-only first)
+    assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Group", "version": v, "reason": "x"}) .status_code == 409  # other value
+    assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": "x", "reason": "x"}).status_code == 409   # stale
+    r = adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": v, "reason": "printed like this"}); assert r.status_code == 200, r.text
+    r2 = adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": r.json()["version"]}); assert r2.json().get("already")
     with st.db() as c:
         assert c.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='hard_check_override'", (cid,)).fetchone()[0] == 1
         assert c.execute("SELECT COUNT(*) FROM auth_log WHERE event LIKE ?", (f"confirmed as correct on card #{cid}:%",)).fetchone()[0] == 0   # round 24: one audit row (card history) per confirm
-    assert U.confirmed_lines(st.get(cid)["fields"]) and "Company confirmed by RR: Acme Gr0up" in U.confirmed_lines(st.get(cid)["fields"])[0]
+    assert U.confirmed_lines(st.get(cid)["fields"]) and "Company confirmed" in U.confirmed_lines(st.get(cid)["fields"])[0] and "Acme Gr0up" in U.confirmed_lines(st.get(cid)["fields"])[0]
     c2 = mk(ui, st, first_name="Bo", last_name="Li", company="Beta Gr0up", emails=["bo@beta.com"]); ui.set_meta(c2, archived=1)
     v2 = rev.get(f"/api/cards/{c2}").json()["version"]
     r = rev.post(f"/api/cards/{c2}/confirm-correct", json={"field": "company", "value": "Beta Gr0up", "version": v2}); assert r.status_code == 409 and r.json()["need"] == "archived"

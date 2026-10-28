@@ -63,9 +63,13 @@ $("#logout").onclick = async () => {
   ["lastBatch", "lastBatchUid", "lastBatchAt", "batchChosen", "batchChosenUid", "queueHash", "order", "draft", "batch"].forEach(k => { try { delete SS[k]; } catch {} });
   await post("/api/auth/logout", {}); location.href = "/login?next=" + encodeURIComponent("/ui" + back); };
 /* ---------- undo ---------- */
-async function refreshUndo() { try { const u = await call("/api/undo"); $("#undoBtn").hidden = !u.id; $("#undoBtn").title = u.id ? "Undo: " + u.label + " (U)" : ""; $("#undoBtn").dataset.label = u.label || ""; } catch {} }
+// v0.4.5 #6: Undo works on the batch you are in, from the last 2 hours, and says what it will undo
+const undoBatch = () => (S.cur && !$("#v-review").hidden && S.cur.batch) || ($("#fBatch") && !$("#v-queue").hidden && $("#fBatch").value) || (S.B && S.B.id) || "";
+async function refreshUndo() { try { const b = undoBatch(), u = await call("/api/undo" + (b ? "?batch=" + encodeURIComponent(b) : "")); $("#undoBtn").hidden = !u.id;
+  const what = u.id ? `${u.label} · ${u.age_min < 1 ? "just now" : u.age_min + " min ago"}${u.batch_label ? " · " + u.batch_label : ""}` : "";
+  $("#undoBtn").title = u.id ? "Undo: " + what + " (U)" : ""; $("#undoBtn").setAttribute("aria-label", u.id ? "Undo: " + what : "Undo"); $("#undoBtn").dataset.label = u.label || ""; $("#undoBtn").dataset.id = u.id || ""; } catch {} }
 async function doUndo() {
-  try { const r = await post("/api/undo", {}); refreshCounts();
+  try { const id_ = Number($("#undoBtn").dataset.id) || null, b = undoBatch(); const r = await post("/api/undo", {...(id_ ? {id: id_} : {}), ...(b ? {batch: b} : {})}); refreshCounts();
     // v0.4.3 #8 (newcomer): a short "Undone" that survives the move to the card (a route change clears the message)
     const msg = "Undone: " + r.undone + "." + (r.notice ? " " + r.notice : ""), show = () => toast(msg, r.notice ? 8000 : 4500);
     const {v, id} = parseHash(); if (v === "review" && r.cards.includes(+id)) { await openCard(+id); show(); } else if (v === "review" && r.cards.length) { location.hash = "review/" + r.cards[0]; setTimeout(show, 500); } else { if (v === "queue") loadQueue(); else if (v === "export") exportInfo(); show(); }

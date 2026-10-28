@@ -170,6 +170,8 @@ def test_soft_company_hint_can_be_confirmed(env):
     cid = mk(ui, st, first_name="Hiro", last_name="Jorgensen", company="Highland Square CoffeeCo.", emails=["hj@v41co.example.com"])
     d = rc.get(f"/api/cards/{cid}").json()
     assert any(a["code"] == "hint" and a["field"] == "company" for a in d["attention"])
+    assert rc.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Highland Square CoffeeCo.", "version": d["version"], "reason": "printed like this"}).status_code == 403   # v0.4.5 #2 admins only
+    rc = env["adm"]
     r = rc.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Highland Square CoffeeCo.", "version": d["version"], "reason": "printed like this"})
     assert r.status_code == 200, r.text
     d = rc.get(f"/api/cards/{cid}").json()

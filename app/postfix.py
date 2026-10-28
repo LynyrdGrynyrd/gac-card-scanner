@@ -27,7 +27,8 @@ def apply(f: dict) -> dict:
         if any(q is not p and _d(re.split(r"(?i)\b(ext|x)\b", q.get("number", ""))[0]) == d and len(_d(q["number"])) > len(_d(p["number"])) for q in phones): continue
         if any(_d(q.get("number")) == _d(p.get("number")) for q in out): continue
         out.append(p)
-    f["phones"] = out
+    # v0.4.5 #10 (data-manager: "(234)555-0153" next to "(234) 555-0153"): one space after the area code, every number
+    f["phones"] = [dict(p, number=re.sub(r"^(\s*\(\d{3}\))(?=\d)", r"\1 ", p["number"])) if isinstance(p.get("number"), str) else p for p in out]
     # 3. title that repeats the name or ends with the company
     t = f.get("title") or ""; fn, ln = f.get("first_name") or "", f.get("last_name") or ""
     if t and fn and ln and fn.isascii() and ln.isascii():

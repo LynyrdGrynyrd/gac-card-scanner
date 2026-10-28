@@ -32,7 +32,7 @@ def test_counts_per_user(env):
     assert c2["mine_pending"] < c1["everyone_pending"] or c2["mine_pending"] == 0
     bs = {b["batch"]: b for b in rc.get("/api/batches").json()}
     assert bs["r15-e"]["own"] and bs["r15-e"]["mine"]
-    assert not {b["batch"]: b for b in r2.get("/api/batches").json()}["r15-e"]["own"]
+    assert "r15-e" not in {b["batch"]: b for b in r2.get("/api/batches").json()}   # v0.4.5 #9: reviewers see only their own
 
 def test_settings_optimistic_lock(env):
     adm = env["adm"]

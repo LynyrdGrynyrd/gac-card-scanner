@@ -72,6 +72,23 @@ def _init_ui(c):
                      ("ix_actions_user", "actions(user_id, undone)"), ("ix_exports_file", "exports(filename)")):
         c.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {ix}")
     _repair_pending_exported(c)
+    _migrate_batch_owners(c)
+
+def _migrate_batch_owners(c):
+    """v0.4.5 #9: older batches (before v0.4.3) get a user-id owner once: the one active user whose initials scanned the
+    batch's first card. Batches with no such single user stay unowned (admins only)."""
+    try:
+        rows = c.execute("""SELECT m.batch, (SELECT h.reviewer FROM card_history h JOIN card_meta m2 ON m2.card_id=h.card_id
+                              WHERE m2.batch=m.batch AND h.action='scanned' ORDER BY h.id LIMIT 1) ini
+                            FROM card_meta m WHERE m.batch IS NOT NULL AND m.batch NOT IN (SELECT batch FROM batch_owners) GROUP BY m.batch""").fetchall()
+        now = time.time(); n = 0
+        for b_, ini in rows:
+            if not ini: continue
+            u = c.execute("SELECT id FROM users WHERE UPPER(initials)=UPPER(?)", (ini,)).fetchall()
+            if len(u) == 1:
+                c.execute("INSERT OR IGNORE INTO batch_owners(batch,user_id,ts) VALUES(?,?,?)", (b_, u[0][0], now)); n += 1
+        if n: c.commit()
+    except Exception: pass
 
 def _repair_pending_exported(c):
     """v0.4.4 #13 (skeptic: #797, made before the v0.4.3 undo fix): a card that is back to pending after an export
@@ -421,7 +438,7 @@ def _lost_dot(m_, dom=None, others=()):
     return not (dom and dom in {o for o in others if o})
 
 OVERRIDABLE = ("name", "last_name", "title", "company", "department", "address", "other_address", "website", "emails")
-ADMIN_OVERRIDE = ("emails", "website", "address", "other_address")   # v0.4.4 (user decision): admin-only again, reverses v0.4.3 #7
+ADMIN_OVERRIDE = OVERRIDABLE + ("first_name",)   # v0.4.5 #2 (user rule): ONLY admins confirm ANY blocked field; reviewer confirmations never count
 def overridable(f):
     """Fields whose hard check can be confirmed with 'This is correct': only garbled-looking values, never formula/HTML."""
     from . import mctrade_export as _mx
@@ -498,7 +515,7 @@ def _as_row(c):
 # share a phone, an email, a name start, a company word, a website, an address or the photo; (2) the look-alike list of
 # every card is cached until any card, status or look-alike-relevant meta field changes (one fingerprint per request).
 _DK = ("batch", "sha256", "archived", "kept_apart", "dup_resolution", "crm_action")
-_DC = {"refs": {}, "ctx": None}; _DCL = threading.Lock()
+_DC = {"refs": {}, "ctx": None}; _DCL = threading.Lock(); _DBUILD = threading.Lock()
 
 def _bkeys(f, m):
     k = set(); al = lambda x: re.sub(r"[^a-z0-9@]", "", (x or "").lower())
@@ -526,10 +543,16 @@ def _dctx(others, metas):
     sig = hashlib.sha1(json.dumps([[o["id"], o["status"], o["fields"], [(metas.get(o["id"]) or {}).get(k_) for k_ in _DK]] for o in others],
                                   sort_keys=True, default=str).encode()).hexdigest()
     if not ctx or ctx["sig"] != sig:
-        idx = {}
-        for o in others:
-            for k_ in _bkeys(o["fields"], metas.get(o["id"]) or {}): idx.setdefault(k_, []).append(o)
-        ctx = {"sig": sig, "idx": idx, "res": {}}
+        # v0.4.5 #1 (skeptic C1, OOM at 4 GB): parallel requests each built their OWN index and result cache for the same data
+        # (about 160 MB each, seconds of work each), so a few polling tabs piled up gigabytes. Now one builds; the rest wait and share it.
+        with _DBUILD:
+            ctx = _DC["ctx"]
+            if not ctx or ctx["sig"] != sig:
+                idx = {}
+                for o in others:
+                    for k_ in _bkeys(o["fields"], metas.get(o["id"]) or {}): idx.setdefault(k_, []).append(o)
+                ctx = {"sig": sig, "idx": idx, "res": {}}
+                with _DCL: _DC["ctx"] = ctx
     with _DCL:
         _DC["refs"] = {k_: v for k_, v in _DC["refs"].items() if now - v[3] < 3}
         _DC["refs"][id(others)] = (others, metas, len(others), now, ctx); _DC["ctx"] = ctx
@@ -604,7 +627,7 @@ def _dupes(c, others, metas, crm):
         other_rej = (o or {}).get("status") == "rejected"
         x["blocking"] = (x["strong"] or x["same_batch"]) and not rej and not other_rej   # a rejected twin only warns
         # v0.4.3 #8: Same (merge) toward your own OLDER batch only on a strong match (same photo, email or phone)
-        x["can_same"] = x["same_user"] and (x["same_batch"] or bool({"same photo", "email exact", "phone exact"} & set(x["why"])))
+        x["can_same"] = x["same_user"] and x["same_batch"]   # v0.4.5 #3: Same (merge) only inside the current batch
         if x["can_same"] and not x["same_batch"]:   # v0.4.4 #1: both batches must have the same owner (user id), as the server checks
             o1, o2 = batch_owner_id(m.get("batch")), batch_owner_id(om.get("batch"))
             x["can_same"] = o1 is not None and o1 == o2
@@ -664,6 +687,9 @@ def merge_refusal(c, f2, tgt, user=None):
     ids = {x["card_id"] for f_ in (c["fields"], f2) for x in dupes(c | {"fields": f_}, cs_, metas_)["queue"]}
     if tgt["id"] not in ids:
         return {"error": f"Card #{tgt['id']} doesn't look like this card, so it can't be merged into.", "need": "merge_unrelated"}
+    # v0.4.5 #3 (shared qa-admin login merged into #516): whoever is signed in, the target must be in THIS card's batch
+    if _batch_of(tgt["id"]) != _batch_of(c["id"]) or not _batch_of(c["id"]):
+        return {"error": f"Card #{tgt['id']} is in another batch, so it can't be merged into. Use Different.", "need": "merge_other_batch"}
     # v0.4.4 #1 (data-manager REGRESSION: merged into another tester's #516): the target's batch must be YOURS, by user id.
     # Initials alone matched two different people. Applies to admins too: a merge edits the target card.
     if user is not None:
@@ -856,6 +882,15 @@ def enrich(c, cards, metas, full=False, names=None):
         d = {k: v for k, v in d.items() if k != "meta"}
         # round 11 (part-timer r4): the review page warns BEFORE Approve when this person was already approved+exported elsewhere
         xb = [x for x in _cross_batch(c, f, cards, metas) if x["exported"] and {"same email", "same phone", "same photo"} & set(x["why"])]
+        # v0.4.5 #4 (data-manager: Grace's misread email/phone matched nothing): exported look-alikes from OTHER batches in the
+        # look-alike list count too (similar name and company), so Approve still says "exported before"
+        _bx = (metas.get(c["id"]) or {}).get("batch"); _have = {x["card_id"] for x in xb}
+        _nm = {o["id"]: f"{o['fields'].get('first_name') or ''} {o['fields'].get('last_name') or ''}".strip() for o in cards}
+        for q_ in d.get("queue") or []:
+            om_ = metas.get(q_["card_id"]) or {}
+            if q_["card_id"] not in _have and om_.get("exported") and om_.get("batch") != _bx and not om_.get("archived"):
+                xb.append({"card_id": q_["card_id"], "why": list(q_.get("why") or []), "exported": True}); _have.add(q_["card_id"])
+        for x in xb: x["name"] = _nm.get(x["card_id"], "")
         with db() as conn:
             nexp = {x["card_id"]: conn.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='exported'", (x["card_id"],)).fetchone()[0] for x in xb}
         _kx = _kept(m)   # round 21: after 'Different person' (or for kept-apart cards) the 'already exported' warning is silent
@@ -1767,6 +1802,12 @@ def _name_index(cards):
 def cards(request: Request, status: str | None = None, batch: str | None = None, archived: bool = False):
     if status not in (None, "", "pending", "approved", "rejected"):
         return JSONResponse({"error": "status must be pending, approved, rejected, or empty (all).", "need": "bad_status"}, 422)
+    if not _LIST_SEM.acquire(timeout=30):   # v0.4.5 #1 guard: a few list builds at a time; the rest wait (or get a calm 503)
+        return JSONResponse({"error": "The server is busy. Try again in a moment.", "need": "busy"}, 503)
+    try: return _cards(request, status, batch, archived)
+    finally: _LIST_SEM.release()
+_LIST_SEM = threading.BoundedSemaphore(int(os.environ.get("GAC_LIST_PARALLEL", "3")))
+def _cards(request, status, batch, archived):
     cs, metas = _active(include_archived=archived)
     # round 15 (manager r14: ~6 s under load): filter BEFORE the expensive enrich, so a one-batch queue only enriches its own cards
     def _b(c): return (metas.get(c["id"]) or {}).get("batch")
@@ -1845,6 +1886,9 @@ def batches(request: Request):
     except Exception: pass
     nob = db().execute("SELECT COUNT(*) FROM cards c LEFT JOIN card_meta m ON m.card_id=c.id WHERE m.batch IS NULL AND COALESCE(m.archived,0)=0").fetchone()[0]
     if nob: out.append({"batch": "__none__", "batch_label": "Earlier cards (no batch)", "n": nob})
+    # v0.4.5 #9 (mctrade-admin: a reviewer listed 187 batches with other people's labels and names): reviewers see their own only
+    if request.state.user.get("role") != "admin":
+        out = [r for r in out if r.get("own") or r.get("batch") == "__none__"]
     return out
 
 def card_version(c):
@@ -1859,6 +1903,12 @@ def card(cid: CardId):
 @router.get("/api/cards/{cid}")
 def card_route(cid: CardId, request: Request):
     out = card(cid)
+    u0 = getattr(request.state, "user", None) or {}
+    if u0.get("role") != "admin":   # v0.4.5 #9: a reviewer never sees other people's export file names or batch names in History
+        for h in out.get("history") or []:
+            if h.get("reviewer") != u0.get("initials") and h.get("action") in ("exported", "redownloaded", "scanned", "moved"):
+                if isinstance(h.get("detail"), dict): h["detail"] = {k: v for k, v in h["detail"].items() if k not in ("file", "batch", "files")}
+                h["text"] = {"exported": "exported (another user's export)", "redownloaded": "re-downloaded by another user", "scanned": "scanned by another user"}.get(h["action"], h.get("text"))
     u = getattr(request.state, "user", None) or {}
     r = db().execute("SELECT vals, version, ts FROM drafts WHERE user_id=? AND card_id=?", (u.get("id"), cid)).fetchone() if u.get("id") else None
     if r:   # v0.4.4 #10: your own server-side draft (kept at an idle sign-out; the browser copy is cleared at every sign-out)
@@ -2045,6 +2095,9 @@ def _update(cid, request, body, internal=False):
     if merge_tgt:
         tf = merge_tgt["fields"]; filled = {}; replaced = {}; unkept = []
         mk_ = body.get("merge_keep") if isinstance(body.get("merge_keep"), dict) else {}   # v0.4.3 #6: the person may choose per field
+        def _bad(k, v):   # v0.4.5 #8: a value that fails a check (misread, garbled) is not copied into the note
+            try: g_ = garbled_errors({k: v, "confirmed_ok": {}}); return bool(g_.get("name" if k == "first_name" else k))
+            except Exception: return False
         for k in ("first_name", "last_name", "title", "company", "website", "address", "department"):
             pk = merge_pick(tf, f, k)
             if pk and mk_.get(k) in ("src", "tgt") and f.get(k): pk = mk_[k]
@@ -2053,9 +2106,9 @@ def _update(cid, request, body, internal=False):
                 if tf.get(k):
                     replaced[k] = tf[k]
                     # v0.4.4 #2 (data-manager M2, coordinator): the REPLACED value goes to the note too ('Regional Owner', the old address)
-                    if _merge_ws(tf[k]) != _merge_ws(f[k]): unkept.append(f"{lab_}: {tf[k]}")
+                    if _merge_ws(tf[k]) != _merge_ws(f[k]) and not _bad(k, tf[k]): unkept.append(f"{lab_}: {tf[k]}")
                 filled[k] = f[k]; tf[k] = f[k]
-            elif f.get(k) and tf.get(k) and _merge_ws(f[k]) != _merge_ws(tf[k]):
+            elif f.get(k) and tf.get(k) and _merge_ws(f[k]) != _merge_ws(tf[k]) and not _bad(k, f[k]):
                 unkept.append(f"{lab_}: {f[k]}")   # v0.4.3 #6: never dropped silently; it goes to the note
         for k in ("emails", "social"):
             add = [x for x in f.get(k, []) if x not in tf.get(k, [])]
@@ -2565,16 +2618,41 @@ def archive(request: Request, body: dict = Body(...)):
     return {"archived": len(ids)}
 
 # ---------------------------------------------------------------- undo
+UNDO_WINDOW = int(os.environ.get("GAC_UNDO_MINUTES", "120")) * 60   # v0.4.5 #6: Undo reaches back this far, no further
+
+def _undo_batches(a):
+    try: snap = json.loads(a["snapshot"])
+    except Exception: return set()
+    return {_batch_of(s_["card"]["id"]) for s_ in snap if s_.get("card")}
+
+def _undo_pick(user, batch, aid=None, peek=False):
+    """v0.4.5 #6 (skeptic L1: Undo reached back hours into other batches): the newest open action of this person from the
+    last UNDO_WINDOW, and, when a batch is given, only one whose cards are all in that batch. Exported-since ones are closed."""
+        # peeking is read-only and non-closing: it may look past the batch/window but PRESERVES the refused=exported semantics
+    q = ("SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL" + (" AND ts>=?" if not peek else "") + (" AND id=?" if aid is not None else "")
+         + " ORDER BY id DESC LIMIT 50")
+    args = (user["id"],) + (() if peek else (time.time() - UNDO_WINDOW,)) + ((aid,) if aid is not None else ())
+    for r in db().execute(q, args).fetchall():
+        if peek and _undo_exported(r): continue   # the button never promises an undo that will be refused
+        if batch and _undo_batches(r) != {batch} and not peek: continue
+        if _undo_exported(r):
+            with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), r["id"]))
+            if aid is not None: return r
+            continue
+        return r
+    return None
+
 @router.get("/api/undo")
-def undo_peek(request: Request):
-    # v0.4.4 #10 (skeptic L1): an action that can't be undone any more (exported since) is closed and skipped, so the
-    # Undo button moves on to the one before it instead of failing every time
-    for _ in range(20):
-        r = db().execute("SELECT id,ts,label,snapshot FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL ORDER BY id DESC LIMIT 1", (request.state.user["id"],)).fetchone()
-        if not r: return {}
-        if not _undo_exported(r): return {k: r[k] for k in ("id", "ts", "label")}
-        with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), r["id"]))
-    return {}
+def undo_peek(request: Request, batch: str = ""):
+    r = _undo_pick(request.state.user, batch or None, peek=True)
+    if not r: return {}
+    bs = _undo_batches(r); b = next(iter(bs)) if len(bs) == 1 else None
+    lab = (metas_one(b) if b else None) or b or ""
+    return {"id": r["id"], "ts": r["ts"], "label": r["label"], "batch": b, "batch_label": lab, "age_min": int((time.time() - r["ts"]) // 60)}
+
+def metas_one(batch):
+    r = db().execute("SELECT batch_label FROM card_meta WHERE batch=? AND batch_label IS NOT NULL LIMIT 1", (batch,)).fetchone()
+    return r[0] if r else None
 
 def _undo_exported(a):
     """Cards of action `a` that were exported after it (v0.4.3 #1)."""
@@ -2593,9 +2671,19 @@ def undo(request: Request, body: dict = Body(default={})):
         except BadId: aid = None
         if aid is None:
             return JSONResponse({"error": "id must be the number of an action from your undo list."}, 422)
-    q = "SELECT * FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL" + (" AND id=?" if "id" in body else "") + " ORDER BY id DESC LIMIT 1"
-    a = db().execute(q, (user["id"], aid) if "id" in body else (user["id"],)).fetchone()
-    if not a: return JSONResponse({"error": "Nothing to undo."}, 404)
+    batch_ = str(body.get("batch") or "") or None
+    if "id" not in body and batch_ and db().execute("SELECT 1 FROM actions WHERE user_id=? AND undone IS NULL AND refused IS NULL", (user["id"],)).fetchone() \
+            and not _undo_pick(user, batch_) and not _undo_pick(user, None):
+        # v0.4.5 #6: in this batch there is nothing to undo, but there is elsewhere. Never undo a cross-batch action by accident.
+        return JSONResponse({"error": "That action is in another batch. Open that batch to undo it.", "need": "wrong_batch"}, 409)
+    if "id" in body:
+        a = _undo_pick(user, None, aid)
+        if a is not None and _undo_exported(a):
+            with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), a["id"]))
+            return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in _undo_exported(a))} was exported after this. Change it by hand; it is then marked for re-export.", "need": "exported", "cards": _undo_exported(a)}, 409)
+    else:
+        a = _undo_pick(user, batch_)
+    if not a: return JSONResponse({"error": "Nothing to undo in this batch from the last 2 hours."}, 404)
     if time.time() - a["ts"] > 24 * 3600: return JSONResponse({"error": "That action is more than a day old and can't be undone here."}, 409)
     snap = json.loads(a["snapshot"])
     # Round 9 (skeptic R9-1): undo only what THAT action changed. Each value is put back only while it still holds

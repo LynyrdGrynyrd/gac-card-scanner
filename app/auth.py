@@ -7,7 +7,7 @@ from . import store, demo
 
 router = APIRouter()
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000
+COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000; MAX_SESSIONS = int(os.environ.get("GAC_MAX_SESSIONS", "10"))
 SESSION_MAX_HOURS = float(os.environ.get("GAC_SESSION_MAX_HOURS", str(7 * 24)))   # absolute limit, sliding expiry or not
 PUBLIC_PREFIX = ("/static/", "/api/auth/")
 PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo", "/help", "/ui/help"}   # v0.4.2 #10: public help
@@ -39,7 +39,10 @@ def set_setting(k, v):
 def hash_pw(pw):
     salt = secrets.token_bytes(16)
     return f"pbkdf2_sha256${ITER}${salt.hex()}${hashlib.pbkdf2_hmac('sha256', pw.encode(), salt, ITER).hex()}"
+_PW_SEM = threading.BoundedSemaphore(2)   # v0.4.5 #1 guard: at most 2 password checks at once (each is ~0.2 s of CPU)
 def check_pw(pw, stored):
+    with _PW_SEM: return _check_pw(pw, stored)
+def _check_pw(pw, stored):
     try:
         _, it, salt, h = stored.split("$")
         return hmac.compare_digest(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), int(it)).hex(), h)
@@ -277,6 +280,9 @@ def _start_session(request, uid):
         c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
         c.execute("INSERT INTO sessions(token,user_id,created,expires,ip) VALUES(?,?,?,?,?)",
                   (hashlib.sha256(tok.encode()).hexdigest(), uid, time.time(), time.time() + SESSION_HOURS * 3600, "" if demo.enabled() else _client(request)))
+        # v0.4.5 #1 guard: at most MAX_SESSIONS open sign-ins per person (a script signing in every few seconds can't pile them up)
+        c.execute("""DELETE FROM sessions WHERE user_id=? AND token NOT IN
+                     (SELECT token FROM sessions WHERE user_id=? ORDER BY created DESC LIMIT ?)""", (uid, uid, MAX_SESSIONS))
     return tok
 
 def _set_cookie(resp, request, tok):

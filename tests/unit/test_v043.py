@@ -20,7 +20,10 @@ def test_v043_undo_refused_after_export(env):
     cid = mk(ui, st, first_name="Ulla", last_name="Nox", emails=["un@undo43.example.com"], by=ini); ui.set_meta(cid, batch="u43", batch_label="u43")
     assert rv.post(f"/api/cards/{cid}", json={"status": "approved", "crm_action": "create_new"}).status_code == 200
     ui.log(cid, ini, "exported")
-    r = rv.post("/api/undo", json={}); assert r.status_code == 409 and r.json()["need"] == "exported" and cid in r.json()["cards"]
+    from app import auth
+    aid = ui.db().execute("SELECT id FROM actions WHERE user_id=(SELECT id FROM users WHERE username='undo43') ORDER BY id DESC LIMIT 1").fetchone()[0]
+    r = rv.post("/api/undo", json={"id": aid}); assert r.status_code == 409 and r.json()["need"] == "exported" and cid in r.json()["cards"]
+    assert rv.get("/api/undo").json() == {}   # v0.4.5 #6: the button never promises that undo
     assert st.get(cid)["status"] == "approved"
 
 
@@ -53,9 +56,9 @@ def test_v043_idle_dialog_keeps_draft():
 def test_v043_history_different_wording():
     from app import audit_log
     t = audit_log._audit_text("cross_batch_confirmed", None, None, {"cards": [17, 25, 30], "via": "none are the same person"})
-    assert "may be the same person" not in t and "marked different from 3 cards" in t
+    assert "may be the same person" not in t and "marked different from 3 approved cards" in t
     t = audit_log._audit_text("cross_batch_confirmed", None, None, {"cards": [17, 25], "via": "confirm", "kept": [25]})
-    assert "#17 may be the same person" in t and "different from 1 card" in t
+    assert "#17 may be the same person" in t and "different from 1 approved card in other batches" in t
 
 
 def test_v043_exported_elsewhere_kept_after_different(env):
@@ -106,7 +109,7 @@ def test_v043_merge_keeps_other_value_in_note(env):
 # ---- #7 staff may confirm with a reason
 def test_v043_staff_confirm_everything():
     from app import ui
-    assert ui.ADMIN_OVERRIDE == ("emails", "website", "address", "other_address")   # v0.4.4 user decision: admins only again
+    assert set(ui.OVERRIDABLE) <= set(ui.ADMIN_OVERRIDE)   # v0.4.5 #2: every field is admin-only
     assert "An admin needs to confirm this." in open("app/static/ui/views/review.js", encoding="utf-8").read()
 
 

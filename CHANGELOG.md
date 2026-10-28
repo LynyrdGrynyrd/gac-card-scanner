@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.5 (2026-10-27)
+
+### Memory fix, admin-only confirm for every field, safer merge and undo (from the v0.4.4 tester reports)
+- **Memory leak fixed:** the app opened a new database connection on every lookup, and dropped connections weren't freed promptly. A few people polling the queue at once piled up thousands of them: about 4 GB in minutes, then the system stopped the app. Each worker now reuses one connection. Under the same load the app stays at about 350–400 MB. A 30-minute soak test (bench/mem_soak.py) checks it.
+- **Guards:** at most 10 open sign-ins per person, at most 2 password checks at once, at most 3 queue lists built at once, and a memory watchdog that clears caches and logs a line above 1.5 GB. /health shows uptime and memory.
+- **Only admins may Confirm** a blocked field, any field (name, title, company, department, email, website, address). Confirmations made earlier by reviewers no longer count at export. Each problem tells a reviewer: "Fix it, or ask an admin if the card is right."
+- **Same (merge)** only inside the card's own batch, whoever is signed in.
+- **Approve** always says when this person was exported before, also after Different, in one dialog where Cancel has the focus. An MC Trade look-alike alone no longer asks "Approve as a new person?". In the "AI check not finished" dialog, Cancel has the focus and Enter never approves.
+- **Wait for the AI** now continues when the check is done (one message).
+- **Undo** works only on the batch you are in and on the last 2 hours, and says what it will undo and when.
+- **Export:** the READ-ME names the one file to import; the SUMMARY's "Why" column gives the real reasons. Your own batches are listed without "More batches…". Export can't be pressed while it is loading. Values that failed a check don't go into the merge note.
+- **Privacy:** reviewers see only their own batches, and History doesn't show other people's export file names. Older batches get an owner by user id.
+- **Smaller fixes:** card links have names for screen readers; History counts match their lists; "MC Trade" keeps its capitals in the dry run; one "Summary" link in Export history; mobile numbers get a space after the area code; shorter duplicate box.
+- **Shorter wording:** the "AI check not finished" dialog no longer repeats its title; Different on one card says "(exported before)".
+- **Guides:** a line for your admin's name and contact.
+
 ## v0.4.4 (2026-10-16)
 
 ### Admin-only confirm, safer merge, one "To check" number (from the v0.4.3 tester reports)

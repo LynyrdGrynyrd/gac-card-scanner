@@ -262,7 +262,7 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     def nm(c): return _html.escape(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)")
     trs = "".join(f"<tr data-card='{c['id']}' data-decision='{dec[str(c['id'])]}' style='background:{COL[dec[str(c['id'])]]}'><td>#{c['id']}</td><td>{nm(c)}</td><td>{_html.escape(c['fields'].get('company') or '')}</td>"
                   f"<td><b>{'TO CHECK (in the new-profiles file)' if str(c['id']) in tc_ and dec[str(c['id'])] in ('new', 'update') else LBL[dec[str(c['id'])]]}</b></td>"
-                  f"<td>{_html.escape(why.get(c['id'], '') or (mcp.get(str(c['id']), '').capitalize() if dec[str(c['id'])] == 'new' else ''))}</td></tr>"
+                  f"<td>{_html.escape(why.get(c['id'], '') or ((lambda t_: t_[:1].upper() + t_[1:])(mcp.get(str(c['id']), '')) if dec[str(c['id'])] == 'new' else ''))}</td></tr>"
                   for c in sorted(sel, key=lambda c: (order['review' if str(c['id']) in tc_ else dec[str(c['id'])]], c["id"])))
     left = [int(i) for i, k in dec.items() if k in ("review", "left")]
     html_ = ("<!doctype html><html><head><meta charset='utf-8'><title>MC Trade dry run: match report</title></head><body style='font:14px sans-serif;margin:16px'>"

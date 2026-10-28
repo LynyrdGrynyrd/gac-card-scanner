@@ -35,9 +35,9 @@
   </div>
 </header>
 <main id="main" class="wrap guide" tabindex="-1">
-<p class="draftnote">Pilot help, updated Oct 16, 2026 · version <span data-ver>0.4.4</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
+<p class="draftnote">Pilot help, updated Oct 27, 2026 · version <span data-ver>0.4.5</span>. <a href="/static/ui/GAC-Card-Scanner-Admin-Guide.pdf" target="_blank" rel="noopener">Open the printable PDF</a> · <a href="/static/ui/help.html">← Reviewer Start Here</a></p>
 <h1 id="admin-mc-trade-guide">Admin &amp; MC Trade Guide</h1>
-<p><em>Greater Akron Chamber · Card Scanner · version 0.4.4</em></p>
+<p><em>Greater Akron Chamber · Card Scanner · version 0.4.5</em></p>
 <blockquote class="callout">
 <p>For the person who runs the scanner and does the MC Trade import. Reviewing cards is in the <strong><a href="/static/ui/help.html">Reviewer Guide</a></strong>.</p>
 </blockquote>
@@ -99,7 +99,7 @@
 </tbody>
 </table></div>
 <p>The server enforces this. An admin exporting someone else's batch is asked first; <strong>Cancel</strong> is the default.</p>
-<p>Only admins may <strong>Confirm</strong> a blocked email, website or address. Open the card, compare with the photo, click <strong>Confirm</strong> and give a reason. The reason is logged.</p>
+<p>Only admins may <strong>Confirm</strong> a blocked field (any field: name, title, company, department, email, website, address). Confirmations made by reviewers before v0.4.5 no longer count; those cards block again until an admin confirms them. Open the card, compare with the photo, click <strong>Confirm</strong> and give a reason. The reason is logged.</p>
 <hr />
 <h2 id="5-export">5. Export</h2>
 <ol>
@@ -131,7 +131,7 @@
 </tbody>
 </table></div>
 <figure><img alt="Ready to save" src="/static/ui/help-img/20_export_confirm.webp" loading="lazy" /></figure>
-<p>You get 3 files. Import only the <strong>.xlsx</strong>. Read the <strong>Check</strong> lines first.</p>
+<p>Import only <strong>GAC-MCTrade-…-DATE.xlsx</strong> (the name ends in the date). Not for import: <strong>…-SUMMARY.xlsx</strong>, the CSV and the READ-ME. <strong>…-UPDATES.xlsx</strong> (only when there are updates) is for updating existing contacts. Read the <strong>Check</strong> lines first.</p>
 <hr />
 <h2 id="6-mc-trade-import-first-time">6. MC Trade import: first time</h2>
 <ol>
@@ -214,6 +214,7 @@
 <figure><img alt="Delete permanently" src="/static/ui/help-img/17_delete_permanently.webp" loading="lazy" /></figure>
 <hr />
 <h2 id="11-problems">11. Problems</h2>
+<p>GAC admin contact: ______________________ (name, phone or email). Write it into the Reviewer Guide too.</p>
 <div class="tw"><table>
 <thead>
 <tr>

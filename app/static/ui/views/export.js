@@ -12,7 +12,8 @@ async function exportInfo() {
   const st = $("#exStatus").value, eb = $("#exBatch").value; $("#exInfo").textContent = "Checking…";
   // v0.4.4 #6 (reviewer: another batch's "2 ready" / "0 cards ready" for 2-3 s): a newer check wins; until then, "Loading…"
   const seq = exportInfo.seq = (exportInfo.seq || 0) + 1;
-  if ($("#exBig")) { $("#exBig").textContent = "…"; $("#exBigT").textContent = "Loading…"; }
+  // v0.4.5 (reviewer e, item 10): one "Loading…" only, and Export can't be pressed until the count is known
+  if ($("#exBig")) { $("#exBig").textContent = ""; $("#exBigT").textContent = "Loading…"; } $$(".tile").forEach(t => t.disabled = true);
   try {
     if (!exportInfo.busyList) {   // refreshed every time (manager L-new3: a new batch showed only after a reload)
       exportInfo.busyList = true; let bs; try { bs = await call("/api/batches"); exportInfo.list = bs; } finally { exportInfo.busyList = false; }
@@ -37,7 +38,8 @@ async function exportInfo() {
       const cur_ = bs.find(b => b.batch === keepB);
       $("#exBatch").innerHTML = (keepB === "__choose__" ? `<option value="__choose__">Choose a batch…</option>` : "") +
         (showAll ? (mine.length ? `<optgroup label="Your batches">${mine.map(opt).join("")}</optgroup>` : "") + (others.length ? `<optgroup label="Other people's batches">${others.map(opt).join("")}</optgroup>` : "") + (adm ? `<option value="">All batches (everyone's)</option>` : "")
-                 : (cur_ && (adm || cur_.own) ? opt(cur_) : keepB === "" && adm ? `<option value="">All batches (everyone's)</option>` : "") + `<option value="__more__">More batches…</option>`);
+                 // v0.4.5 (reviewer d): your own batches are listed straight away; "More batches…" is only for other people's (admins)
+                 : [...mine].sort((a, b) => (b.started || 0) - (a.started || 0)).map(opt).join("") + (cur_ && !mine.includes(cur_) && adm ? opt(cur_) : "") + (keepB === "" && adm ? `<option value="">All batches (everyone's)</option>` : "") + (adm && others.length ? `<option value="__more__">More batches…</option>` : ""));
       if ($("#exShowAll")) { $("#exShowAll").nextElementSibling.textContent = adm ? " Show all batches" : " Show all my batches"; }
       $("#exBatch").value = [...$("#exBatch").options].some(o => o.value === keepB) ? keepB : ($("#exBatch").options[0] || {}).value || ""; filterExBatch(); }
     if ($("#exBatch").value !== "__more__") exportInfo.last = $("#exBatch").value;
@@ -53,7 +55,7 @@ async function exportInfo() {
     $("#exOwner")?.remove();
     if (notMine && r.count) $("#exInfo").insertAdjacentHTML("beforebegin", `<p class="alert bad" id="exOwner" role="status"><b>${eb === "" ? "All batches: this includes other people's cards." : `Not your batch: ${esc(bo_.owner || "someone else")} scanned it.`}</b> You will be asked before export.</p>`);
     $("#exInfo").innerHTML = "" + `${r.count ? "" : (!$("#exDone").hidden && $("#exDone").classList.contains("ok") && $("#exDone").dataset.batch === eb) ? "All cards in this batch are exported." : "Nothing to export yet. Approve some cards first."}` +
-      (r.flagged && r.flagged.length ? `<span class="flag bad">To check: ${r.flagged.length} (${r.flagged.slice(0, 5).map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}${r.flagged.length > 5 ? " …" : ""}).</span>` : "");   // v0.4.1 #4: same count as the preview and the sheet
+      (r.flagged && r.flagged.length ? `<span class="flag bad">To check: ${r.flagged.length} (${r.flagged.slice(0, 5).map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}${r.flagged.length > 5 ? " …" : ""}).</span>` : "");   // v0.4.1 #4: same count as the preview and the sheet
 
     $("#exDup").hidden = !r.duplicates.length;
     // round 7: no button per pair (part-timer/newcomer: a flood of buttons that write onto other people's cards). The pairs are
@@ -61,7 +63,7 @@ async function exportInfo() {
     const pairsAll = r.duplicates.flatMap(p => p.with.filter(w => !(p.strong || []).includes(w)).map(w => [p.id, w]));
     $("#exDup").innerHTML = r.duplicates.length ? `<b>Export is blocked: some cards look like the same person.</b> ${eb ? "Open each card to merge, or mark them as different people there." : "<b>Tip:</b> choose your own batch; other people's look-alikes don't block it."}` +
       (!eb && r.ok_batches && r.ok_batches.length ? `<p>These batches can be exported now: ${r.ok_batches.map(b => `<a href="#" data-xbatch="${esc(b.batch)}">${esc(b.label)}</a> (${b.count})`).join(", ")}</p>` : "") +
-      `<details${eb ? " open" : ""}><summary>Review list: ${plural(r.duplicates.length, "card")} with look-alikes</summary><ul>${r.duplicates.map(p => `<li><a href="#review/${p.id}">Card #${p.id}</a>${p.batch ? ` <span class="sub">(${esc(p.batch)})</span>` : ""} may duplicate ${p.with.map(w => `<a href="#review/${w}">#${w}</a>` + ((p.strong || []).includes(w) ? ` <span class="sub">(duplicate scan: merge or reject one)</span>` : "")).join(", ")}</li>`).join("")}</ul></details>` : "";
+      `<details${eb ? " open" : ""}><summary>Review list: ${plural(r.duplicates.length, "card")} with look-alikes</summary><ul>${r.duplicates.map(p => `<li><a href="#review/${p.id}">Card #${p.id}</a>${p.batch ? ` <span class="sub">(${esc(p.batch)})</span>` : ""} may duplicate ${p.with.map(w => `<a href="#review/${w}" aria-label="Open card #${w}">#${w}</a>` + ((p.strong || []).includes(w) ? ` <span class="sub">(duplicate scan: merge or reject one)</span>` : "")).join(", ")}</li>`).join("")}</ul></details>` : "";
     const pairs = S.ME.role === "admin" ? pairsAll : [];
     if (pairs.length > 1) {
       $("#exDup").insertAdjacentHTML("beforeend", `<p class="small">Admin only: <button class="btn small" id="xKeepAll">Mark all ${pairs.length} listed pairs as different people…</button> (check the list first)</p>`);
@@ -76,7 +78,7 @@ async function exportInfo() {
     $$(".tile").forEach(t => t.disabled = !r.count || r.duplicates.length > 0); loadExportHistory();
     if ($("#exBig")) { $("#exBig").textContent = r.count; $("#exBigT").textContent = r.count === 1 ? "card ready" : "cards ready"; }
     return r;
-  } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; }
+  } catch (e) { $("#exInfo").textContent = "Couldn't check: " + e.message; if ($("#exBigT") && $("#exBigT").textContent === "Loading…") $("#exBigT").textContent = "Couldn't check"; }
 }
 // audit 2026-10: say what was really saved. In the desktop app each file goes through a native Save dialog that can be
 // cancelled (desktop.js gacSaveBlob answers {saved} | {cancelled} | {error}); a browser only takes the download over.
@@ -107,7 +109,7 @@ $("#exPreview").onclick = async () => {
         const a = await ask({title: "Preview of the MC Trade files", html: `<p class="small">Nothing is downloaded or marked as exported.</p><p>${esc(v.source_text)}</p>` +
           // v0.4.3 #4: possible MC Trade matches get their own "Needs review" list, as in the dry run and the CSV Check column
           // v0.4.4 #3: the same 'To check' list (and number) as the page, the Save dialog and the READ-ME
-          ((v.to_check_ids || []).length ? `<p><b>To check (${v.to_check_ids.length})</b></p><ul>${v.to_check_ids.map(i => `<li><a href="#review/${esc(i)}">#${esc(i)}</a>${(v.mc_possible || {})[i] ? " " + esc((v.mc_possible || {})[i]) : ""}</li>`).join("")}</ul>` : "") +
+          ((v.to_check_ids || []).length ? `<p><b>To check (${v.to_check_ids.length})</b></p><ul>${v.to_check_ids.map(i => `<li><a href="#review/${esc(i)}" aria-label="Open card #${esc(i)}">#${esc(i)}</a>${(v.mc_possible || {})[i] ? " " + esc((v.mc_possible || {})[i]) : ""}</li>`).join("")}</ul>` : "") +
           `<p><b>New profiles (${plural(v.rows.length, "row")})</b></p>` + tbl(["Check", "Card", ...v.headers], v.rows.map((r_, i) => [rn[i] || "", v.row_ids ? "#" + v.row_ids[i] : "", ...r_])) +
           (v.updates.length ? `<p><b>UPDATES file (${v.updates.length})</b></p>` + tbl(v.headers, v.updates) : "") +
           `<p><b>Left out (${v.left.length})</b></p>` + tbl(["Card", "Why"], v.left.map(x => ["#" + x[0], x[1]])) +
@@ -135,7 +137,7 @@ async function loadExportHistory() {
   const all = everyone ? every : every.filter(x => x.own), h = all.slice(0, exHistShow);
   $("#exHistMore").hidden = all.length <= h.length; $("#exHistCount").textContent = `${h.length} of ${all.length} shown` + (everyone ? " (everyone's)" : "");
   $("#exHist").innerHTML = h.map(x => `<tr><td>${esc(when(x.ts))}</td><td>${esc(x.initials)}</td><td>${esc(HK[x.kind] || x.kind.toUpperCase())}${x.batch_label ? `<div class="sub">${esc(x.batch_label)}</div>` : ""}</td><td>${x.count}</td>
-    <td>${x.available ? `<a href="/api/exports/${x.id}/download" title="${esc(x.filename)}">Download</a>` + (x.companions || []).map(c => ` · <a href="/api/exports/${x.id}/companion/${c}">${c === "readme.txt" ? "READ-ME" : c === "updates.xlsx" ? "Updates" : "Extra details"}</a>`).join("") : `<span title="${esc(x.filename)}">File</span> <span class="sub">(${x.mine ? "copy deleted" : "only " + esc(x.initials) + " or an admin can download it"})</span>`}</td></tr>`).join("") || `<tr><td colspan="5">No exports yet.</td></tr>`;
+    <td>${x.available ? `<a href="/api/exports/${x.id}/download" title="${esc(x.filename)}">Download</a>` + (x.companions || []).map(c => ` · <a href="/api/exports/${x.id}/companion/${c}">${c === "readme.txt" ? "READ-ME" : c === "updates.xlsx" ? "Updates" : c === "summary.xlsx" ? "Summary" : "Extra details"}</a>`).join("") : `<span title="${esc(x.filename)}">File</span> <span class="sub">(${x.mine ? "copy deleted" : "only " + esc(x.initials) + " or an admin can download it"})</span>`}</td></tr>`).join("") || `<tr><td colspan="5">No exports yet.</td></tr>`;
 }
 $("#exHistEveryone") && ($("#exHistEveryone").onchange = () => loadExportHistory());
 const KIND = {xlsx: "MC Trade import (Excel)", csv: "Spreadsheet (CSV)", vcf: "Contacts (vCard)"};
@@ -161,12 +163,12 @@ async function tileExport(t) {
       so = `<div class="alert"><ul><li><b>${info.count}</b> approved card${(info.count) === 1 ? "" : "s"} checked</li>` +
         `<li><b>${v.rows.length}</b> new contact${(v.rows.length) === 1 ? "" : "s"}${shw(v.rows.length, esc(v.rows.map(nm).join(", ")))}</li>` +
         (v.updates.length ? `<li><b>${v.updates.length}</b> update${(v.updates.length) === 1 ? "" : "s"} to existing contacts: ${esc(v.updates.map(nm).join(", "))}</li>` : "") +
-        ((v.update_diff || []).length ? `<li><b>What the updates change in MC Trade</b> (an import overwrites non-blank cells and can't be undone):<div style="overflow:auto;max-height:30vh"><table class="aidiff" data-updiff="1"><thead><tr><th>Card</th><th>Profile</th><th>Field</th><th>Now in MC Trade</th><th>After import</th></tr></thead><tbody>${v.update_diff.map(u => u.fields.map(x => `<tr${x.changes ? ' class="chg"' : ""}><td><a href="#review/${u.card}">#${u.card}</a></td><td>${esc(u.profile_id)}</td><td>${esc(x.field)}</td><td>${x.old === null ? "<i>not in the contacts export: check in MC Trade</i>" : esc(x.old)}</td><td>${x.changes || x.changes === null ? "<b>" + esc(x.new) + "</b>" : esc(x.new)}</td></tr>`).join("")).join("")}</tbody></table></div></li>` : "") +
-        ((v.sample_email_matches || []).length ? `<li>${v.sample_email_matches.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")} may already be in MC Trade (test list).</li>` : "") +
+        ((v.update_diff || []).length ? `<li><b>What the updates change in MC Trade</b> (an import overwrites non-blank cells and can't be undone):<div style="overflow:auto;max-height:30vh"><table class="aidiff" data-updiff="1"><thead><tr><th>Card</th><th>Profile</th><th>Field</th><th>Now in MC Trade</th><th>After import</th></tr></thead><tbody>${v.update_diff.map(u => u.fields.map(x => `<tr${x.changes ? ' class="chg"' : ""}><td><a href="#review/${u.card}" aria-label="Open card #${u.card}">#${u.card}</a></td><td>${esc(u.profile_id)}</td><td>${esc(x.field)}</td><td>${x.old === null ? "<i>not in the contacts export: check in MC Trade</i>" : esc(x.old)}</td><td>${x.changes || x.changes === null ? "<b>" + esc(x.new) + "</b>" : esc(x.new)}</td></tr>`).join("")).join("")}</tbody></table></div></li>` : "") +
+        ((v.sample_email_matches || []).length ? `<li>${v.sample_email_matches.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")} may already be in MC Trade (test list).</li>` : "") +
         (() => { const dz = v.decisions || {}, rv = v.left.filter(x => dz[String(x[0])] === "review"), lo = v.left.filter(x => dz[String(x[0])] !== "review");   // same classification as the export + dry run
           return (rv.length ? `<li><b>${rv.length}</b> card${(rv.length) === 1 ? "" : "s"} to review (in neither file)${shw(rv.length, rv.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : "") +
                  (lo.length ? `<li><b>${lo.length}</b> card${(lo.length) === 1 ? "" : "s"} left out (merged into another row, or to fix first)${shw(lo.length, lo.map(x => `<a href="#review/${x[0]}" title="${esc(x[1])}">#${x[0]}</a>`).join(", "))}</li>` : ""); })() +
-        (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
+        (info.pending_count ? `<li><b>${info.pending_count}</b> card${(info.pending_count) === 1 ? "" : "s"} still <b>pending</b>${shw(info.pending_count, info.pending.slice(0, 30).map(x => `<a href="#review/${x.id}" aria-label="Open card #${x.id}">#${x.id} ${esc(x.name)}</a>`).join(", "))}</li>` : "") +
         `</ul></div>`; } } catch {} }
   // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
   let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
@@ -191,8 +193,8 @@ async function tileExport(t) {
     let sm = null; try { sm = JSON.parse(res.headers.get("X-Summary") || "null"); } catch {}
     // round 23 (coordinator/newcomer r22): one short line, plus only what needs action
     $("#exDone").innerHTML = (sm ? `<b>✓ ${plural(sm.cards, "card")} exported` + (sm.update_rows ? ` (${plural(sm.new_rows, "new contact")}, ${plural(sm.update_rows, "update")})` : "") + (sm.crm_real ? "" : " (test MC Trade list)") + `.</b>` +
-        (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "") +
-        (sm.possible.length ? ` <span class="flag low">May already be in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}">#${i}</a>`).join(", ")}.</span>` : "")
+        (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "") +
+        (sm.possible.length ? ` <span class="flag low">May already be in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "")
       : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the .xlsx${comp.includes("updates.xlsx") ? " (updates separately)" : ""}` + ((sm ? sm.new_rows + (sm.update_rows || 0) : +n) > 2 ? "; test 2 rows first." : ".") : "");
     const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
     if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);

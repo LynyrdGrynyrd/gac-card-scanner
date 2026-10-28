@@ -298,6 +298,15 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         # Screen, Save dialog, READ-ME Totals, dry run and Preview all use it.
         _chk0 = set(_warn) | {i for i, _ in conf_} | set(ovr_) | _flagged | {i for i, _w, _y in website_warnings(sel, metas, rows + upd, res.get("merged"))}
         _tc = _chk0 | {int(k) for k, v in res["decisions"].items() if v[0] == mx.REVIEW}
+        # v0.4.5 #8 (data-manager: Why said only "see the READ-ME"): the real reasons, so the summary works on its own
+        _why = {i: list(v) for i, v in _warn.items()}
+        for i, ln in conf_: _why.setdefault(i, []).append(str(ln).rstrip("."))
+        for i in ovr_: _why.setdefault(i, []).append("approved with a reason despite a warning")
+        for i, w_, y_ in website_warnings(sel, metas, rows + upd, res.get("merged")): _why.setdefault(i, []).append(f"website {w_}: {y_}")
+        for k, v in res["decisions"].items():
+            if v[0] == mx.REVIEW: _why.setdefault(int(k), []).append("needs a decision: " + str(v[1] or "possible match in MC Trade").rstrip("."))
+        for c in sel:
+            if c["id"] in _flagged and c["id"] not in _why: _why[c["id"]] = [str(aud(c)[-1]).rstrip(".")]
         _has_web = any(mx.canonical(h) in ("Website", "IndWebsite") for h in hdr if h)
         readme = "\n".join([
             *(["*** PREVIEW ONLY: DO NOT IMPORT. These files were not marked as exported; use the real export for MC Trade. ***"] if preview else []),
@@ -306,7 +315,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
             ("Before importing: read the “Check” lines. " if _tc else "") + "An import can't be undone." + (" Test 2 rows first." if len(rows) + len(upd) > 2 else "")
             + (" Import new contacts and updates separately." if upd else ""),
             f"Created {_when(time.time())} by {who}" + (f" · batch {batch_label}" if batch_label else "") + f" · {plural(len(sel), 'card')}.",
-            f"Files: {rfn} (import this one only)" + (f", {comp_name(rfn, '-UPDATES.xlsx')} (updates)" if upd else "") + ", plus the CSV, the summary and this READ-ME (not for import).",
+            f"Import this file only: {rfn}" + (f" (and {comp_name(rfn, '-UPDATES.xlsx')} for updates)" if upd else "") + f". Not for import: {comp_name(rfn, '-SUMMARY.xlsx')}, the CSV and this READ-ME.",
             *[f"Check: #{i} {ln}" for i, ln in conf_[:20]],
             (f"… and {len(conf_) - 20} more confirmed values in the CSV." if len(conf_) > 20 else ""),
             (f"Check: {plural(len(ovr_), 'card')} approved anyway (see the CSV)." if ovr_ else ""),
@@ -343,7 +352,7 @@ def build_export(kind, sel, metas, status, who, batch_label="", preview=False):
         _sw = Workbook(); _ss = _sw.active; _ss.title = "Summary"
         for rw_ in (["GAC Card Scanner export summary (not for import)"], ["Batch", batch_label or "All batches"], ["Cards", len(sel)],
                     ["New contacts", cnt_[mx.NEW]], ["Updates", cnt_[mx.UPDATE]], ["To check", len(_tc)], ["Left out", cnt_[mx.LEFT]], [],
-                    ["To check", "Why"], *[[f"#{i}", "; ".join(_warn.get(i, [])) or (_mcn.get(i) or "see the READ-ME")] for i in sorted(_tc)]):
+                    ["Card", "Why to check it"], *[[f"#{i}", "; ".join(dict.fromkeys(_why.get(i, []))) or (_mcn.get(i) or "a note in the CSV Check column")] for i in sorted(_tc)]):
             _ss.append([safe_cell(x) if isinstance(x, str) else x for x in rw_])
         for rw in _ss.iter_rows():
             for cell in rw:

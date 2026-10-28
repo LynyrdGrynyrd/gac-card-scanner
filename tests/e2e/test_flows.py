@@ -34,6 +34,7 @@ def scan(page, *names, batch):
     n = len(names)
     expect(page.locator("#batchSummary")).to_contain_text(f"{n} of {n} finished · {n} added", timeout=180000)
     page.get_by_role("link", name="Review batch →").click()
+    expect(page.locator("#qBody")).to_be_visible()   # the hidden queue can still hold the last batch's rows for a moment
     expect(page.locator("#qBody a[href^='#review/']")).to_have_count(n)
 
 def wait_card(page, cid):
@@ -42,7 +43,8 @@ def wait_card(page, cid):
 def answer_dialogs(page, timeout=5000):
     """Approving asks when the card looks like someone in the MC Trade contacts (the 5 SAMPLE contacts here, which include
     Maria Delgado): answer 'different person'. Cards with no look-alike get no question."""
-    b = page.locator("#dlg[open]").get_by_role("button", name="Add as new contact")
+    import re as _re
+    b = page.locator("#dlg[open]").get_by_role("button", name=_re.compile("^(Add as new contact|Approve anyway|Approve now)$"))
     try: b.wait_for(timeout=timeout)
     except PWTimeout: return
     b.click()
@@ -61,7 +63,7 @@ def test_first_run_scan_review_approve_export(new_page):
     page.get_by_label("Job title").fill("Head of E2E Lending")
     expect(page.locator("#rDirty")).to_be_visible()
     page.locator("#bApprove").click()
-    expect(page.get_by_role("dialog", name="Approve as a new person?")).to_be_visible(); answer_dialogs(page)   # v0.4.2 #3: one question for exported / MC Trade look-alikes
+    answer_dialogs(page, timeout=1500)   # v0.4.5 #4: an MC Trade look-alike alone asks nothing (the box on the card says it)
     # the last pending card of the batch: back to the batch's queue, with an 'All done' note
     expect(page).to_have_url(re.compile(r"#queue\?s=pending"), timeout=30000); expect(page.locator("#toast")).to_contain_text("All done")
     c = card_json(page, cid); assert c["status"] == "approved" and c["card"]["fields"]["title"] == "Head of E2E Lending"

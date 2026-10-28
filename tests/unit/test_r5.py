@@ -62,6 +62,7 @@ def test_formula_and_html_refused_at_approval(env):
 def test_preview_export_marks_nothing(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     cid = mk(ui, st, first_name="Pre", last_name="View", emails=["pre@view.io"]); ui.set_meta(cid, batch="r5p", batch_label="R5P")
+    from app import auth; ui.claim_batch("r5p", {"id": auth.db().execute("SELECT id FROM users WHERE username='rev'").fetchone()[0]})
     assert _approve(rev, cid).status_code == 200
     n = len(rev.get("/api/exports").json())
     r = rev.get("/api/export/xlsx?status=approved_new&batch=r5p&preview=1"); assert r.status_code == 200 and r.headers["X-Preview"] == "1"
@@ -101,6 +102,7 @@ def test_privacy_delete_purges_target_snapshots_and_exports(env):
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
     a = mk(ui, st, first_name="Del", last_name="Me", emails=["delme@x.io"], phones=[{"type": "mobile", "number": "330-555-7777"}])
     b = mk(ui, st, first_name="Del", last_name="Me", emails=["keep@t.io"], phones=[{"type": "mobile", "number": "330-555-7777"}]); ui.set_meta(b, batch="r5d", batch_label="R5D")
+    ui.set_meta(a, batch="r5d", batch_label="R5D")   # v0.4.5 #3: same batch
     assert rev.post(f"/api/cards/{a}", json={"merge_into": b}).status_code == 200
     assert rev.post(f"/api/cards/{b}", json={"fields": {"title": "Boss"}}).status_code == 200       # snapshot of b holds delme@x.io
     assert _approve(rev, b).status_code == 200

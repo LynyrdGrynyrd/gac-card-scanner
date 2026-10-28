@@ -33,8 +33,10 @@ def _audit_text(action, frm, to, d):
         if d.get("via") == "none are the same person": kp_ = set(cs_)
         if cs_ and kp_:   # v0.4.3 #3 (reviewer): cards marked Different are not "may be the same person"
             op_ = [i for i in cs_ if i not in kp_]
-            return (("approved although #" + ", #".join(map(str, op_)) + " may be the same person; " if op_ else "approved (")
-                    + f"marked different from {len(kp_)} card{'s' if len(kp_) != 1 else ''}" + ("" if op_ else ")"))
+            # v0.4.5 (reviewer: "different from 12" next to 35 ids): every number is followed by exactly the cards it counts
+            def _ids(xs): xs = sorted(xs); return ", ".join(f"#{i}" for i in xs[:5]) + (f" and {len(xs) - 5} more" if len(xs) > 5 else "")
+            kt = f"marked different from {len(kp_)} approved card{'s' if len(kp_) != 1 else ''} in other batches ({_ids(kp_)})"
+            return ("approved although " + _ids(op_) + " may be the same person; " + kt) if op_ else "approved; " + kt
         return "approved although " + (("#" + ", #".join(str(i) for i in d["cards"])) if d.get("cards") else "a card in another batch") + " may be the same person"
     if action == "deleted_on_request": return f"card deleted on request (photo and details; {d.get('export_copies', 0)} stored export file(s)); its history is kept without personal data"
     if action == "redownloaded": return f"re-downloaded in export #{d.get('export_id')} ({d.get('file')})"

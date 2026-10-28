@@ -75,10 +75,32 @@ def tx():
         c.rollback(); raise
     finally:
         _TX.conn = None; c.close()
+class _Shared:
+    """v0.4.5 #1 (skeptic C1: 4 GB, OOM-killed): every db() call used to open a NEW sqlite connection. In Python 3.13 a
+    connection and its statement cache reference each other, so dropped connections were not freed promptly; under a few
+    parallel list requests thousands piled up (each with its file handles and page cache), gigabytes in a minute. Now each
+    thread keeps ONE connection per database file and reuses it. `with db() as c:` still commits; close() is a no-op."""
+    def __init__(self, c): self._c = c
+    def __getattr__(self, k): return getattr(self._c, k)
+    def __enter__(self): self._c.__enter__(); return self
+    def __exit__(self, *exc): return self._c.__exit__(*exc)
+    def close(self): pass
+_LOCAL = threading.local()
+def _ident(path):
+    try: st = os.stat(path); return (os.path.abspath(path), st.st_ino, st.st_dev)
+    except OSError: return None
 def db():
     if getattr(_TX, "conn", None) is not None: return _TX.conn
     once("cards", _init_cards)
-    return connect()
+    key = _ident(DB); cur = getattr(_LOCAL, "conn", None)
+    if key is None or cur is None or cur[0] != key:   # first use in this thread, another file, or the file was replaced
+        if cur is not None:
+            try: cur[1]._c.close()
+            except Exception: pass
+        c = _Shared(connect())
+        _LOCAL.conn = (_ident(DB) or key, c) if key is not None else None
+        return c
+    return cur[1]
 def add(engine, raw, fields, image):
     with db() as c:
         return c.execute("INSERT INTO cards(created,engine,raw_text,fields,image) VALUES(?,?,?,?,?)",

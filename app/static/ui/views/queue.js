@@ -237,9 +237,9 @@ async function bulk_(status, btn, ids) {
   // round 21 (r20 bots): about 5 short lines; ids and reasons behind "Show" / More
   const show = (n, inner) => `<details class="more small"><summary>Show ${n}</summary><ul>${inner}</ul></details>`;
   const line = [];
-  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
+  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}" aria-label="Open card #${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
   if (ai0.length) line.push(`<li>${plural(ai0.length, "card")}: AI check not finished (approving cancels it).</li>`);
-  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
+  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}" aria-label="Open card #${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
   if (decided.length) line.push(`<li>${plural(decided.length, "card")} already decided.</li>`);
   const preHtml = line.length ? `<ul>${line.join("")}</ul>` : "";
   const restN = pre ? (pre.would_approve || []).filter(i => !lk0.some(w => w.id === i)).length : 0;
@@ -264,7 +264,7 @@ async function bulk_(status, btn, ids) {
     });
     if (!ask_) break;
     const lk = ask_.lookalikes || [], rest = ids_.filter(i => !lk.some(w => w.id === i));
-    const a = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(ask_.error)}</p><ul>${cap17(lk, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(w.why)}</li>`)}</ul><p class="small">The same person may go to MC Trade twice. Approving anyway is noted in history.</p>`,
+    const a = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(ask_.error)}</p><ul>${cap17(lk, w => `<li><a href="#review/${w.id}" aria-label="Open card #${w.id}">#${w.id}</a>: ${esc(w.why)}</li>`)}</ul><p class="small">The same person may go to MC Trade twice. Approving anyway is noted in history.</p>`,
       buttons: [...(rest.length ? [{label: `Approve the other ${rest.length}, leave these pending`, cls: "ok", value: "rest"}] : []), {label: allN17(ids_.length, "these too"), value: "all"}, {label: "Cancel (nothing changes)", value: null, primary: true, focus: true}]});
     if (!a.value) { res = null; break; }
     if (a.value === "all") xbOk = true; else ids_ = rest;
