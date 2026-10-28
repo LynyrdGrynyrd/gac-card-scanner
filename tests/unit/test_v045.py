@@ -62,7 +62,7 @@ def test_v045_admin_only_confirm_any_field(env):
     assert "title" in ui.hard_errors(f)                                                  # an old reviewer confirmation is dropped
     assert "title" not in ui.hard_errors(dict(f, confirmed_meta={"title": dict(meta, role="admin")}))
     assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "title", "value": "Vlce Pres|dent", "version": v0, "reason": "on card"}).status_code == 200
-    assert "Fix it, or ask an admin if the card is right." in _src("app/static/ui/views/review.js")
+    assert "An admin needs to confirm this." in _src("app/static/ui/views/review.js")   # v0.4.7 #4: said first
 
 
 # ---- #3 merge only inside the current batch, whoever is signed in

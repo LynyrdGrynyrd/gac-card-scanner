@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.7 (2026-10-28)
+
+### Look-alikes only from the current batch, no double imports after edits, Needs admin fixes (from the v0.4.6 bot reports)
+- **Privacy (high):** a reviewer sees full details, links and merge only for look-alikes in the card's own current batch. Cards in the reviewer's other batches, other people's batches or no batch are a count ("in another batch"), with no id, no link and no merge. Exported-elsewhere warnings and History lines follow the same rule. Root cause: v0.4.6 showed every batch the account owned, and the shared qa-* logins own many older batches.
+- **Exported, then edited:** such a card is left out of the next IMPORT-ME file (it would be added to MC Trade twice). The Save dialog, READ-ME and SUMMARY list it with the earlier file. Admins can still put it in as new.
+- **Ready to import** counts only rows in the file ("3 rows (2 clean, 1 to check)"); cards to check that are not in the file are counted apart. The CSV no longer ends with a summary row.
+- **Needs admin:** the flag clears when nothing is left to confirm; the reason names the field and value and a second reason is added, not replaced. "An admin needs to confirm this." shows only when there is something an admin can confirm, and up front on Approve. Admins see "N waiting for admin" in the Export dialog with a link to a filter across batches. Refused confirms are card rows in the audit log.
+- **Undo** names the batch and time on the button and works on the current batch only, also for cards with no batch.
+- **Misreads:** names like 4imprint, E2open, 4thought, 3M, Q3 and "Manager | Sales" pass. Vice Pres|dent, Manag|ng and Sa|es are still caught, and look-alike letters (Rnbber) are flagged when a close fix exists.
+- **Uploads** with a batch name but no batch id now get a batch.
+- **Reviewers:** no "Show everyone's exports" and no "All batches" options; the badge counts pending cards in their own batches.
+- **Approve then type:** a value typed while Approve is being sent is saved to the card it was typed on, never carried to the next card.
+- **Export:** a three-step import checklist after a real export; "Of these, to check" in the Save dialog.
+- **Wording:** the Exported-before title isn't repeated in the body; "Pick Different first." names the misread; short why-text ("Email, website confirmed"); "47 more in other batches"; one sign-in idle line; the guides say Undo works on the current batch only; "Your admin: ask the front desk" only when no admin contact is set. Websites with non-ASCII names are checked in their punycode form.
+
 ## v0.4.6 (2026-10-28)
 
 ### Reviewer privacy everywhere, Needs admin flag, misread digits, clearer export (from the v0.4.5 tester reports)

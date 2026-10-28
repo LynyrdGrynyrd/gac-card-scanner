@@ -42,7 +42,10 @@ from app import ui as _ui
 MIS = [("company", "Rubb3r City Robotics", 1), ("company", "Kent Partn3rs", 1), ("department", "L3gal", 1), ("title", "Own3r 4", 1),
        ("first_name", "Morg4n", 1), ("department", "Acc|ounts", 1), ("title", "Vice Pres|dent", 1), ("title", "Ex3cutive Director", 1),
        ("company", "3M", 0), ("company", "B2B Sales Co", 0), ("company", "21st Century Insurance", 0), ("company", "7-Eleven", 0),
-       ("department", "Level 3 Support", 0), ("company", "H2O Labs", 0), ("first_name", "Morgan", 0)]
+       ("department", "Level 3 Support", 0), ("company", "H2O Labs", 0), ("first_name", "Morgan", 0),
+       # v0.4.7 #6: real names with digits and a '|' separator pass; mid-word '|' and look-alikes with a close fix are still caught
+       ("company", "4imprint", 0), ("company", "E2open", 0), ("company", "4thought Marketing", 0), ("company", "Q3 Partners", 0),
+       ("title", "Manager | Sales", 0), ("title", "Manag|ng Director", 1), ("department", "Sa|es", 1), ("company", "Rnbber City Robotics", 1)]
 mok = 0
 for fld, val, want in MIS:
     e = _ui.hard_errors({"first_name": "Ann", "last_name": "Lee", "emails": ["a@b.example.com"], "phones": [], fld: val})

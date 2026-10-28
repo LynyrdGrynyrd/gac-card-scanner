@@ -68,8 +68,10 @@ def test_v043_exported_elsewhere_kept_after_different(env):
     ui.set_meta(a, exported=time.time()); ui.log(a, "RR", "exported")
     b = mk(ui, st, first_name="Kira", last_name="Dove", emails=["kd@v43x.example.com"]); ui.set_meta(b, batch="v43xb", batch_label="v43xb")
     ui.set_meta(b, kept_apart=json.dumps([a]), dup_resolution="keep_both")
-    xe = rev.get(f"/api/cards/{b}").json()["exported_elsewhere"]
+    xe = env["adm"].get(f"/api/cards/{b}").json()["exported_elsewhere"]
     assert [x["card_id"] for x in xe] == [a] and xe[0]["kept_apart"] is True
+    xe = rev.get(f"/api/cards/{b}").json()["exported_elsewhere"]
+    assert len(xe) == 1 and "card_id" not in xe[0]   # v0.4.7 #1
 
 
 # ---- #4 possible MC Trade match: CSV Check note, preview/dry run list

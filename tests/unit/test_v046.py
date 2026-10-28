@@ -78,7 +78,7 @@ def test_v046_undo_window_batch_and_named_id(env):
     b = mk(ui, st, first_name="Ben", last_name="Do", emails=["bd@v46u.example.com"], by=""); ui.set_meta(b, batch="v46u2", batch_label="U2")
     rc.post(f"/api/cards/{a}", json={"fields": {"title": "Undo A"}}); rc.post(f"/api/cards/{b}", json={"fields": {"title": "Undo B"}})
     pa = rc.get("/api/undo?batch=v46u1").json(); pb = rc.get("/api/undo?batch=v46u2").json()
-    assert pa["id"] != pb["id"] and pa["age_min"] == 0 and "batch_label" not in pa and len(pa["label"]) < 60
+    assert pa["id"] != pb["id"] and pa["age_min"] == 0 and pa.get("batch_label") == "U1" and len(pa["label"]) < 60   # v0.4.7 #5: the batch is on the button
     # a named id from another batch is refused in this batch
     r = rc.post("/api/undo", json={"id": pb["id"], "batch": "v46u1"}); assert r.status_code == 404
     assert st.get(b)["fields"]["title"] == "Undo B"
@@ -107,7 +107,7 @@ def test_v046_reviewer_confirm_refused_is_audited_and_needs_admin_flag(env):
     r = rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "name", "value": "Morg4n", "reason": "printed like this", "version": v})
     assert r.status_code == 403 and r.json()["error"] == "An admin needs to confirm this."
     ev = [x[0] for x in auth.db().execute("SELECT event FROM auth_log WHERE username='rev' ORDER BY id DESC LIMIT 5")]
-    assert any("refused: reviewer confirm" in e and f"#{cid}" in e for e in ev)
+    assert any("reviewer confirm refused" in e and f"#{cid}" in e for e in ev)
     r = rev.post(f"/api/cards/{cid}/needs-admin", json={}); assert r.status_code == 200 and "Morg4n" in r.json()["needs_admin"]["reason"]
     assert cid in {c["id"] for c in adm.get("/api/cards?needs_admin=1").json()}
     assert adm.get("/api/counts").json()["needs_admin"] >= 1
@@ -116,7 +116,7 @@ def test_v046_reviewer_confirm_refused_is_audited_and_needs_admin_flag(env):
     assert adm.post(f"/api/cards/{cid}/needs-admin", json={"clear": True}).json()["needs_admin"] is None
     assert cid not in {c["id"] for c in adm.get("/api/cards?needs_admin=1").json()}
     js = _src("app/static/ui/views/review.js")
-    assert '"An admin needs to confirm this."' in js and 'id="bNeedsAdmin">Needs admin<' in js and "Ask an admin." in js
+    assert 'An admin needs to confirm this.' in js and 'id="bNeedsAdmin">Needs admin<' in js and "Ask an admin." in js
     assert _src("app/static/ui/views/queue.js").count("needs admin") >= 1 and 'id="fNa"' in _src("app/static/ui/index.html")
 
 
@@ -124,7 +124,7 @@ def test_v046_reviewer_confirm_refused_is_audited_and_needs_admin_flag(env):
 def test_v046_same_or_different_toast_wording():
     js = _src("app/static/ui/views/review.js")
     assert 'return $("#rDupQ #dSame") ? "Same person? Answer Same or Different first." : "Pick Different first.";' in js
-    assert 'h[0] + " Fix it first."' in js and js.count('toast("Same person? Answer Same or Different first."') == 0
+    assert "function blockedMsg(hard, ov)" in js and js.count('toast("Same person? Answer Same or Different first."') == 0
     assert "Date.now() - lastSameT < 2500" in js
 
 
@@ -177,13 +177,13 @@ def test_v046_export_names_readme_and_ready_line(env):
     rd = out[3]["readme.txt"].decode(); rdy = out[4]["ready"]
     assert rdy["text"] in rd and rdy["text"].startswith("Ready to import: ") and "Test 2 rows first." in rdy["text"]
     assert "Import only: IMPORT-ME_" in rd and "DO NOT IMPORT" not in rd and rdy["files"] == 4 + ("updates.xlsx" in out[3])
-    assert rdy["text"] in out[3]["extra.csv"].decode("utf-8-sig")
+    assert rdy["text"] not in out[3]["extra.csv"].decode("utf-8-sig")   # v0.4.7 #9 (data-manager L5): no summary row at the end of the CSV
     pv = ui.build_export("xlsx", sel, metas, "approved_new", "RR", "Ready", preview=True)[3]["readme.txt"].decode()
     assert "import none" in pv and "Import only" not in pv
     sm = rev.get("/api/export/summary?status=approved_new&batch=v46r")
     if sm.status_code == 200: assert sm.json()["ready"]["text"] == rdy["text"]
     ex = _src("app/static/ui/views/export.js")
-    assert "sum.ready.files" in ex and "All my batches" in _src("app/static/ui/views/queue.js") and "seenN[l] > 1" in ex
+    assert "sum.ready.files" in ex and "no All batches for reviewers" in _src("app/static/ui/views/queue.js") and "seenN[l] > 1" in ex
 
 
 # ---- #8 copy, /health
@@ -192,7 +192,7 @@ def test_v046_copy_and_health(env):
     from app import main
     h = Client(main.app).get("/health").json(); assert "commit" in h and "public_commit" not in h
     js = _src("app/static/ui/views/review.js")
-    assert js.count("Fix it, or ask an admin if the card is right.") == 1
+    assert js.count("Fix it, or ask an admin if the card is right.") == 0 and js.count("<b>An admin needs to confirm this.</b> Or fix it:") == 1   # v0.4.7 #4
     assert 'id="batchLegend"' not in _src("app/static/ui/index.html")
     import os
     if os.path.exists("training/REVIEWER-GUIDE.md"):   # the public repo has no training/ folder
@@ -215,5 +215,5 @@ def test_v046_blocked_toast_names_misread_and_badge_grammar():
     import pathlib
     ui = pathlib.Path(__file__).resolve().parents[2] / "app" / "static" / "ui"
     js = (ui / "views" / "review.js").read_text(encoding="utf-8"); hd = (ui / "header.js").read_text(encoding="utf-8")
-    assert 'looks misread. Fix it${isAdm_ ? "" : ", or ask an admin"}.' in js and '"An admin needs to confirm this."' in js
+    assert '`"${mv}" looks misread.`' in js and '"An admin needs to confirm this. "' in js and '" Fix it or click Needs admin."' in js
     assert 'c.needs_admin === 1 ? "needs" : "need"' in hd

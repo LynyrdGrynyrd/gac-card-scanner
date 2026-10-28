@@ -18,7 +18,8 @@ async function loadMe() {
   { const w = document.getElementById("youAre"); if (w && S.ME) { w.innerHTML = `You are: <b>${esc(S.ME.display || S.ME.username)}</b> · <button type="button" class="link" id="notMe">Not you?</button>`; $("#notMe").onclick = () => $("#logout").click(); } }
   idleStart(S.ME.idle_minutes);
   $("#whoText").innerHTML = `<b>${esc(S.ME.display)}</b> (${esc(S.ME.initials)})`;
-  $("#fNaL").hidden = S.ME.role !== "admin";
+  $("#fNaL").hidden = false;   // v0.4.7 #4: reviewers filter their own flagged cards; admins see every batch's
+  { const a_ = S.ME.role === "admin"; for (const id of ["exHistEveryoneL"]) { const el = document.getElementById(id); if (el) el.hidden = !a_; } }   // v0.4.7 #8
   $("#navAdmin").hidden = S.ME.role !== "admin"; $("#archiveAll").hidden = S.ME.role !== "admin"; $("#archiveBatch").hidden = S.ME.role !== "admin";
   if (S.ME.role !== "admin") $$("#exStatus option[value=all], #exStatus option[value=pending], #exStatus option[value=rejected]").forEach(o => o.remove());
   if (S.ME.must_change) setTimeout(() => changePw("Please choose your own password (the one you were given is temporary)."), 400);
@@ -70,6 +71,9 @@ const undoBatch = () => (S.cur && !$("#v-review").hidden && S.cur.batch) || ($("
 async function refreshUndo() { try { const b = undoBatch(), u = await call("/api/undo" + (b ? "?batch=" + encodeURIComponent(b) : "")); $("#undoBtn").hidden = !u.id;
   const what = u.id ? `${u.label} · ${u.age_min < 1 ? "just now" : u.age_min + " min ago"}${u.batch_label ? " · " + u.batch_label : ""}` : "";
   clearTimeout(refreshUndo.t); if (u.id) refreshUndo.t = setTimeout(refreshUndo, 60000);   // the "N min ago" never goes stale
+  // v0.4.7 #5: the batch and a short time are VISIBLE on the button, not only in the tooltip
+  const hm = u.id ? new Date(u.ts * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"}) : "", bl = (u.batch_label || "").length > 18 ? u.batch_label.slice(0, 17) + "…" : (u.batch_label || "");
+  $("#undoBtn").textContent = u.id ? `↶ Undo (${bl ? bl + ", " : ""}${hm})` : "↶ Undo";
   $("#undoBtn").title = u.id ? "Undo: " + what + " (U)" : ""; $("#undoBtn").setAttribute("aria-label", u.id ? "Undo: " + what : "Undo"); $("#undoBtn").dataset.label = u.label || ""; $("#undoBtn").dataset.id = u.id || ""; } catch { $("#undoBtn").hidden = true; $("#undoBtn").dataset.id = ""; } }
 async function doUndo() {
   try { const id_ = Number($("#undoBtn").dataset.id) || null, b = undoBatch(); const r = await post("/api/undo", {...(id_ ? {id: id_} : {}), ...(b ? {batch: b} : {})}); refreshCounts();
@@ -88,7 +92,7 @@ async function refreshCounts() {
     const rd = S.B && S.B.uid === (S.ME && S.ME.id) ? S.B.rows.filter(r => ["wait", "up", "queued", "reading"].includes(r.state)).length : 0;
     const pb = $("#pendingBadge"); pb.hidden = !c.mine_pending && !rd;
     pb.textContent = String(c.mine_pending) + (rd ? ` · ${rd} reading` : "");   // v0.4.4 #9 (coordinator): plain words, not "63 +4"
-    const lbl = `${c.mine_pending} waiting in your batches` + (rd ? `, ${rd} still being read` : "");
+    const lbl = `${c.mine_pending} to review in your batches` + (rd ? `, ${rd} still being read` : "");
     pb.setAttribute("aria-label", lbl); pb.title = lbl;
     const na = $("#naBadge"); if (na) { na.hidden = !c.needs_admin; na.textContent = `${c.needs_admin || 0} ${c.needs_admin === 1 ? "needs" : "need"} admin`; }   // v0.4.6 #3 (admins only)
     if ($("#v-queue").hidden) $$("#statusTabs button span").forEach(x => x.textContent = "");

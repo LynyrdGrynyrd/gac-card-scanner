@@ -65,12 +65,14 @@ def test_keep_both_per_match_and_true_duplicates(env):
     a = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(a, batch="kb")
     b = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(b, batch="kb")    # same batch, same email
     c = mk(ui, st, first_name="James", last_name="Okafor", emails=["jo@other.org"], company="Ok Ltd", phones=PH); ui.set_meta(c, batch="other")
-    d = rev.get(f"/api/cards/{a}").json()["dupes"]["queue"]
+    d = env["adm"].get(f"/api/cards/{a}").json()["dupes"]["queue"]   # v0.4.7 #1: a reviewer sees only this batch's card in full
     assert {x["card_id"]: x["strong"] for x in d if x["card_id"] in (b, c)} == {b: True, c: False}
+    d = rev.get(f"/api/cards/{a}").json()["dupes"]["queue"]
+    assert {x["card_id"]: x["strong"] for x in d if x.get("card_id") in (b, c)} == {b: True}
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [b]}); assert r.status_code == 409 and r.json()["need"] == "true_duplicate"
     r = rev.post(f"/api/cards/{a}", json={"dup_resolution": "keep_both"}); assert r.status_code == 409          # legacy all-at-once too
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [c]}); assert r.status_code == 200
-    q = {x["card_id"]: x["kept_apart"] for x in r.json()["dupes"]["queue"]}; assert q[c] and not q[b]
+    q = {x["card_id"]: x["kept_apart"] for x in env["adm"].get(f"/api/cards/{a}").json()["dupes"]["queue"]}; assert q[c] and not q[b]
     assert r.json()["dupes"]["unresolved_queue"]
 
     for x in (a, b): rev.post(f"/api/cards/{x}", json={"status": "approved", "crm_action": "create_new"})

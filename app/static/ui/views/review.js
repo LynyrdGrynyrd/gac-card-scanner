@@ -187,7 +187,8 @@ $("#rForm").addEventListener("input", e => {
   { const f_ = e.target.closest && e.target.closest(".f"); if (f_ && f_.querySelector(".fhint")) { f_.querySelectorAll(".fhint").forEach(x => x.remove()); f_.classList.remove("hinted");
       const lab = (f_.querySelector("label")?.getAttribute("for")) || ""; $$("#rRisk li[data-f]").forEach(li => { if (li.dataset.f === lab) li.remove(); });
       const n_ = $$("#rRisk li").length, b_ = $("#rRisk b"); if (!n_) $("#rRisk").hidden = true; else if (b_) b_.textContent = `To check (${n_}):`; } }
-  recomputeDirty(); clearTimeout(keepDraft.t); keepDraft.t = setTimeout(keepDraft, 400); clearTimeout(vT);
+  recomputeDirty(); clearTimeout(keepDraft.t); { const id_ = S.cur && S.cur.id; keepDraft.t = setTimeout(() => { if (S.cur && S.cur.id === id_) keepDraft(); }, 400); }   // v0.4.7 #10: a draft goes to the card it was typed on
+  clearTimeout(vT);
   if (S.cur) { const b = $("#rAI .flag.bad"); if (b && !S.dirty) b.remove(); }
   // v0.4.1 #8 (newcomer #7): typing re-checks the form, so "Morg4n" in Last name warns at once (it only re-checked while a problem showed)
   vT = setTimeout(async () => { try { const r = await post("/api/validate", {fields: collect(), card_id: S.cur && S.cur.id}); showErrors({...r.errors, ...r.hard}, !$("#rErr").hidden); if (!recomputeDirty()) confirmBtn(r.overridable, S.cur && S.cur.id, r.hard); } catch {} }, 300); });
@@ -293,8 +294,9 @@ function showErrors(errs, loud) {
   const adm_ = S.ME && S.ME.role === "admin", ov_ = (S.cur && S.cur.overridable) || [];
   // v0.4.6 #8: the "ask an admin" line shows ONCE under the list; #3: a reviewer can flag the card for an admin in one click
   const askN = !adm_ && Object.keys(errs || {}).some(k => k !== "phones" && ov_.includes(k)), na_ = S.cur && S.cur.needs_admin;
-  $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? `<b>Fix before approving:</b><ul>${Object.entries(errs).map(([k, m]) => `<li data-err="${esc(k)}">${esc(m)}</li>`).join("")}</ul>` +
-    (askN ? `<p class="small askadm">Fix it, or ask an admin if the card is right. ${na_ ? `<span id="naDone">Flagged for an admin.</span>` : `<button type="button" class="btn small" id="bNeedsAdmin">Needs admin</button>`}</p>` : "") : "";
+  // v0.4.7 #4: when an admin could confirm it, a reviewer reads that FIRST
+  $("#rErr").hidden = !n; $("#rErr").innerHTML = n ? (askN ? `<p class="askadm1"><b>An admin needs to confirm this.</b> Or fix it:</p><ul>` : `<b>Fix before approving:</b><ul>`) + `${Object.entries(errs).map(([k, m]) => `<li data-err="${esc(k)}">${esc(m)}</li>`).join("")}</ul>` +
+    (askN ? `<p class="small askadm">${na_ ? `<span id="naDone">Flagged for an admin.</span>` : `<button type="button" class="btn small" id="bNeedsAdmin">Needs admin</button>`}</p>` : "") : "";
   if ($("#bNeedsAdmin")) $("#bNeedsAdmin").onclick = () => flagNeedsAdmin(S.cur.id);
 }
 // round 23 (datamanager/coordinator/newcomer r22): 'This is correct' confirms ONE field at a time, shows the value and needs a
@@ -359,7 +361,7 @@ function renderDupes(d) {
     const bestQ = [...q].sort(cmp)[0] || [...all].sort(cmp)[0];
     const canSame = !!(bestQ && bestQ.same_user && bestQ.can_same !== false);   // the server refuses a merge into another person's card
     // v0.4.2 #11 (skeptic L3) / #8: someone else's look-alike gets no "Same person?" headline (only Different is possible); short text
-    const head = !bestQ ? "" : canSame ? `<b>Same person?</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a>` : `<b>Looks like</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a> <span class="small">(someone else's card)</span>`;
+    const head = !bestQ ? "" : canSame ? `<b>Same person?</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a>` : `<b>Looks like</b> <a href="#review/${bestQ.card_id}" aria-label="Open card #${bestQ.card_id}">#${bestQ.card_id}</a> <span class="small">(${bestQ.same_batch ? "someone else's card" : "in another batch"})</span>`;   // v0.4.7 #1
     $("#rDupQ").innerHTML = res === "keep_both" ? (d.status !== "pending" && !d.dup_decided ? `<b>Looks like</b> ${plural(all.length, "other card")}.` : (kept.length > 3 ? "Marked different." : `Marked different: ${kept.map(x => `<a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a>`).join(", ")}.`))
       // round 8 (newcomer r8 N5): ONE decision per card instead of two buttons per look-alike (18 buttons for 9 look-alikes)
       // round 20 (reviewer r19): ONE 'Seen before' box: the best match, Same / Different person buttons, the rest under More
@@ -380,7 +382,7 @@ function renderDupes(d) {
         `</select> <button type="button" class="btn small" id="dApply" disabled>Save decision</button></div></details>` +
       // v0.4.5 #10 (newcomer): no second helper line; the Same button says it (tooltip and name)
       (kept.length ? `<p class="small">Marked different: ${kept.map(x => `<a href="#review/${x.card_id}" aria-label="Open card #${x.card_id}">#${x.card_id}</a>`).join(", ")}.</p>` : "") +
-      (hid && res !== "keep_both" ? `<p class="small">Also looks like ${plural(hid, "card")} in another batch.</p>` : "") +
+      (hid && res !== "keep_both" ? `<p class="small">${hid} more in ${hid === 1 ? "another batch" : "other batches"}.</p>` : "") +
       `<span id="dMerge" hidden></span>`;
     fillDupGrid(d);
     const doMerge = async (btn, tid) => {   // round 7: preview what merging does (no silent drop); round 8: same pick rule as the server
@@ -462,7 +464,7 @@ async function act(btn, extra, okMsg, sid = S.cur && S.cur.id) {
   $$("#rDupQ button, #rDupC button").forEach(b => { if (b !== btn) b.disabled = true; });
   clearTimeout(rPoll); S.SAVING = true; try {
   await busy(btn, "Saving…", async () => {
-    try { const sent_ = formSnap(); const r = await post("/api/cards/" + sid, {fields: collect(), reviewer: who(), note: $("#note").value, card_id: sid, version: S.cur.version, ...extra}); clearTimeout(keepDraft.t); markSaved(sid, sent_); toast(r.notice || okMsg, r.notice ? 7000 : 4500, true); await openCard(S.cur.id, {keep: true}); refreshCounts(); }
+    try { const sent_ = formSnap(); const r = await post("/api/cards/" + sid, {fields: collect(), reviewer: who(), note: $("#note").value, card_id: sid, version: S.cur.version, ...extra}); clearTimeout(keepDraft.t); markSaved(sid, sent_); toast(r.notice || okMsg, r.notice ? 7000 : 4500, true); if (S.cur && S.cur.id === sid) await openCard(sid, {keep: true}); refreshCounts(); }
     catch (e) { toast("Not saved: " + e.message, 5000); }
   }); } finally { S.SAVING = false; recomputeDirty(); }   // round 21: never a stuck 'Saving…' after a refused save
 }
@@ -509,7 +511,10 @@ async function decide_(status, btn) {
     if (!S.cur || S.cur.id !== sid) { toast(`Not saved: you moved from card #${sid} to another card.`, 6000); return; }
   }
   // v0.4.1 #5: the duplicate question is asked ONCE, in the Same/Different box (Approve doesn't ask it again in a dialog)
-  if (status === "approved" && sameOpen()) { sameToast(4000); $("#rDupQ").scrollIntoView({block: "center"}); return; }
+  // v0.4.7 #9: a misread on the form is named first (it, not the look-alike, is what blocks)
+  if (status === "approved" && sameOpen()) { let h0 = {}, ov0 = []; try { const v0 = await post("/api/validate", {fields: collect(), card_id: sid}); h0 = v0.hard || {}; ov0 = v0.admin_can || v0.overridable || []; } catch {}
+    if (Object.keys(h0).length) { toast(blockedMsg(h0, ov0), 5000); return; }
+    sameToast(4000); $("#rDupQ").scrollIntoView({block: "center"}); return; }
   const sent = formSnap();
   const body = {fields: collect(), status, reviewer: who(), note: $("#note").value, card_id: sid, version: S.cur.version};
   // round 13 (part-timer r5): the AI status on screen can be out of date (queued or started after the page loaded): ask the
@@ -528,9 +533,7 @@ async function decide_(status, btn) {
       if (!recomputeDirty()) confirmBtn(ov, sid, hard_);   // the button covers the overridable blocks; others still need fixing
       // v0.4.6 #3: Approve is never silent: a reviewer is told an admin has to confirm it
       // v0.4.6 #4: when the blocker is a misread (Morg4n), the toast names it
-      const mis_ = Object.keys(hard_).find(k => /misread/i.test(String(hard_[k]))), mv_ = mis_ ? (collect()[mis_ === "name" ? "first_name" : mis_] || "") : "";
-      const isAdm_ = S.ME && S.ME.role === "admin", allOv_ = ov.length && Object.keys(hard_).every(k => ov.includes(k));
-      toast(mis_ && typeof mv_ === "string" && mv_ ? `"${mv_}" looks misread. Fix it${isAdm_ ? "" : ", or ask an admin"}.` : allOv_ && !isAdm_ ? "An admin needs to confirm this." : "Fix the red items first.", 4500);
+      toast(blockedMsg(hard_, v_.admin_can || ov), 5000);
       { const first = $("#fields .f.err input, #fields .f.err textarea"); first && first.focus(); return; }
       try { const fr_ = await call("/api/cards/" + sid); body.version = fr_.version; S.cur.version = fr_.version; } catch {} } } catch {} }
   const aiWas = fr0 ? fr0.ai_status : S.cur.ai_status;   // approving doesn't wait for the AI; a queued check is cancelled, a running one leaves suggestions
@@ -566,7 +569,10 @@ async function decide_(status, btn) {
     const needWhy = status === "approved" && Object.keys(soft0).length > 0;
     if (needWhy) bits.push(`<ul>${Object.values(soft0).map(m => `<li>${esc(m)}</li>`).join("")}</ul><p>Fix them on the form, or approve anyway and say why.</p>`);
     const warn0 = xe0.length || crm0.length;
-    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : `Exported before (${xe0.length})`;
+    const t0 = status === "rejected" ? "Reject before the AI check?" : aiBusy && warn0 ? "Before you approve" : aiBusy ? "AI check not finished" : xe0.length ? `Exported before (${xe0.length})` : "May already be in MC Trade";
+    // v0.4.7 #9 (data-manager L1): the title is not said again in the body
+    if (t0.startsWith("Exported before") && bits[0] && bits[0].startsWith("<p>Exported before")) bits[0] = "<p>Approve anyway?</p>";
+    if (t0 === "May already be in MC Trade") bits.forEach((b_, i_) => { if (b_.startsWith("<p>May already be in MC Trade: ")) bits[i_] = b_.replace("May already be in MC Trade: ", ""); });
     if (aiBusy && t0 === "AI check not finished") bits[0] = bits[0].replace("AI check not finished. ", "");   // v0.4.5 UX: the title already says it
     const r0 = await ask({title: t0, html: bits.join(""),
       input: needWhy ? {label: "Reason for approving anyway", placeholder: "e.g. card has no email, phone confirmed by hand", required: "A reason is needed to approve anyway.", max: 300} : null,
@@ -589,16 +595,22 @@ async function decide_(status, btn) {
       try {
         if (!S.cur || S.cur.id !== sid) { toast(`Not saved: you moved from card #${sid} to another card. Your edits on #${sid} are kept as a draft.`, 7000); return; }
         // round 15 (part-timer): values typed WHILE the save/approve was waiting (dialogs, network) are included, not lost
-        body.fields = collect(); body.note = $("#note").value;
+        const sentNow = formSnap(); body.fields = collect(); body.note = $("#note").value;   // v0.4.7 #10: the baseline is what THIS request sends
         const saved = await post("/api/cards/" + sid, body);
         if (saved && saved.version && S.cur && S.cur.id === sid) S.cur.version = saved.version;   // round 14: the next quick save uses the new version at once
         if (saved && saved.card) LASTOK[sid] = JSON.stringify([saved.card.fields, saved.card.status, saved.card.note || ""]);
-        clearTimeout(keepDraft.t); delete SS.draft; markSaved(sid, sent);   // reviewer r8 / round 12 / round 14: no ghost draft or badge after a save
+        clearTimeout(keepDraft.t); delete SS.draft; markSaved(sid, sentNow || sent);   // reviewer r8 / round 12 / round 14: no ghost draft or badge after a save
         await refreshCounts(); STATUS[sid] = saved.status;
         if (status === "approved" || status === "rejected") {
           toast(`✓ Card #${sid} ${status} by ${who()}.` + (["queued", "checking"].includes(aiWas) ? (aiWas === "queued" ? " The waiting AI check was cancelled." : " Any AI suggestions will appear on the card later.") : ""), 3500, true);
           // round 8 (part-timer r2): 'Next' stays inside THIS card's batch, asked from the server (also when the card was opened
           // by a direct link); "All done" only when that batch has no pending card left at all
+          // v0.4.7 #10: a value typed on THIS card while Approve was being sent is saved to THIS card (never carried to the next one)
+          if (S.cur && S.cur.id === sid && recomputeDirty()) {
+            try { const s2 = await post("/api/cards/" + sid, {fields: collect(), note: $("#note").value, reviewer: who(), card_id: sid, version: saved.version});
+              if (s2 && s2.version && S.cur && S.cur.id === sid) S.cur.version = s2.version; markSaved(sid, formSnap()); toast(`✓ Card #${sid} ${status}. Your last edit was saved to #${sid} too.`, 4000, true); }
+            catch (e2) { keepDraft(); toast(`Card #${sid} ${status}, but your last edit was not saved: ${e2.message} It is kept as a draft on #${sid}.`, 8000); return; }
+          }
           const myB = S.cur.batch || null, o = order(), i = o.indexOf(sid);
           let pl = null; try { const qs = new URLSearchParams({status: "pending"}); if (myB) qs.set("batch", myB); else qs.set("limit", "500"); pl = (await call("/api/cards?" + qs)).filter(x => x.id !== sid); } catch {}   // audit 2026-10: capped without a batch
           let nx2;
@@ -728,7 +740,16 @@ const sameOpen = () => { const q = $("#rDupQ"); return !!(q && !q.hidden && q.qu
 // v0.4.6 #4/#9: ONE message for "why can't I approve yet": a misread on the saved card is named first; "Same or Different"
 // only when there is a Same button; never the same toast twice in a row
 let lastSameT = 0;
-function sameMsg() { const h = Object.values((S.cur && S.cur.hard) || {}); if (h.length) return h[0] + " Fix it first.";
+// v0.4.7 #4 (newcomer/part-timer/reviewer): ONE message for Approve on a blocked card. A reviewer reads "An admin needs to
+// confirm this." FIRST whenever an admin could confirm the block; then what is wrong, and the button that hands it over.
+function blockedMsg(hard, ov) {
+  const ks = Object.keys(hard || {}), isAdm = S.ME && S.ME.role === "admin", f_ = collect();
+  const mis = ks.find(k => /misread|“\|”/i.test(String(hard[k]))), mv = mis ? f_[mis === "name" ? "first_name" : mis] : "";
+  const what = mis && typeof mv === "string" && mv ? `"${mv}" looks misread.` : String(hard[ks[0]] || "");
+  if (isAdm) return what + " Fix it or confirm it.";
+  return (ks.some(k => (ov || []).includes(k)) ? "An admin needs to confirm this. " : "") + what + " Fix it or click Needs admin.";
+}
+function sameMsg() { const h = (S.cur && S.cur.hard) || {}; if (Object.keys(h).length) return blockedMsg(h, S.cur.overridable);
   return $("#rDupQ #dSame") ? "Same person? Answer Same or Different first." : "Pick Different first."; }
 function sameToast(ms) { if (Date.now() - lastSameT < 2500) return; lastSameT = Date.now(); toast(sameMsg(), ms || 4000); }
 let ENTER_ARMED = true; S.ENTER_AFTER = 0;

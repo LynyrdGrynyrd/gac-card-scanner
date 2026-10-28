@@ -26,6 +26,10 @@ def _audit_text(action, frm, to, d):
         elif action == "undo": t = f"undid: {d.get('undid', '')}"
         else: t = NAMES.get(action, action.replace("_", " "))
         return t + " [personal details removed on request]"
+    if action == "needs_admin":   # v0.4.7 #4 (skeptic F3): the history row says why
+        return "sent to an admin" + (f": {str(d.get('reason'))[:300]}" if d.get("reason") else "")
+    if action == "needs_admin_cleared":
+        return "Needs admin taken off" + (" (nothing left to confirm)" if d.get("why") else "")
     if action == "hard_check_override":   # round 23: field, value and reason in plain words
         return f"confirmed {U.LABEL.get(d.get('field'), d.get('field') or 'a value')} “{_fmtv(d.get('value'))[:120]}” as correct" + (f" (reason: {d['reason']})" if d.get("reason") else " (no reason recorded)")
     if action == "cross_batch_confirmed":
@@ -93,6 +97,7 @@ def audit(q: str = "", limit: int = 500, fmt: str = "json"):
         kind = (("export" if ev.startswith("refused export") else "template" if "of the MC Trade template" in ev else "contacts" if "of the MC Trade contacts" in ev else "settings")
                 if ev.startswith("refused") else "settings" if ev.startswith("settings") else "export" if ev.startswith(("re-downloaded", "downloaded the", "dry run", "ran the MC Trade dry-run", "viewed the PREVIEW")) else
                 "card" if ev.startswith(("deleted card", "Clear all test data", "confirmed as correct on card")) else "account")
+        if not ev.startswith("refused export") and re.search(r"(?:^|\bon )card #\d+|^#\d+ ", ev): kind = "card"   # v0.4.7 #9 (mctrade-admin N5): card rows are 'card' and carry the id
         ids_ = list(dict.fromkeys(int(x) for x in re.findall(r"#(\d+)", ev))) if kind in ("export", "card") or ev.startswith("refused export") else []   # round 11: each card once (manager-r10)
         rows.append({"ts": r["ts"], "who": r["username"], "what": ev + (f" (from {r['ip']})" if r["ip"] else ""), "card": ids_[0] if ids_ else None, "cards": ids_, "kind": kind})
     for r in U.db().execute("SELECT * FROM exports ORDER BY id DESC LIMIT ?", (limit,)):

@@ -84,7 +84,7 @@ def test_cross_batch_phone_only_needs_confirm_and_none_same_logs(env):
     a = mk(ui, st, first_name="Ophelia", last_name="Strand<b>", emails=["o1@x.io"], phones=PH); ui.set_meta(a, batch="r7xa")
     assert _ap(rev, a, last_name="Strand", fields={"last_name": "Strand"}).status_code == 200
     b = mk(ui, st, first_name="Ophelia", last_name="Strand", emails=["o2@y.io"], phones=[{"type": "mobile", "number": "+1 330.555.0177 x5"}]); ui.set_meta(b, batch="r7xb")
-    r = _ap(rev, b); assert r.status_code == 409 and r.json()["need"] == "confirm_cross_batch" and a in r.json()["others"], r.text
+    r = _ap(rev, b); assert r.status_code == 409 and r.json()["need"] == "confirm_cross_batch" and a not in r.json()["others"] and r.json()["hidden_n"] == 1, r.text   # v0.4.7 #1: another batch = a count
     r = _ap(rev, b, keep_apart="all"); assert r.status_code == 200, r.text
     assert any(h["action"] == "cross_batch_confirmed" for h in ui.history(b))
 

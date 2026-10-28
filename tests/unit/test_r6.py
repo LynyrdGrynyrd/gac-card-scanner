@@ -185,7 +185,7 @@ def test_same_photo_other_batch_warns_only(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     a = mk(ui, st, first_name="Pho", last_name="To", emails=["pho1@x.io"]); ui.set_meta(a, batch="ph1", sha256="r6sha")
     b = mk(ui, st, first_name="Other", last_name="Name", emails=["oth@y.io"], phones=[{"type": "work", "number": "216-555-0909"}]); ui.set_meta(b, batch="ph2", sha256="r6sha")
-    x = [q for q in rev.get(f"/api/cards/{b}").json()["dupes"]["queue"] if q["card_id"] == a][0]
+    x = [q for q in env["adm"].get(f"/api/cards/{b}").json()["dupes"]["queue"] if q["card_id"] == a][0]   # v0.4.7 #1: other batch = full view for admins only
     assert "same photo" in x["why"] and not x["blocking"]
 
 def test_img_long_and_control_names_404(env):

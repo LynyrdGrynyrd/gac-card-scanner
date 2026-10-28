@@ -78,7 +78,7 @@ async function loadQueue(force) {
     const buildB = () => { const tM = new Set(trimB(bMine, Q.batch)), tO = new Set(trimB(bOth, Q.batch)), hid = bMine.length - tM.size + bOth.length - tO.size;
     const hOpt = keep => b => keep.has(b) ? bOpt(b) : "";   // round 22: old/test batches are really left out (<option hidden> is ignored by some browsers); links and Show all still reach them
     $("#fBatch").innerHTML = (tM.size ? `<optgroup label="My batches">${bMine.map(hOpt(tM)).join("")}</optgroup>` : "") +
-      (tO.size ? `<optgroup label="Other people's batches">${bOth.map(hOpt(tO)).join("")}</optgroup>` : "") + (SHOWALLB || Q.batch === "" ? `<option value="">${S.ME && S.ME.role === "admin" ? "All batches (everyone's)" : "All my batches"}</option>` : "") +
+      (tO.size ? `<optgroup label="Other people's batches">${bOth.map(hOpt(tO)).join("")}</optgroup>` : "") + (S.ME && S.ME.role === "admin" && (SHOWALLB || Q.batch === "") ? `<option value="">All batches (everyone's)</option>` : "")   /* v0.4.7 #8: no All batches for reviewers */ +
       (hid ? `<option value="__showall__">More batches…</option>` : ""); }; // round 16 (coordinator r15 #1); round 21: old/test batches behind "Show all"
     S.BATCHES = batches; MINE = new Set(batches.filter(b => b.mine).map(b => b.batch));
     const byNew = (a, b) => (b.started || 0) - (a.started || 0);
@@ -88,6 +88,7 @@ async function loadQueue(force) {
     if (Q.batchFromMemory && newest && newest.batch !== Q.batch) Q.batch = null;   // round 22 (part-timer r21): the queue opens on your newest batch
     Q.batchFromMemory = false;
     if (Q.batch === null) Q.batch = newest ? newest.batch : "";
+    if (Q.batch === "" && newest && !(S.ME && S.ME.role === "admin")) Q.batch = newest.batch;   // v0.4.7 #8: a reviewer always works in one batch
     buildB();
     if (Q.reading && Q.batch === Q.reading && !batches.some(b => b.batch === Q.reading)) $("#fBatch").insertAdjacentHTML("beforeend", `<option value="${esc(Q.reading)}">${esc(myB.label || "Newest batch")} (being read…)</option>`);
     if (Q.batch && Q.batch !== "__none__" && Q.batch !== Q.reading && !batches.some(b => b.batch === Q.batch))

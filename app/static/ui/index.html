@@ -169,7 +169,7 @@
   <select id="exStatus"><option value="approved_new">Ready to export</option><option value="approved">All approved</option><option value="all">All cards</option><option value="pending">Pending only</option><option value="rejected">Rejected only (admin)</option></select>
   <label for="exBatch">Batch</label>
   <input id="exBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="14"> <select id="exBatch"><option value="">All batches</option></select>
-  <label class="small chk"><input type="checkbox" id="exShowAll"><span> Show everyone's batches</span></label>
+  <label class="small chk" id="exShowAllL"><input type="checkbox" id="exShowAll"><span> Show everyone's batches</span></label>
   <p id="exInfo" class="muted" aria-live="polite"></p>
   <div id="exDup" class="alert bad" hidden></div>
   <div class="exgo"><div class="big" id="exBig" aria-hidden="true"></div><p class="muted" id="exBigT">Loading…</p>
@@ -185,7 +185,7 @@
   <div id="exDone" class="alert ok" role="status" hidden></div>
   <h2 class="mt">Export history</h2>
   <p class="small">Download again while the copy is kept.</p>
-  <p class="small"><label style="display:inline-flex;gap:.4em;align-items:center"><input type="checkbox" id="exHistEveryone" style="width:auto;height:auto"> Show everyone's exports</label></p>
+  <p class="small" id="exHistEveryoneL" hidden><label style="display:inline-flex;gap:.4em;align-items:center"><input type="checkbox" id="exHistEveryone" style="width:auto;height:auto"> Show everyone's exports</label></p>
   <div class="tablewrap"><table class="q plain"><caption class="sr">Export history</caption>
     <thead><tr><th scope="col">When</th><th scope="col">By</th><th scope="col">Format</th><th scope="col">Cards</th><th scope="col">File</th></tr></thead><tbody id="exHist"></tbody></table></div>
   <p class="btns" id="exHistMore" hidden><button type="button" class="btn small" id="exHistMoreBtn">Show more</button><button type="button" class="btn small ghost" id="exHistAllBtn">Show all</button> <span class="small" id="exHistCount"></span></p>

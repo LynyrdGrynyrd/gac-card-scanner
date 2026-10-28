@@ -232,7 +232,8 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     sel, metas = sel0, metas0
     if not sel: return refuse(404, "No cards to check.")
     blabel = blabel0
-    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "")
+    from .exporting import _inc
+    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "", include_changed=_inc(request))
     body, comp, summ = res[0], res[3], res[4]; view = summ.pop("_view", None) or {}
     cinfo = crm_source.info(); dec = summ["decisions"]; cnt = summ["counts"]
     why = {int(i): w for i, w in view.get("left", [])}
@@ -273,6 +274,7 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
              + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · TO CHECK {len(tc_)} · LEFT OUT {cnt['left']}</b>"
              + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {U._s(summ['new_rows'], 'row')}, {summ['update_rows']} update {U._s(summ['update_rows'], 'row')})"
              + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are TO CHECK, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
+             + f"<br>{_html.escape((summ.get('ready') or {}).get('text') or '')}"   # v0.4.7 #3: the same line as the README and the screen
              + f"<br>{filecheck}</div>"
              "<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>Card</th><th>Name</th><th>Company</th><th>Decision</th><th>Why</th></tr>"
              + trs + "</table></body></html>")

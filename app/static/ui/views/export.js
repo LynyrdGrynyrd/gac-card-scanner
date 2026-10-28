@@ -138,7 +138,7 @@ let exHistShow = 10;
 $("#exHistMoreBtn").onclick = () => { exHistShow += 10; loadExportHistory(); };
 $("#exHistAllBtn").onclick = () => { exHistShow = Infinity; loadExportHistory(); };
 async function loadExportHistory() {
-  const every = await call("/api/exports"), everyone = $("#exHistEveryone") && $("#exHistEveryone").checked;   // part-timer r3: yours by default
+  const every = await call("/api/exports"), everyone = S.ME && S.ME.role === "admin" && $("#exHistEveryone") && $("#exHistEveryone").checked;   // part-timer r3: yours by default
   const all = everyone ? every : every.filter(x => x.own), h = all.slice(0, exHistShow);
   $("#exHistMore").hidden = all.length <= h.length; $("#exHistCount").textContent = `${h.length} of ${all.length} shown` + (everyone ? " (everyone's)" : "");
   $("#exHist").innerHTML = h.map(x => `<tr><td>${esc(when(x.ts))}</td><td>${esc(x.initials)}</td><td>${esc(HK[x.kind] || x.kind.toUpperCase())}${x.batch_label ? `<div class="sub">${esc(x.batch_label)}</div>` : ""}</td><td>${x.count}</td>
@@ -151,7 +151,10 @@ $$(".tile").forEach(t => t.onclick = async () => {   // round 14 (parttimer r6):
   t.setAttribute("aria-busy", "true"); const lbl0 = t.style.cursor; t.style.cursor = "progress"; toast("Preparing the export…", 1500);
   try { await tileExport(t); } finally { t.removeAttribute("aria-busy"); t.style.cursor = lbl0; }
 });
+let incChg = false;
+document.addEventListener("change", e => { if (e.target && e.target.id === "exIncChg") incChg = e.target.checked; });   // v0.4.7 #2
 async function tileExport(t) {
+  incChg = false;
   const kind = ($("input[name=exKind]:checked") || {}).value || t.dataset.ex || "xlsx", st = $("#exStatus").value;
   const pre = kind === "xlsx" ? call(`/api/export/xlsx?preview=1&view=1&status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`).catch(e => ({__err: e})) : null;
   const info = await exportInfo(); if (!info || !info.count || info.duplicates.length) return;
@@ -178,8 +181,13 @@ async function tileExport(t) {
   // v0.4 #5: a summary sheet first ("12 new, 1 to check"); the counts come from the server's own export re-check
   let sum = null; try { sum = await call(`/api/export/summary?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}`); } catch {}
   const stat = (l, n, w) => `<div class="stat"><span>${l}</span><b${w && n ? ' class="w"' : ""}>${n}</b></div>`;
-  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat("To check", sum.to_check, true) +
-    (kind === "xlsx" && sum.ready ? `<p class="small" id="exReady">${esc(sum.ready.text)}</p>` : "") : "";   // v0.4.6 #7: the README's own line
+  const sheet = sum ? (kind === "xlsx" ? stat("New contacts", sum.new) + stat("Updates", sum.updated) : stat("Cards", sum.count)) + stat(kind === "xlsx" ? "Of these, to check" : "To check", sum.to_check, true) +   /* v0.4.7 #9: not a third group */
+    (kind === "xlsx" && sum.ready ? `<p class="small" id="exReady">${esc(sum.ready.text)}</p>` : "") +
+    // v0.4.7 #2: cards exported before and edited since are not in the import file (they would be added twice)
+    (kind === "xlsx" && (sum.changed_ids || []).length ? `<p class="small" id="exChanged">${plural(sum.changed_ids.length, "card")} already exported earlier; not in this file. Update ${sum.changed_ids.length === 1 ? "it" : "them"} in MC Trade by hand${sum.changed_file ? ` (earlier file: ${esc(sum.changed_file)})` : ""}: ${sum.changed_ids.slice(0, 5).map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.` +
+      (S.ME && S.ME.role === "admin" ? ` <label><input type="checkbox" id="exIncChg"> Put ${sum.changed_ids.length === 1 ? "it" : "them"} in as new anyway</label>` : "") + `</p>` : "") +
+    // v0.4.7 #4: admins see what is still waiting for them
+    (sum.needs_admin ? `<p class="small" id="exNA"><a href="#queue?s=pending&amp;batch=all&amp;na=1">${sum.needs_admin} waiting for admin</a> (not in this export).</p>` : "") : "";
   const bl_ = (exportInfo.list || []).find(b => b.batch === $("#exBatch").value);
   const r = await ask({title: "Ready to save", html: `<p>Batch: <b>${esc(bl_ ? bl_.batch_label || bl_.batch : "All batches")}</b></p>` + sheet + `<details class="more small"><summary>More</summary>` + so + `<p>Format: <b>${KIND[kind]}</b></p><p>Cards: <b>${esc($("#exStatus").selectedOptions[0].textContent)}</b></p><p class="small">${kind === "xlsx" ? `<b>You'll get ${(sum && sum.ready && sum.ready.files) || (nUpd ? 5 : 4)} files. Import only IMPORT-ME${nUpd ? " (updates separately)" : ""}.</b> NOT-FOR-IMPORT files are for reading.` : "You'll get one file."}</p></details>`,
     buttons: [{label: "Cancel", value: null}, {label: "Save", cls: "primary", value: 1, primary: true}]});
@@ -187,7 +195,7 @@ async function tileExport(t) {
   t.setAttribute("aria-busy", "true");
   try {
     const sv = seenV ? Object.entries(seenV).map(([k, x]) => `&seen_${k}=${encodeURIComponent(x)}`).join("") : "";
-    const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv);
+    const res = await fetchOk(`/api/export/${kind}?status=${st}&batch=${encodeURIComponent($("#exBatch").value)}` + sv + (incChg ? "&include_changed=1" : ""));
     const name = (res.headers.get("Content-Disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "export." + kind, n = res.headers.get("X-Card-Count");
     const outs = [await saveBlob(await res.blob(), name)];
     $("#exDone").hidden = false;
@@ -201,7 +209,9 @@ async function tileExport(t) {
     $("#exDone").innerHTML = (sm ? `<b>✓ ${plural(sm.cards, "card")} exported` + (sm.update_rows ? ` (${plural(sm.new_rows, "new contact")}, ${plural(sm.update_rows, "update")})` : "") + (sm.crm_real ? "" : " (test MC Trade list)") + `.</b>` +
         (sm.left_ids.length ? ` <span class="flag bad">Not imported: ${sm.left_ids.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "") +
         (sm.possible.length ? ` <span class="flag low">May already be in MC Trade: ${sm.possible.map(i => `<a href="#review/${i}" aria-label="Open card #${i}">#${i}</a>`).join(", ")}.</span>` : "")
-      : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? `<br>Import only the IMPORT-ME file${comp.includes("updates.xlsx") ? "s (updates separately)" : ""}.` + (sm && sm.ready ? " " + esc(sm.ready.text) : "") : "");
+      : `<b>✓ Exported ${plural(n, "card")}</b>.`) + (kind === "xlsx" ? (sm && sm.ready ? `<br>${esc(sm.ready.text)}` : "") +
+        // v0.4.7 #11: a short import checklist after a real export
+        `<ol class="small" id="exCheck"><li>Read the READ-ME.</li><li>Import only the IMPORT-ME file${comp.includes("updates.xlsx") ? " (updates: the UPDATES file, separately)" : ""}.</li>${sm && sm.ready ? "" : "<li>Test 2 rows first.</li>"}</ol>`   /* the Ready line already says "Test 2 rows first." */ : "");
     const lost = lostFiles(outs);   // audit 2026-10: a cancelled Save dialog (desktop app) is said, never claimed as saved
     if (lost.length) $("#exDone").insertAdjacentHTML("beforeend", `<br><span class="flag bad">Not saved: ${esc(lost.map(o => o.name).join(", "))}.</span> Download ${lost.length === 1 ? "it" : "them"} again from Export history below.`);
     $("#exDone").dataset.batch = $("#exBatch").value;
