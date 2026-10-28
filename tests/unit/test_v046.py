@@ -214,6 +214,6 @@ def test_v046_review_badge_counts_own_batches(env):
 def test_v046_blocked_toast_names_misread_and_badge_grammar():
     import pathlib
     ui = pathlib.Path(__file__).resolve().parents[2] / "app" / "static" / "ui"
-    js = (ui / "views" / "review.js").read_text(); hd = (ui / "header.js").read_text()
+    js = (ui / "views" / "review.js").read_text(encoding="utf-8"); hd = (ui / "header.js").read_text(encoding="utf-8")
     assert 'looks misread. Fix it${isAdm_ ? "" : ", or ask an admin"}.' in js and '"An admin needs to confirm this."' in js
     assert 'c.needs_admin === 1 ? "needs" : "need"' in hd
