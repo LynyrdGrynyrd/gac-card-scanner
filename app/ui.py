@@ -175,6 +175,10 @@ def _init_ui(c):
         try: c.execute("ALTER TABLE exports ADD COLUMN people TEXT")
         except Exception as e:
             if "duplicate column" not in str(e): raise
+    if "listed_ids" not in {r[1] for r in c.execute("PRAGMA table_info(exports)")}:   # v0.4.12: every card the export's files list
+        try: c.execute("ALTER TABLE exports ADD COLUMN listed_ids TEXT")
+        except Exception as e:
+            if "duplicate column" not in str(e): raise
     if "refused" not in {r[1] for r in c.execute("PRAGMA table_info(actions)")}:   # v0.4.4 #10: an action Undo can no longer take back
         try: c.execute("ALTER TABLE actions ADD COLUMN refused REAL")
         except Exception as e:
@@ -2358,8 +2362,9 @@ def _update(cid, request, body, internal=False):
     if len(wiped) >= 2 and _form and body.get("_allow_blank") is not True:   # a whole form sent (the page), not a deliberate partial API edit
         return JSONResponse({"error": "This save would clear " + ", ".join(LABEL.get(k, k) for k in wiped) + " (the form was probably still empty when Save was clicked). Nothing was saved: wait for the card to finish loading, then try again.",
                              "need": "blank_wipe", "fields": wiped}, 409)
-    if st == "rejected" and c["status"] == "approved" and meta(cid).get("exported") and not internal:
-        # v0.4.4 #7 (data-manager L1): an exported card is in the MC Trade file; rejecting it here would not take it out
+    if (st == "rejected" or body.get("merge_into")) and c["status"] == "approved" and meta(cid).get("exported") and not internal:
+        # v0.4.4 #7 (data-manager L1): an exported card is in the MC Trade file; rejecting it here would not take it out.
+        # v0.4.12 (review F3): merging it into another card rejects it too, so the same rule applies to a merge.
         return JSONResponse({"error": f"Card #{cid} was already exported, so it can't be rejected here. If it shouldn't be in MC Trade, remove it there and add a note on the card.",
                              "need": "exported_reject"}, 409)
     if (st and st != c["status"] or body.get("merge_into")):
@@ -2491,7 +2496,9 @@ def _update(cid, request, body, internal=False):
         else: set_meta(cid, override=json.dumps({"reason": why, "problems": list(errs_now.values()), "by": rv}) if errs_now and why else None)
     elif st: set_meta(cid, override=None)
     note_changed = "note" in body and (note or "") != (c.get("note") or "")
-    if (changes or note_changed) and st in (None, "approved") and c["status"] == "approved" and cid in sent_ids():   # skeptic R7-5, R8-3 (note too)
+    # v0.4.12 (review F4): also while it is back in Pending (moved there after export): the edit must reach MC Trade once it
+    # is approved again, and approved_new only offers an exported card that is marked for re-export
+    if (changes or note_changed) and st in (None, "approved") and c["status"] in ("approved", "pending") and cid in sent_ids():   # skeptic R7-5, R8-3 (note too)
         set_meta(cid, reexport=time.time()); log(cid, rv, "reexport_needed", detail={"why": "edited after export"})
         exp_notice = True   # v0.4.8 #3: say it at save time
     else: exp_notice = False
@@ -2900,6 +2907,8 @@ def _bulk(request, body):
             skipped.append({"id": i, "need": "stale", "why": "changed since the list was loaded (or no version sent): reload and try again"}); continue
         if c["status"] != "pending" and not body.get("confirm_redecide"):
             skipped.append({"id": i, "why": f"already {c['status']}"}); continue
+        if st == "rejected" and c["status"] == "approved" and meta(i).get("exported"):   # v0.4.12 (review F3): the one-card rule
+            skipped.append({"id": i, "need": "exported_reject", "why": "already exported (it is in an MC Trade file), so it can't be rejected here"}); continue
         if st == "approved":
             _e = {**validate(c["fields"]), **hard_errors(c["fields"])}   # round 14 (coordinator r6 #1): name the problem
             if _e: skipped.append({"id": i, "why": "; ".join(dict.fromkeys(_e.values()))[:300]}); continue
@@ -3086,6 +3095,11 @@ def undo(request: Request, body: dict = Body(default={})):
         return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Edit the card instead.",
                              "need": "exported", "cards": xp}, 409)
     with WRITE_LOCK:
+        xp = _undo_exported(a)   # v0.4.12 (review F5): again under the lock: an export that marked the cards while Undo waited counts
+        if xp:
+            with db() as c_: c_.execute("UPDATE actions SET refused=? WHERE id=?", (time.time(), a["id"]))
+            return JSONResponse({"error": f"Can't undo: card {', '.join('#' + str(i) for i in xp)} was exported after this. Edit the card instead.",
+                                 "need": "exported", "cards": xp}, 409)
         if any("after" not in s_ for s_ in snap):
             return JSONResponse({"error": "This can't be undone safely. Edit the card instead.", "need": "legacy_action"}, 409)
         with db() as c:

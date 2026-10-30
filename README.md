@@ -8,7 +8,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
-**Current version: 0.4.11.** Security update: the image library (Pillow) is updated to 13.0 for published vulnerabilities in its image decoders. Nothing else changes from 0.4.10. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
+**Current version: 0.4.12.** Fixes from a review of the 0.4 changes: delete-on-request now removes every stored copy of the person, an exported card can no longer be rejected by bulk or merge, edits made after moving an exported card back to Pending reach MC Trade, and Undo can no longer slip in during an export. Since 0.4.11: Pillow security update. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
 
 **Live demo:** a public demo on Hugging Face Spaces (synthetic cards only) is planned; its link will be added here when it is published. Until then you can run the same demo mode locally (see [Public demo](#public-demo)).
 
