@@ -26,7 +26,9 @@ async function openCard(id, opts = {}) {
     $$("#rForm input, #rForm textarea").forEach(el => el.value = ""); $("#rDupBox").hidden = true; ["#rExported", "#rDupQ", "#rDupC", "#rAI", "#rCons"].forEach(q => { const e = $(q); if (e) { e.hidden = true; e.innerHTML = ""; e._h = null; } });
     $("#h-r").textContent = `Loading card #${id}…`; $$(".decide button, #bApprove, #bReject, #bSave, #bPending").forEach(b => b.disabled = true);
   }
-  let d; try { d = await call("/api/cards/" + id); } catch { if (tok === openSeq) { toast("Card not found."); location.hash = SS.queueHash || "queue"; } return; }
+  // v0.4.12: back to the queue only while this card is still the page shown: a late "not found" (e.g. #review with no card
+  // number) used to pull the person off the page they had already moved to (Export, Scan...)
+  let d; try { d = await call("/api/cards/" + id); } catch { if (tok === openSeq && /^#review(\/|$)/.test(location.hash)) { toast("Card not found."); location.hash = SS.queueHash || "queue"; } return; }
   if (tok !== openSeq) return;   // the person already moved on to another card: drop this late answer
   // round 14 (LOST SAVE): what the person typed WHILE the card was loading is kept too (it used to be read before the fetch)
   if (opts.keep && S.cur && S.cur.id === id) recomputeDirty();
