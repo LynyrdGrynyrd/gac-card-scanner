@@ -38,7 +38,7 @@ def test_in_batch_rejected_twin_not_hidden_by_many_other_batch_lookalikes(env):
     for x, y in ((a, t), (t, a)):
         h = _hint(_row(rc, b, x)); assert any(f"#{y}" in s and "this batch" in s for s in h), h
         assert any(f"#{y}" in s for s in _hint(rc.get(f"/api/cards/{x}").json()))
-        assert all("more" in s or "other cards" in s for s in h if "another batch" in s)   # r22: a decided card shows a count (part-timer r21)
+        assert all("more" in s or "other cards" in s or "Looks like" in s for s in h if "another batch" in s or "other batches" in s)   # r22: a decided card shows a count (part-timer r21)
     assert rc.post(f"/api/cards/{a}", json={"status": "pending", "confirm_redecide": True}).status_code == 200
     h = _hint(_row(rc, b, a)); assert any(f"#{t} (rejected, this batch): a hint only" in s for s in h), h
 

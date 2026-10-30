@@ -52,6 +52,76 @@ LOOKALIKE = {"rnbber": "rubber", "rubbcr": "rubber", "mian": "main", "akrn": "ak
              "hcalth": "health", "heaith": "health", "rnedical": "medical", "medlcal": "medical", "dental": None, "bnak": "bank",
              "credlt": "credit", "unlon": "union", "lnsurance": "insurance", "realtv": "realty", "propertles": "properties"}
 LOOKALIKE = {k: v for k, v in LOOKALIKE.items() if v}
+# v0.4.8 #9 (reviewer/skeptic: 'Vlce', 'Managr' passed): common job-title words read with i->l, o->n or a dropped last vowel
+_LA_TITLE = ["manager", "director", "president", "vice", "senior", "officer", "engineer", "executive", "assistant", "coordinator",
+               "specialist", "consultant", "owner", "founder", "partner", "accountant", "supervisor", "administrator", "principal",
+               "analyst", "advisor", "representative", "associate", "chief", "marketing", "operations", "business", "development"]
+def _title_variants(w):
+    out = set()
+    for i, ch in enumerate(w):
+        if ch == "i": out.add(w[:i] + "l" + w[i + 1:])
+        if ch == "o" and 0 < i: out.add(w[:i] + "n" + w[i + 1:])
+    m_ = re.match(r"^(.{3,})([aeio])([a-z]{1,2})$", w)
+    if m_ and len(w) >= 5 and m_.group(3) in ("r", "nt", "st", "n", "l"): out.add(m_.group(1) + m_.group(3))
+    return out - {w}
+_REALW = {"vile", "senor", "owner", "lice", "chef", "bnsiness"}
+def _swaps(w):
+    """v0.4.9 #9 (skeptic: 'Vice Presdient' passed): two neighbouring letters swapped, in a title word of 6+ letters."""
+    return {w[:i] + w[i + 1] + w[i] + w[i + 2:] for i in range(len(w) - 1) if w[i] != w[i + 1]} if len(w) >= 6 else set()
+TITLE_VARIANTS = set()   # v0.4.9 #9: these block in a job title only; in a company name ('Managr Inc') they are a suggestion
+for _w in _LA_TITLE:
+    for _v in _title_variants(_w) | _swaps(_w):
+        if _v not in _REALW and _v not in LOOKALIKE and _v not in _LA_TITLE: LOOKALIKE[_v] = _w; TITLE_VARIANTS.add(_v)
+# v0.4.9 #9: 'Rnbert' (o read as n) is a misread wherever it is; 'Rnjak', 'Nrupen' (real names) are not. A word starting with
+# Rn/Nr/Lr/Rl/Rm blocks only when one vowel in place of its 2nd letter gives a common first name.
+COMMON_NAMES = {"robert", "roberta", "roberto", "robin", "ronald", "roger", "rodney", "rosa", "rose", "roland", "rocco", "rory",
+                "ross", "roy", "ruben", "russell", "ruth", "rachel", "ralph", "randy", "raymond", "rebecca", "regina", "renee",
+                "richard", "rita", "nora", "norma", "norman", "nathan", "nancy", "nicole", "linda", "laura", "larry", "lori",
+                "lisa", "lucas", "luke", "rome", "romeo", "ronan", "ronnie", "rowan", "royce", "nolan", "noah", "noel", "lorna",
+                "lorenzo", "louis", "louise", "lucy", "lola", "rolando", "rodrigo", "robbie", "bobby", "rebekah", "ramon", "rafael"}
+def name_misread(v):
+    """The first word in v that looks like a misread common first name ('Rnbert' -> 'Robert'), as (word, fix), or None."""
+    for w in re.findall(r"[A-Za-z]{3,}", str(v or "")):
+        m_ = re.match(r"(?i)^(rn|nr|lr|rl|rm)([a-z]+)$", w)
+        if not m_: continue
+        for vw in "oaeiu":
+            g = m_.group(1)[0] + vw + m_.group(2)
+            if g.lower() in COMMON_NAMES: return w, g.capitalize()
+    return None
+# v0.4.9 #9 (coordinator: 'Highlandisguare Cofee Co' approved): a company with an obvious typo or words run together gets a
+# 'Check spelling' suggestion (never a block)
+CO_TYPOS = {"cofee": "coffee", "coffe": "coffee", "compnay": "company", "comapny": "company", "servcies": "services", "servces": "services",
+            "solutons": "solutions", "soultions": "solutions", "managment": "management", "consulitng": "consulting", "restuarant": "restaurant",
+            "resturant": "restaurant", "bakey": "bakery", "insurnace": "insurance", "intenational": "international", "assocaites": "associates",
+            "assoicates": "associates", "constuction": "construction", "contruction": "construction", "marketng": "marketing", "squre": "square",
+            "sqaure": "square", "gruop": "group", "goup": "group", "partenrs": "partners", "parnters": "partners", "techology": "technology"}
+LONG_OK = {"international", "technologies", "construction", "communications", "manufacturing", "pharmaceuticals", "entertainment",
+           "environmental", "transportation", "architecture", "professional", "professionals", "corporation", "incorporated",
+           "distribution", "distributors", "development", "developments", "engineering", "investments", "management", "consultants",
+           "photography", "laboratories", "foundation", "association", "associates", "properties", "productions", "enterprises",
+           "electronics", "healthcare", "insurance", "logistics", "restaurants", "hospitality", "landscaping", "contracting",
+           "manufacturers", "biotechnology", "telecommunications", "pharmaceutical", "orthodontics", "chiropractic", "therapeutics",
+           "accountants", "accounting", "marketplace", "warehousing", "veterinary", "philanthropy", "renaissance", "metropolitan"}
+_LONG_SUFFIX = re.compile(r"(tions?|ments?|ical|ology|ologies|ities|ings?|ances?|ences?|ness|ships?|ists?|ators?|ware|works|worldwide)$")
+def company_spelling(c):
+    """'Highlandisguare Cofee Co' -> 'Cofee' (a usual typo) or 'Highlandisguare' (13+ letters, not a known long word), or None."""
+    words = re.findall(r"[A-Za-z]+", str(c or ""))
+    for w in words:
+        if w.lower() in CO_TYPOS: return w
+    for w in words:
+        lw = w.lower()
+        if len(w) >= 13 and w[1:].islower() and lw not in LONG_OK and not _LONG_SUFFIX.search(lw): return w
+    return None
+# v0.4.8 #9: brand names with digits ('E2open', '4imprint', '4ward') are not misreads
+DIGIT_NAMES_OK = {"4imprint", "4thought", "e2open", "3com", "4kids", "3m", "7-eleven", "1-800-flowers", "g4s", "i3", "web3labs", "b2b", "b2c", "h2o", "q1", "q2", "q3", "q4",
+                  "4ward", "4ever", "2go", "4sale", "4front"}
+def digit_brand_ok(w):
+    """'4ward', '4ever', '2go': a leading 2/4 read as to/for (four-ward); '4nalytics' (a 4 for an A) is still a misread."""
+    w = (w or "").lower()
+    if w in DIGIT_NAMES_OK: return True
+    m_ = re.match(r"^([24])([a-z]{2,})$", w)
+    return bool(m_ and (m_.group(1) == "4" and re.match(r"^(ward|ever|sale|front|most|cast|tune|sight|word|real|good|life|you|u|all|get|thought|imprint)", m_.group(2))
+                        or m_.group(1) == "2" and re.match(r"^(go|day|morrow|gether|you|u)", m_.group(2))))
 GLUE = ["coffee", "bank", "group", "law", "park", "street", "suite", "city", "robotics", "hardware", "health", "partners", "services",
         "solutions", "company", "realty", "insurance", "dental", "medical", "market", "events", "analytics"]
 CAMEL_OK = {"iPhone", "eBay", "YouTube", "LinkedIn", "PayPal", "FedEx", "WordPress", "JavaScript", "McDonald", "PowerPoint", "HubSpot"}
@@ -148,7 +218,9 @@ def check(f):
                     out.append(_sug("email_web", "emails", f"Email domain “{d}” and website “{web}” differ by {dist} letter(s): one is probably misread"))
         # local part vs name
         la = _a(lp)
-        if fn and ln and len(la) >= 4:
+        # v0.4.4 #12 (reviewer: "praman@…" vs "Morg4n Raman"): no hint when the NAME is the misread part (digits in it); the
+        # email was right and the hint wrongly blamed it. The name is flagged on its own.
+        if fn and ln and len(la) >= 4 and not re.search(r"\d", f"{f.get('first_name') or ''}{f.get('last_name') or ''}"):
             pats = {fn + ln, fn[0] + ln, fn, ln, ln + fn[0], fn + ln[0]}
             full = {fn + ln, fn[0] + ln, ln + fn[0], ln + fn}
             if la not in pats:
@@ -225,6 +297,7 @@ def check(f):
         out.append(_sug("company_sanity", "company", f"Company “{c}” contains an email or phone number"))
     # round 13 (manager r11 L-r11-1): a digit/letter mix-up inside a company word ("R1O Testworks": 1 / O)
     for w_ in re.findall(r"[A-Za-z0-9]+", c):
+        if digit_brand_ok(w_): continue   # v0.4.8 #9 (part-timer: 'E2open' flagged)
         if re.search(r"[A-Za-z]", w_) and re.search(r"\d", w_) and re.search(r"(?<=\d)[OoIlS]|[OoIlS](?=\d)|(?<=[A-Za-z])[015](?=[A-Za-z])|[01](?=[OoIl])|(?<=[OoIl])[01]", w_):
             fx = _digit_reading(w_)
             alt = re.sub(r"(?<=[A-Za-z])0|0(?=[A-Za-z])", "O", re.sub(r"(?<=[A-Za-z])1|1(?=[A-Za-z])", "I", w_))
@@ -236,6 +309,9 @@ def check(f):
         rare = sum(1 for i in range(len(w_) - 1) if w_[i:i + 2].lower() in _RARE2)
         if re.search(r"[a-z]{3,}[A-Z][a-z]?$", w_) or (len(w_) >= 10 and rare >= 1) or rare >= 2 or re.search(r"[bcdfghjklmnpqrstvwxz]{5,}", w_.lower()):
             out.append(_sug("company_gibberish", "company", f"Company word “{w_}” doesn't look like a real word: check it against the photo")); break
+    if c and not any(x["field"] == "company" and x["code"] in ("company_gibberish", "ocr_lookalike") for x in out):
+        w_ = company_spelling(c)
+        if w_: out.append(_sug("company_spelling", "company", f"Company “{c}”: check spelling (“{w_}”)", re.sub(r"\b" + re.escape(w_) + r"\b", CO_TYPOS[w_.lower()].capitalize() if w_[0].isupper() else CO_TYPOS[w_.lower()], c) if w_.lower() in CO_TYPOS else None))
     if not any(x["field"] == "website" and x["code"] == "email_web" for x in out): out += website_check(f)
     seen, uniq = set(), []   # round 11 (reviewer r10): each hint once
     web_ = [x for x in out if x["field"] == "website"]   # round 20 (coordinator r19): ONE website line, not 2-3 repeats

@@ -5,7 +5,7 @@ import glob, os, re
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 UI = os.path.join(ROOT, "app", "static", "ui")
 PHONE = os.path.join(ROOT, "app", "static", "phone")
-MODULES = sorted(set(glob.glob(os.path.join(UI, "**", "*.js"), recursive=True)) - {os.path.join(UI, n) for n in ("desktop.js", "login.js", "privacy.js")})
+MODULES = sorted(set(glob.glob(os.path.join(UI, "**", "*.js"), recursive=True)) - {os.path.join(UI, n) for n in ("desktop.js", "login.js", "privacy.js", "help-nav.js")})
 SERVED = sorted(glob.glob(os.path.join(UI, "*.html")) + glob.glob(os.path.join(UI, "**", "*.js"), recursive=True) +
                 glob.glob(os.path.join(PHONE, "*.html")) + glob.glob(os.path.join(PHONE, "*.js")))
 

@@ -15,7 +15,7 @@ def test_wrong_blocks_and_misses():
     assert "name" in H(first_name="Morg4n") and "last_name" in H(last_name="Sm1th") and "name" not in H(first_name="Morgan")
     assert "phones" in H(phones=[{"number": "555-0100"}]) and "no area code" in H(phones=[{"number": "555-0100"}])["phones"]
     for ok in ("330-555-0100", "330-555-0170 x4271", "(330) 555-0100 ext 12", "+44 20 7946 0958", "1-330-555-0100"): assert "phones" not in H(phones=[{"number": ok}]), ok
-    m = H(address="g W Exchange St, Cuyahoga Falls, OH 44223")["address"]; assert "44223" in m
+    m = H(address="g W Exchange St, Cuyahoga Falls, OH 44223")["address"]; assert "“g”" in m and len(m) < 70   # v0.4.6 #8: short line
     assert "phones" in U.payload_problems({"phones": [{"number": "555-0100"}]}) or "phones" in H(phones=[{"number": "555-0100"}])
 
 def _confirm(c, cid, field, value, reason="printed like this on the card"):
@@ -25,9 +25,9 @@ def _confirm(c, cid, field, value, reason="printed like this on the card"):
 def test_confirm_one_field_needs_reason_and_is_logged(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     cid = mk(ui, st, first_name="Ann", last_name="Lee", company="Acme Gr0up", title="Acc0unt Manager", emails=["ann@acme.com"])
-    r = _confirm(rev, cid, "company", "Acme Gr0up", reason=None); assert r.status_code == 422 and r.json()["need"] == "reason"
-    assert _confirm(rev, cid, "company", "Acme Gr0up", reason="\u200b-").status_code == 422
-    r = _confirm(rev, cid, "company", "Acme Gr0up"); assert r.status_code == 200, r.text
+    r = _confirm(rev, cid, "company", "Acme Gr0up", reason=None); assert r.status_code == 403   # v0.4.5 #2: reviewers never confirm
+    assert _confirm(env["adm"], cid, "company", "Acme Gr0up", reason="\u200b-").status_code == 422
+    r = _confirm(env["adm"], cid, "company", "Acme Gr0up"); assert r.status_code == 200, r.text
     h = U.hard_errors(st.get(cid)["fields"]); assert "company" not in h and "title" in h   # ONE field only
     hist = [x for x in U.history(cid) if x["action"] == "hard_check_override"][-1]
     assert "Company" in hist["text"] and "Acme Gr0up" in hist["text"] and "printed like this" in hist["text"], hist["text"]
@@ -42,10 +42,10 @@ def test_old_and_invalid_confirmations_do_not_count(env):
     f = {"first_name": "Ann", "company": "Acme Gr0up", "phones": [{"number": "33o-555-0100"}], "confirmed_ok": dict(old, phones=json.dumps([{"number": "33o-555-0100"}])), "confirmed_by": {"company": "QS"}}
     assert "company" in U.hard_errors(f) and "phones" in U.hard_errors(f)   # pre-r23 (no author / reason), and phones never
     meta = {"user": "rev", "by": "RR", "role": "reviewer", "reason": "on card", "value": old["company"]}
-    assert "company" not in U.hard_errors(dict(f, confirmed_meta={"company": meta}))
-    e = json.dumps(["a@acmegroupexample.com"])
-    f2 = {"first_name": "Ann", "emails": ["a@acmegroupexample.com"], "confirmed_ok": {"emails": e}, "confirmed_meta": {"emails": dict(meta, value=e)}}
-    assert "emails" in U.hard_errors(f2)                                     # a reviewer can't confirm an email
+    assert "company" in U.hard_errors(dict(f, confirmed_meta={"company": meta}))   # v0.4.5 #2: a reviewer confirmation counts for nothing
+    e = json.dumps(["a@firestoneparkhardwexample.com"])
+    f2 = {"first_name": "Ann", "emails": ["a@firestoneparkhardwexample.com"], "confirmed_ok": {"emails": e}, "confirmed_meta": {"emails": dict(meta, value=e)}}
+    assert "emails" in U.hard_errors(f2)                                     # v0.4.4: only an admin's confirmation counts for email
     assert "emails" not in U.hard_errors(dict(f2, confirmed_meta={"emails": dict(meta, value=e, role="admin")}))
     assert "company" in U.hard_errors(dict(f, company="Acme Gr0up2", confirmed_meta={"company": meta}))   # edited since: no longer confirmed
 
@@ -70,7 +70,7 @@ def test_card_merge_drops_confirmations(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     t = mk(ui, st, first_name="Mia", last_name="Merge", company="", emails=["mia@merge23.com"])
     s = mk(ui, st, first_name="Mia", last_name="Merge", company="Acme Gr0up", emails=["mia@merge23.com"])
-    assert _confirm(rev, s, "company", "Acme Gr0up").status_code == 200
+    assert _confirm(env["adm"], s, "company", "Acme Gr0up").status_code == 200
     assert U.merge_pick(st.get(t)["fields"], st.get(s)["fields"], "company") is None   # a garbled value never fills the target, confirmed or not
 
 def test_cancel_counts_only_this_upload(env):

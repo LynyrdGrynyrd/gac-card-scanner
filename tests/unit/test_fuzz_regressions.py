@@ -5,7 +5,8 @@ import pytest
 
 def _card(env):
     f = {"first_name": "Fay", "last_name": "Fuzz", "emails": ["fay@fuzz.io"], "phones": [{"type": "work", "number": "330-555-0199"}], "social": []}
-    cid = env["store"].add("test", "raw", f, ""); env["ui"].set_meta(cid, batch="bfz", batch_label="Fuzz"); return cid
+    cid = env["store"].add("test", "raw", f, ""); env["ui"].set_meta(cid, batch="bfz", batch_label="Fuzz")
+    from test_app import _rev_ini; env["ui"].log(cid, _rev_ini(env["ui"]), "scanned"); return cid   # v0.4.6: rev's own card
 
 
 @pytest.mark.parametrize("body", [{"username": [None, None], "password": "x"}, {"username": "adm", "password": {"a": 1}}])

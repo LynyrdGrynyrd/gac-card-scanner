@@ -225,7 +225,7 @@ def test_setup_refused_through_a_foreign_host_name(tmp_path, monkeypatch):
     from conftest import Client
     monkeypatch.setattr(store, "DB", str(tmp_path / "fresh.db"))
     c = Client(main.app)
-    body = {"username": "evil", "display": "Evil", "password": "evil-pass-12345"}
+    body = {"username": "evil", "display": "Evil", "password": "Setup-attempt-from-foreign-host"}
     r = c.post("/api/auth/setup", json=body, headers={"Host": "attacker.example:8765", "Origin": "http://attacker.example:8765"})
     assert r.status_code == 403
     assert c.get("/api/auth/state", headers={"Host": "attacker.example"}).json()["setup_allowed"] is False

@@ -226,15 +226,20 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
     def refuse(code, msg):
         auth.alog(user["username"], f"dry run REFUSED ({code}): {msg} [filter {U.FILTERS.get(status, status)}, batch {('“' + blabel0 + '”') if blabel0 else (batch or 'all')}]")
         return JSONResponse({"error": msg}, code)
+    if U._batch_refused(batch, user) and not U._filter_refused(status, user): return refuse(403, U.BATCH_MSG)
     if U._filter_refused(status, user) or (not batch and user.get("role") != "admin"):
         return refuse(403, "Choose your batch first (only an admin can check all batches).")
     sel, metas = sel0, metas0
     if not sel: return refuse(404, "No cards to check.")
     blabel = blabel0
-    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "")
+    from .exporting import _inc
+    from .exporting import waiting_ids as _wids
+    res = U.build_export("xlsx", sel, metas, status, f"{user['display']} ({user['initials']})", "", include_changed=_inc(request), waiting=_wids(batch) if batch else None, viewer=user)
     body, comp, summ = res[0], res[3], res[4]; view = summ.pop("_view", None) or {}
     cinfo = crm_source.info(); dec = summ["decisions"]; cnt = summ["counts"]
     why = {int(i): w for i, w in view.get("left", [])}
+    mcp = summ.get("mc_possible") or {}   # v0.4.3 #4: a possible MC Trade match
+    tc_ = {str(i) for i in summ.get("to_check_ids") or []}   # v0.4.4 #3: the SAME 'To check' set as the screen, Save dialog and READ-ME
     filecheck = ""
     tmp = tempfile.mkdtemp(prefix="gac-dryrun-")
     try:
@@ -253,28 +258,30 @@ def export_dryrun(request: Request, status: str = "approved_new", batch: str = "
         filecheck = "The import files read back cleanly (" + "; ".join(parts_) + ")."
     except (Exception, SystemExit) as e: filecheck = f"The import file could not be read back: {_html.escape(str(e)[:200])}"
     finally: shutil.rmtree(tmp, ignore_errors=True)
-    LBL = {"new": "CREATE (new-profiles file)", "update": "UPDATE (UPDATES file)", "review": "NEEDS REVIEW (in neither file)", "left": "LEFT OUT (merged or fix first)"}
+    LBL = {"new": "CREATE (new-profiles file)", "update": "UPDATE (UPDATES file)", "review": "TO CHECK (in neither file)", "left": "NOT IN THE FILE"}
     COL = {"new": "#d9ead3", "update": "#ddebf7", "review": "#fce4d6", "left": "#eeeeee"}
     order = {"review": 0, "left": 1, "update": 2, "new": 3}
     def nm(c): return _html.escape(f"{c['fields'].get('first_name','')} {c['fields'].get('last_name','')}".strip() or "(no name)")
     trs = "".join(f"<tr data-card='{c['id']}' data-decision='{dec[str(c['id'])]}' style='background:{COL[dec[str(c['id'])]]}'><td>#{c['id']}</td><td>{nm(c)}</td><td>{_html.escape(c['fields'].get('company') or '')}</td>"
-                  f"<td><b>{LBL[dec[str(c['id'])]]}</b></td><td>{_html.escape(why.get(c['id'], ''))}</td></tr>"
-                  for c in sorted(sel, key=lambda c: (order[dec[str(c['id'])]], c["id"])))
+                  f"<td><b>{'TO CHECK (in the new-profiles file)' if str(c['id']) in tc_ and dec[str(c['id'])] in ('new', 'update') else LBL[dec[str(c['id'])]]}</b></td>"
+                  f"<td>{_html.escape(why.get(c['id'], '') or ((lambda t_: t_[:1].upper() + t_[1:])(mcp.get(str(c['id']), '')) if dec[str(c['id'])] == 'new' else ''))}</td></tr>"
+                  for c in sorted(sel, key=lambda c: (order['review' if str(c['id']) in tc_ else dec[str(c['id'])]], c["id"])))
     left = [int(i) for i, k in dec.items() if k in ("review", "left")]
     html_ = ("<!doctype html><html><head><meta charset='utf-8'><title>MC Trade dry run: match report</title></head><body style='font:14px sans-serif;margin:16px'>"
              f"<h1>MC Trade dry run: match report (nothing was sent to MC Trade)</h1>"
              f"<div style='background:#fff3cd;border:2px solid #b45309;padding:10px;margin:8px 0;font:15px sans-serif'><b>Compared against:</b> {_html.escape(cinfo['source'])}."
              + ("" if cinfo["real"] else " <b>SAMPLE DATA: this is a rehearsal; no Profile IDs are assigned.</b>")
              + f"<br><b>Cards checked:</b> {len(sel)}" + (f" · batch “{_html.escape(blabel)}”" if blabel else "")
-             + f"<br><b>UPDATE {cnt['update']} · CREATE {cnt['new']} · NEEDS REVIEW {cnt['review']} · LEFT OUT {cnt['left']}</b>"
+             + f"<br><b>{_html.escape((summ.get('ready') or {}).get('text') or '')}</b>"   # v0.4.9 #1: the headline is the Ready line (one count source)
+             + f"<br>UPDATE {cnt['update']} · CREATE {cnt['new']} · TO CHECK {(summ.get('ready') or {}).get('to_check', 0)} in the file · NOT IN THE FILE {cnt['left'] + cnt['review']}"
              + f" (the same decisions as the export and its sign-off: {summ['new_rows']} new {U._s(summ['new_rows'], 'row')}, {summ['update_rows']} update {U._s(summ['update_rows'], 'row')})"
-             + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are NEEDS REVIEW, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
+             + ("<br>Updating existing MC Trade contacts is <b>switched off</b> (Admin → Settings): cards that match a profile are TO CHECK, never new rows." if auth.get_setting("mctrade_updates_enabled") != "1" else "")
              + f"<br>{filecheck}</div>"
              "<table border='1' cellpadding='4' style='border-collapse:collapse'><tr><th>Card</th><th>Name</th><th>Company</th><th>Decision</th><th>Why</th></tr>"
              + trs + "</table></body></html>")
     auth.alog(user["username"], f"dry run: ran the MC Trade dry-run check on {len(sel)} {U._s(len(sel), 'card')}, " + (f"batch “{blabel or batch}”" if batch else "all batches")
               + f", filter {U.FILTERS.get(status, status)}; data source: {'REAL ' + cinfo['file'] if cinfo['real'] else 'SAMPLE data'}; result: "
-              + f"UPDATE {cnt['update']}, CREATE {cnt['new']}, NEEDS REVIEW {cnt['review']}, LEFT OUT {cnt['left']}"
-              + f"; not in either file {len(left)} (NEEDS REVIEW + LEFT OUT)" + (": " + ", ".join(f"#{i}" for i in sorted(left)[:500]) if left else "")
+              + f"UPDATE {cnt['update']}, CREATE {cnt['new']}, TO CHECK {len(tc_)}, LEFT OUT {cnt['left']}"
+              + f"; not in either file {len(left)} (TO CHECK in neither file + LEFT OUT)" + (": " + ", ".join(f"#{i}" for i in sorted(left)[:500]) if left else "")
               + "; cards checked: " + ", ".join(f"#{c['id']}" for c in sorted(sel, key=lambda c: c["id"])[:500]))   # manager-r9 L-r9-1/2
     return Response(html_, media_type="text/html", headers={"Cache-Control": "no-store"})

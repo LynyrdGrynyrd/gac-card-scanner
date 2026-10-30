@@ -7,7 +7,7 @@ import {ask, busy} from "../ui/dialog.js";
 import {refreshCounts, refreshUndo, who} from "../header.js";
 
 /* ---------- queue ---------- */
-const Q = {s: "pending", batch: "", att: false, dup: false, nx: false, text: "", arch: false, cards: [], sel: new Set()};
+const Q = {s: "pending", batch: "", att: false, dup: false, nx: false, na: false, text: "", arch: false, cards: [], sel: new Set()};
 function applyQueueState(q) {
   if (q.has("s")) Q.s = q.get("s") === "all" ? "" : q.get("s");
   // round 8 (newcomer r8 N1): the batch filter is kept when coming back (menu link, ↩ Queue, back button); 'all' = All batches.
@@ -18,18 +18,19 @@ function applyQueueState(q) {
   const remembered = SS.batchChosen !== undefined && S.ME && SS.batchChosenUid === String(S.ME.id) ? SS.batchChosen : null;
   Q.batch = q.has("batch") ? (q.get("batch") === "all" ? "" : q.get("batch")) : remembered;
   Q.batchFromMemory = !q.has("batch") && remembered !== null;   // round 24 (newcomer/datamanager r23): the queue always opens on your newest batch
-  Q.att = q.get("att") === "1"; Q.nx = q.get("nx") === "1"; Q.dup = q.get("dup") === "1"; Q.text = q.get("q") || ""; Q.arch = q.get("arch") === "1";
+  Q.att = q.get("att") === "1"; Q.na = q.get("na") === "1"; Q.nx = q.get("nx") === "1"; Q.dup = q.get("dup") === "1"; Q.text = q.get("q") || ""; Q.arch = q.get("arch") === "1";
   $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.s === Q.s));
-  $("#fAtt").checked = Q.att; $("#fNew").checked = Q.nx; $("#fDup").checked = Q.dup; $("#fText").value = Q.text; $("#fArch").checked = Q.arch;
+  $("#fAtt").checked = Q.att; if ($("#fNa")) $("#fNa").checked = Q.na; $("#fNew").checked = Q.nx; $("#fDup").checked = Q.dup; $("#fText").value = Q.text; $("#fArch").checked = Q.arch;
 }
 function pushQueueState() {
-  const p = new URLSearchParams(); p.set("s", Q.s); p.set("batch", Q.batch || "all"); SS.lastBatch = Q.batch || ""; SS.lastBatchUid = S.ME ? String(S.ME.id) : ""; SS.lastBatchAt = String(Date.now() / 1000); if (Q.att) p.set("att", "1"); if (Q.nx) p.set("nx", "1"); if (Q.dup) p.set("dup", "1"); if (Q.text) p.set("q", Q.text); if (Q.arch) p.set("arch", "1");
+  const p = new URLSearchParams(); p.set("s", Q.s); p.set("batch", Q.batch || "all"); SS.lastBatch = Q.batch || ""; SS.lastBatchUid = S.ME ? String(S.ME.id) : ""; SS.lastBatchAt = String(Date.now() / 1000); if (Q.att) p.set("att", "1"); if (Q.na) p.set("na", "1"); if (Q.nx) p.set("nx", "1"); if (Q.dup) p.set("dup", "1"); if (Q.text) p.set("q", Q.text); if (Q.arch) p.set("arch", "1");
   SS.queueHash = "#queue?" + p;
   if (location.hash.startsWith("#queue") && !$("#dlg").open) history.replaceState(null, "", "#queue?" + p);   // round 15: never rewrite the URL of another page or under an open question
 }
 $$("#statusTabs button").forEach(b => b.onclick = () => { Q.s = b.dataset.s; $$("#statusTabs button").forEach(x => x.setAttribute("aria-pressed", x === b));   // audit 2026-10: aria-pressed buttons, not tabs without tabpanels
  Q.sel.clear(); pushQueueState(); loadQueue(); });
 $("#fAtt").onchange = e => { Q.att = e.target.checked; pushQueueState(); renderQueue(); };
+$("#fNa").onchange = e => { Q.na = e.target.checked; pushQueueState(); renderQueue(); };   // v0.4.6 #3: admins: cards a reviewer flagged
 $("#fNew").onchange = e => { Q.nx = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fDup").onchange = e => { Q.dup = e.target.checked; pushQueueState(); renderQueue(); };
 $("#fArch").onchange = e => { Q.arch = e.target.checked; Q.sel.clear(); pushQueueState(); loadQueue(); };
@@ -72,12 +73,12 @@ async function loadQueue(force) {
     const batches = await call("/api/batches");
     if (seq !== qSeq || $("#v-queue").hidden) return;
     // round 20 (coordinator r19): your batches first, newest first; everyone else's under their own heading
-    const bOpt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} (${b.n}${reading && b.batch === reading ? ", being read…" : ""})</option>`;
+    const bOpt = b => `<option value="${esc(b.batch)}">${esc(b.batch_label || b.batch)} · ${b.n}${reading && b.batch === reading ? ", being read…" : ""}</option>`;   // v0.4.2 #5: no "(2) (1)"
     const bNew = (a, b) => (b.started || 0) - (a.started || 0), bMine = batches.filter(b => b.mine || b.own).sort(bNew), bOth = batches.filter(b => !(b.mine || b.own)).sort(bNew);
     const buildB = () => { const tM = new Set(trimB(bMine, Q.batch)), tO = new Set(trimB(bOth, Q.batch)), hid = bMine.length - tM.size + bOth.length - tO.size;
     const hOpt = keep => b => keep.has(b) ? bOpt(b) : "";   // round 22: old/test batches are really left out (<option hidden> is ignored by some browsers); links and Show all still reach them
     $("#fBatch").innerHTML = (tM.size ? `<optgroup label="My batches">${bMine.map(hOpt(tM)).join("")}</optgroup>` : "") +
-      (tO.size ? `<optgroup label="Other people's batches">${bOth.map(hOpt(tO)).join("")}</optgroup>` : "") + (SHOWALLB || Q.batch === "" ? `<option value="">All batches (everyone's)</option>` : "") +
+      (tO.size ? `<optgroup label="Other people's batches">${bOth.map(hOpt(tO)).join("")}</optgroup>` : "") + (S.ME && S.ME.role === "admin" && (SHOWALLB || Q.batch === "") ? `<option value="">All batches (everyone's)</option>` : "")   /* v0.4.7 #8: no All batches for reviewers */ +
       (hid ? `<option value="__showall__">More batches…</option>` : ""); }; // round 16 (coordinator r15 #1); round 21: old/test batches behind "Show all"
     S.BATCHES = batches; MINE = new Set(batches.filter(b => b.mine).map(b => b.batch));
     const byNew = (a, b) => (b.started || 0) - (a.started || 0);
@@ -87,6 +88,7 @@ async function loadQueue(force) {
     if (Q.batchFromMemory && newest && newest.batch !== Q.batch) Q.batch = null;   // round 22 (part-timer r21): the queue opens on your newest batch
     Q.batchFromMemory = false;
     if (Q.batch === null) Q.batch = newest ? newest.batch : "";
+    if (Q.batch === "" && newest && !(S.ME && S.ME.role === "admin")) Q.batch = newest.batch;   // v0.4.7 #8: a reviewer always works in one batch
     buildB();
     if (Q.reading && Q.batch === Q.reading && !batches.some(b => b.batch === Q.reading)) $("#fBatch").insertAdjacentHTML("beforeend", `<option value="${esc(Q.reading)}">${esc(myB.label || "Newest batch")} (being read…)</option>`);
     if (Q.batch && Q.batch !== "__none__" && Q.batch !== Q.reading && !batches.some(b => b.batch === Q.batch))
@@ -135,7 +137,7 @@ function filtered() {
   const raw = Q.text.toLowerCase().trim(), idOnly = /^#\d+$/.test(raw), q = raw.replace(/^#/, "");
   if (Q.cardsFor !== Q.batch) return [];   // round 15: rows are only shown for the batch they were loaded for
   return Q.cards.filter(c => (!Q.s || c.status === Q.s) && inBatch(c, Q.batch) &&
-    (!Q.att || c.needs_attention) && (!Q.nx || !c.exported) && (!Q.dup || c.dup) &&
+    (!Q.att || c.needs_attention) && (!Q.na || c.needs_admin) && (!Q.nx || !c.exported) && (!Q.dup || c.dup) &&
     (!q || String(c.id) === q || !idOnly && [c.name, c.company, c.email, c.filename].join(" ").toLowerCase().includes(q)));
 }
 function confBar(v, blocked) { if (blocked) return `<span class="chip bad" title="Fix before approving">Blocked</span>`; if (v == null) return "–"; const p = Math.round(v * 100), col = v < .6 ? "#e8a33a" : v < .8 ? "#388a9c" : "#1e7a3c";
@@ -167,11 +169,11 @@ function renderQueue() {
     <td><input type="checkbox" class="sel" aria-label="Select card #${c.id} ${esc(c.name)}" ${Q.sel.has(c.id) ? "checked" : ""}></td>
     <td><img src="/img/${esc(c.image)}?w=160" alt="" loading="lazy" decoding="async"></td>
     <td><a href="#review/${c.id}">${esc(c.name) || "<em>(no name)</em>"}</a><div class="sub">#${c.id}${c.qr ? ' <span class="src qr">QR</span>' : ""}${c.batch_label ? " · " + esc(c.batch_label) : ""}</div></td>
-    <td>${esc(c.company)}</td><td>${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
+    <td>${esc(c.company)}</td><td class="em">${esc(c.email)}</td><td>${confBar(c.conf, c.blocked)}</td>
     <td class="att">${c.attention.length ? `<ul class="reasons">${c.attention.map(a => `<li><span class="flag ${a.code.startsWith("dup") ? "dup" : a.code === "invalid" ? "bad" : "low"}">${esc(a.text)}</span></li>`).join("")}</ul>` : `<span class="flag ok">Looks good</span>`}</td>
-    <td><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
+    <td class="st"><span class="pill ${c.status}">${c.status}</span>${c.archived ? ' <span class="pill archived">archived</span>' : ""}${c.needs_admin && c.status === "pending" ? ` <span class="pill needsadm" title="${esc("Needs admin: " + (c.needs_admin.reason || "") + (c.needs_admin.by ? " (" + c.needs_admin.by + ")" : ""))}">needs admin</span>` : ""}${c.exported ? ` <span class="pill archived" title="First exported ${esc(when(c.exported))}">exported</span>` : ""}${aiBadge(c)}${c.reviewer ? `<div class="sub">by ${esc(c.reviewer)}</div>` : ""}</td></tr>`).join("");
   if (fId) { const tr = $(`#qBody tr[data-id="${+fId}"]`), el = tr && (tr.querySelector(fSel) || tr.querySelector("a")); if (el) el.focus({preventScroll: true}); }
-  const anyFilter = Q.att || Q.nx || Q.dup || Q.text || Q.batch;
+  const anyFilter = Q.na || Q.att || Q.nx || Q.dup || Q.text || Q.batch;
   $("#qEmpty").hidden = rows.length > 0;
   $("#qEmpty").textContent = Q.cards.length ? (anyFilter ? "No cards match. Clear the filters or search." : `No ${({pending: "pending", approved: "approved", rejected: "rejected"})[Q.s] || ""} cards in this batch. ` + (Q.s === "pending" ? "See “All”, or go to Export." : "See “Pending” or “All”.")) : "No cards yet. Go to “Scan cards” to add some.";
   if (!rows.length && Q.batch && Q.s === "pending" && !Q.att && !Q.nx && !Q.dup && !Q.text && Q.cards.length && Q.cardsFor === Q.batch && !(Q.reading && Q.batch === Q.reading))
@@ -237,9 +239,9 @@ async function bulk_(status, btn, ids) {
   // round 21 (r20 bots): about 5 short lines; ids and reasons behind "Show" / More
   const show = (n, inner) => `<details class="more small"><summary>Show ${n}</summary><ul>${inner}</ul></details>`;
   const line = [];
-  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
+  if (sk0.length) line.push(`<li><b>${plural(sk0.length, "card")}</b> can't be approved yet. ${show(sk0.length, cap17(sk0, x => `<li><a href="#review/${x.id}" aria-label="Open card #${x.id}">#${x.id}</a>: ${esc(why16(x.why))}</li>`))}</li>`);
   if (ai0.length) line.push(`<li>${plural(ai0.length, "card")}: AI check not finished (approving cancels it).</li>`);
-  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
+  if (lk0.length) line.push(`<li>${plural(lk0.length, "card")} may already be in MC Trade. ${show(lk0.length, cap17(lk0, w => `<li><a href="#review/${w.id}" aria-label="Open card #${w.id}">#${w.id}</a>: ${esc(why16(w.why))}</li>`))}</li>`);
   if (decided.length) line.push(`<li>${plural(decided.length, "card")} already decided.</li>`);
   const preHtml = line.length ? `<ul>${line.join("")}</ul>` : "";
   const restN = pre ? (pre.would_approve || []).filter(i => !lk0.some(w => w.id === i)).length : 0;
@@ -264,7 +266,7 @@ async function bulk_(status, btn, ids) {
     });
     if (!ask_) break;
     const lk = ask_.lookalikes || [], rest = ids_.filter(i => !lk.some(w => w.id === i));
-    const a = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(ask_.error)}</p><ul>${cap17(lk, w => `<li><a href="#review/${w.id}">#${w.id}</a>: ${esc(w.why)}</li>`)}</ul><p class="small">The same person may go to MC Trade twice. Approving anyway is noted in history.</p>`,
+    const a = await ask({title: "Same person already approved in another batch?", html: `<p>${esc(ask_.error)}</p><ul>${cap17(lk, w => `<li><a href="#review/${w.id}" aria-label="Open card #${w.id}">#${w.id}</a>: ${esc(w.why)}</li>`)}</ul><p class="small">The same person may go to MC Trade twice. Approving anyway is noted in history.</p>`,
       buttons: [...(rest.length ? [{label: `Approve the other ${rest.length}, leave these pending`, cls: "ok", value: "rest"}] : []), {label: allN17(ids_.length, "these too"), value: "all"}, {label: "Cancel (nothing changes)", value: null, primary: true, focus: true}]});
     if (!a.value) { res = null; break; }
     if (a.value === "all") xbOk = true; else ids_ = rest;

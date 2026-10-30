@@ -7,10 +7,10 @@ from . import store, demo
 
 router = APIRouter()
 STATIC = os.path.join(os.path.dirname(__file__), "static")
-COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000
+COOKIE = "gac_session"; SESSION_HOURS = 12; ITER = 310_000; MAX_SESSIONS = int(os.environ.get("GAC_MAX_SESSIONS", "10"))
 SESSION_MAX_HOURS = float(os.environ.get("GAC_SESSION_MAX_HOURS", str(7 * 24)))   # absolute limit, sliding expiry or not
 PUBLIC_PREFIX = ("/static/", "/api/auth/")
-PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo"}
+PUBLIC = {"/login", "/setup", "/health", "/favicon.ico", "/privacy", "/api/demo", "/help", "/ui/help"}   # v0.4.2 #10: public help
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 def _init_auth(c):
@@ -20,6 +20,8 @@ def _init_auth(c):
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS auth_log(id INTEGER PRIMARY KEY, ts REAL, username TEXT, event TEXT, ip TEXT)")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id)")
+    try: c.execute("ALTER TABLE sessions ADD COLUMN last_active REAL")   # v0.4.3 #2: server-side idle sign-out
+    except Exception: pass
     _dedupe_initials(c)
 def db():
     c = store.db(); store.once("auth", _init_auth)
@@ -37,7 +39,10 @@ def set_setting(k, v):
 def hash_pw(pw):
     salt = secrets.token_bytes(16)
     return f"pbkdf2_sha256${ITER}${salt.hex()}${hashlib.pbkdf2_hmac('sha256', pw.encode(), salt, ITER).hex()}"
+_PW_SEM = threading.BoundedSemaphore(2)   # v0.4.5 #1 guard: at most 2 password checks at once (each is ~0.2 s of CPU)
 def check_pw(pw, stored):
+    with _PW_SEM: return _check_pw(pw, stored)
+def _check_pw(pw, stored):
     try:
         _, it, salt, h = stored.split("$")
         return hmac.compare_digest(hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt), int(it)).hex(), h)
@@ -93,18 +98,38 @@ def alog(username, event, ip=None):
     if demo.enabled(): ip = None   # public demo: no record of visitors' addresses
     with db() as c: c.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), username, event, ip))
 
+def idle_minutes():
+    """v0.4.2 #2 / v0.4.3 #2: minutes without real activity before a session ends (0 = never)."""
+    try: return max(0, int(os.environ.get("GAC_IDLE_MINUTES") or get_setting("idle_minutes") or 30))
+    except ValueError: return 30
+
+def _active_request(request):
+    """v0.4.3 #2 (skeptic M2): what counts as a person using the app. Background polling (GETs the page makes on a timer)
+    does not; a write, a page load, or a GET the page marks as user-initiated (X-User-Active: 1) does."""
+    if request.method not in ("GET", "HEAD"): return True
+    return request.url.path in ("/ui", "/ui/") or request.headers.get("X-User-Active") == "1"
+
 def current_user(request: Request):
     tok = request.cookies.get(COOKIE)
     if not tok: return None
     now = time.time(); h = hashlib.sha256(tok.encode()).hexdigest()
-    c = db(); r = c.execute("SELECT u.*, s.expires AS _s_exp FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? "
+    c = db(); r = c.execute("SELECT u.*, s.expires AS _s_exp, s.last_active AS _s_la, s.created AS _s_cr FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? "
                             "AND s.created>? AND u.active=1", (h, now, now - SESSION_MAX_HOURS * 3600)).fetchone()
     if not r: return None
+    idle = idle_minutes()
+    la = r["_s_la"] or r["_s_cr"]
+    if idle and now - la > idle * 60 and not demo.enabled():   # v0.4.3 #2: ends even when the tab was closed
+        with c: c.execute("DELETE FROM sessions WHERE token=?", (h,))
+        try: alog(r["username"], f"signed out after {idle} min idle (server)")
+        except Exception: pass
+        return None
+    if _active_request(request) and now - la > 20:
+        with c: c.execute("UPDATE sessions SET last_active=? WHERE token=?", (now, h))
     # audit 2026-10 P1: the sliding expiry is written at most every 5 minutes (it was a database write on EVERY request,
     # polling included), and a session ends SESSION_MAX_HOURS after sign-in however active it is
     if r["_s_exp"] < now + SESSION_HOURS * 3600 - 300:
         with c: c.execute("UPDATE sessions SET expires=? WHERE token=?", (now + SESSION_HOURS * 3600, h))
-    d = dict(r); d.pop("_s_exp", None); return d
+    d = dict(r); d["_signed_in"] = r["_s_cr"]; [d.pop(k_, None) for k_ in ("_s_exp", "_s_la", "_s_cr")]; return d   # v0.4.9 #10: Undo starts at sign-in
 
 def _client(request): return request.client.host if request.client else ""
 def trusted_host(request):
@@ -255,6 +280,9 @@ def _start_session(request, uid):
         c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
         c.execute("INSERT INTO sessions(token,user_id,created,expires,ip) VALUES(?,?,?,?,?)",
                   (hashlib.sha256(tok.encode()).hexdigest(), uid, time.time(), time.time() + SESSION_HOURS * 3600, "" if demo.enabled() else _client(request)))
+        # v0.4.5 #1 guard: at most MAX_SESSIONS open sign-ins per person (a script signing in every few seconds can't pile them up)
+        c.execute("""DELETE FROM sessions WHERE user_id=? AND token NOT IN
+                     (SELECT token FROM sessions WHERE user_id=? ORDER BY created DESC LIMIT ?)""", (uid, uid, MAX_SESSIONS))
     return tok
 
 def _set_cookie(resp, request, tok):
@@ -268,7 +296,7 @@ def policy(): return {"image_retention_days": get_setting("image_retention_days"
 @router.get("/api/auth/state")
 def state(request: Request):
     u = current_user(request)
-    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "setup_allowed": trusted_host(request) and (_client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1")}
+    return {"needs_setup": user_count() == 0, "user": pub(u) if u else None, "idle_minutes": idle_minutes(), "setup_allowed": trusted_host(request) and (_client(request) in LOOPBACK or os.getenv("GAC_ALLOW_REMOTE_SETUP") == "1")}
 
 @router.post("/api/auth/setup")
 def setup(request: Request, body: dict = Body(...)):
@@ -374,7 +402,7 @@ def backup_status():
 
 SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
                  "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples", "mctrade_updates_enabled": "Allow 'update existing MC Trade contact'",
-                 "mctrade_affcode": "MC Trade affiliation code", "phone_format": "Phone format",
+                 "mctrade_affcode": "MC Trade code (AffCode1)", "phone_format": "Phone format",
                  "phone_mode_allowed": "Scan with phone", "update_check_enabled": "Check for updates"}
 def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled", "_allowed")) else (v or "(empty)")
 
@@ -412,7 +440,7 @@ def _save_settings(request, body):
         if k in body:
             v = str(body[k]).strip()
             if k.endswith("_days") and (not v.isdigit() or not 1 <= int(v) <= 3650): return JSONResponse({"error": "Enter whole days from 1 to 3650."}, 422)
-            if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "Affiliation code: letters, digits, space, - _ . only (max 40)."}, 422)
+            if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "MC Trade code: letters, digits, space, - _ . only (max 40)."}, 422)
             if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Choose a phone format from the list."}, 422)
             if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
             new[k] = v

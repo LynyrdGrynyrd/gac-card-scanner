@@ -2,7 +2,7 @@
 To check up front, one duplicate box (silenced after 'Different person'), truthful Cancel, 'This is correct' override,
 one row per person in the export, README checklist/totals, vCard phones, job listing owner-only, 428 without versions."""
 import json, os, time
-from test_app import mk
+from test_app import mk, sent
 from app import ui as U, mctrade_export as MX, plausibility as P
 
 def H(**f): return U.hard_errors({"first_name": "Ann"} | f)
@@ -56,7 +56,7 @@ def test_confirm_correct_override_is_audited(env):
     # round 22: phones are never overridable; emails need an admin, the exact value and the version
     assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "phones"}).status_code == 400
     v0 = rev.get(f"/api/cards/{cid}").json()["version"]
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 403
+    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0}).status_code == 403   # v0.4.4: admins only
     assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "emails", "value": ["sam@smithlaws.com"], "version": v0, "reason": "printed on the card"}).status_code == 200
     v = rev.post("/api/validate", json={"fields": st.get(cid)["fields"], "card_id": cid}).json(); assert "emails" not in v["hard"]
     assert "emails" in ui.garbled_errors(st.get(cid)["fields"] | {"emails": ["sam@smithlawz.com"]})   # a changed value is checked again
@@ -68,12 +68,12 @@ def test_different_person_silences_duplicate_warnings(env):
     ph = [{"type": "work", "number": "330-555-7781"}]
     a = mk(ui, st, first_name="Dup", last_name="One", emails=["dup1@x21.com"], website="x21.com", phones=ph); ui.set_meta(a, batch="old21", batch_label="Old")
     assert rev.post(f"/api/cards/{a}", json={"status": "approved", "crm_action": "create_new"}).status_code == 200
-    ui.set_meta(a, exported=time.time())
+    sent(ui, a)
     b = mk(ui, st, first_name="Dup", last_name="One", emails=["dup1@x21.com"], website="x21.com", phones=ph); ui.set_meta(b, batch="new21", batch_label="New")
     d = rev.get(f"/api/cards/{b}").json(); assert d["exported_elsewhere"]
     assert rev.post(f"/api/cards/{b}", json={"keep_apart": "all"}).status_code == 200
     d = rev.get(f"/api/cards/{b}").json()
-    assert d["dup_decided"] and not d["exported_elsewhere"]
+    assert d["dup_decided"] and all(x["kept_apart"] for x in d["exported_elsewhere"])   # v0.4.3 #3: kept for Approve, flagged
     assert not [x for x in d["attention"] if x["code"] in ("dup_other", "dup_queue")]
     r = rev.post("/api/cards-bulk", json={"ids": [b], "status": "approved", "dry_run": True, "versions": {str(b): d["version"]}}).json()
     assert not r["lookalikes"], r
@@ -131,7 +131,7 @@ def test_readme_checklist_and_428(env):
     r = adm.get("/api/export/csv", params={"batch": "b1", "_nov": "1"})
     if r.status_code == 428: assert "now" not in r.json()
     src = "\n".join(open(os.path.join(os.path.dirname(U.__file__), n), encoding="utf-8").read() for n in ("ui.py", "exporting.py", "admin_files.py", "privacy.py", "pages.py", "audit_log.py"))   # audit 2026-10 P2: ui.py was split
-    assert src.count("Test with two rows") == 0 and "Totals: " in src and "Before you import" in src
+    assert src.count("Test with two rows") == 0 and "In the file: " in src and "Before importing" in src
 
 def test_real_huge_page_pdf_fixture():
     """Round 21: the skeptic's actual huge-page PDF file (qa/fixtures/huge-page.pdf), not only the generated copy."""

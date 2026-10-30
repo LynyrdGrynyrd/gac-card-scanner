@@ -25,7 +25,7 @@ def signed_in_admin(new_page):
 def scan(page, *names, batch):
     """Upload card photos on the Scan page and wait until every one is read (real OCR in the server)."""
     page.goto("/ui#upload"); expect(page.get_by_role("heading", name="Scan business cards")).to_be_visible()
-    page.get_by_label("Batch name").fill(batch); page.get_by_label("Skip AI").check()   # no AI helper in tests: don't queue cards for it
+    page.locator("#upMore > summary").click(); page.get_by_label("Batch name").fill(batch); page.get_by_label("Skip the AI double-check").check()   # v0.4 #6: options under More   # no AI helper in tests: don't queue cards for it
     page.locator("#fPhotos").set_input_files([os.path.join(CARDS, n) for n in names])
     # a session that was not signed in in THIS tab is asked who is scanning first (shared computers)
     yes = page.get_by_role("dialog", name="Who is scanning?").get_by_role("button", name=re.compile("^Yes, I am"))
@@ -34,6 +34,7 @@ def scan(page, *names, batch):
     n = len(names)
     expect(page.locator("#batchSummary")).to_contain_text(f"{n} of {n} finished · {n} added", timeout=180000)
     page.get_by_role("link", name="Review batch →").click()
+    expect(page.locator("#qBody")).to_be_visible()   # the hidden queue can still hold the last batch's rows for a moment
     expect(page.locator("#qBody a[href^='#review/']")).to_have_count(n)
 
 def wait_card(page, cid):
@@ -42,7 +43,8 @@ def wait_card(page, cid):
 def answer_dialogs(page, timeout=5000):
     """Approving asks when the card looks like someone in the MC Trade contacts (the 5 SAMPLE contacts here, which include
     Maria Delgado): answer 'different person'. Cards with no look-alike get no question."""
-    b = page.locator("#dlg[open]").get_by_role("button", name="Different person: add as new")
+    import re as _re
+    b = page.locator("#dlg[open]").get_by_role("button", name=_re.compile("^(Add as new contact|Approve anyway|Approve now)$"))
     try: b.wait_for(timeout=timeout)
     except PWTimeout: return
     b.click()
@@ -61,17 +63,18 @@ def test_first_run_scan_review_approve_export(new_page):
     page.get_by_label("Job title").fill("Head of E2E Lending")
     expect(page.locator("#rDirty")).to_be_visible()
     page.locator("#bApprove").click()
-    expect(page.get_by_role("dialog", name="Already in MC Trade?")).to_be_visible(); answer_dialogs(page)
+    answer_dialogs(page, timeout=1500)   # v0.4.5 #4: an MC Trade look-alike alone asks nothing (the box on the card says it)
     # the last pending card of the batch: back to the batch's queue, with an 'All done' note
     expect(page).to_have_url(re.compile(r"#queue\?s=pending"), timeout=30000); expect(page.locator("#toast")).to_contain_text("All done")
     c = card_json(page, cid); assert c["status"] == "approved" and c["card"]["fields"]["title"] == "Head of E2E Lending"
     page.get_by_role("navigation", name="Main").get_by_role("link", name="Export").click()
-    tile = page.get_by_role("button", name=re.compile(r"^Spreadsheet \(CSV\)"))
-    expect(tile).to_be_enabled(); expect(page.locator("#exInfo")).to_contain_text("1")
-    tile.click()
-    dlg = page.locator("#dlg[open]"); expect(dlg.get_by_role("heading")).to_have_text("Export 1 card?")
+    # v0.4 #5: one Export button (format under "Format"), then a summary sheet with Save
+    page.locator("#v-export details > summary", has_text="Format").click(); page.get_by_label("Spreadsheet (CSV)").check()
+    go = page.locator("#exGo"); expect(go).to_be_enabled(); expect(page.locator("#exInfo")).to_contain_text("1"); expect(page.locator("#exBig")).to_have_text("1")
+    go.click()
+    dlg = page.locator("#dlg[open]"); expect(dlg.get_by_role("heading")).to_have_text("Ready to save"); expect(dlg).to_contain_text("To check")
     with page.expect_download() as dl:
-        dlg.get_by_role("button", name="Export", exact=True).click()
+        dlg.get_by_role("button", name="Save", exact=True).click()
     text = open(dl.value.path(), encoding="utf-8-sig").read()
     assert "Head of E2E Lending" in text and "Delgado" in text, text[:2000]
     expect(page.locator("#exDone")).to_contain_text("1 card")
@@ -102,6 +105,7 @@ def test_keyboard_review_queue(new_page):
     wait_card(page, ids[0]); page.keyboard.press("Escape")
     page.keyboard.press("j"); wait_card(page, ids[1])   # J: next card
     page.keyboard.press("k"); wait_card(page, ids[0])   # K: previous card
+    page.wait_for_timeout(700)   # v0.4.1: keys don't approve in the first 600 ms after a card loads
     page.keyboard.press("a"); answer_dialogs(page)        # A: approve; the next pending card of the batch opens
     wait_card(page, ids[1])
     assert card_json(page, ids[0])["status"] == "approved" and card_json(page, ids[1])["status"] == "pending"

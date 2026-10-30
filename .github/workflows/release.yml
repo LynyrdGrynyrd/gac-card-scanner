@@ -22,9 +22,13 @@ env:
   WEBVIEW2_SHA256: "baa78c71c5615533a1ee0c4d2ca2ea3fd24dae01965f9033ac530a61b5aa93a0"
 jobs:
   check:
-    # Fail early (before 3 builds) when a tag doesn't match VERSION. Manual runs (workflow_dispatch) build 0.0.0-dev.N.
+    # Fail early (before 3 builds) when a tag doesn't match VERSION, or when CI is not green for the tagged commit.
+    # Manual runs (workflow_dispatch) build 0.0.0-dev.N and skip both checks.
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read   # read the CI runs of the tagged commit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,6 +42,26 @@ jobs:
             exit 1
           fi
           echo "Tag $GITHUB_REF_NAME matches VERSION $want"
+      - name: CI is green for the tagged commit
+        # v0.4.11: 0.4.5 to 0.4.10 were released while CI's pip-audit was red (Pillow advisories). A tag now waits for the
+        # CI run of its commit (pushed to a branch first, e.g. main) and releases only when every CI job passed.
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 90); do
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=50" \
+                    --jq '.workflow_runs | sort_by(.created_at) | last | if . == null then "" else "\(.status) \(.conclusion) \(.html_url)" end')"
+            set -- $run
+            if [ -z "$run" ]; then
+              [ "$i" -ge 10 ] && { echo "::error::No CI run for $GITHUB_SHA. Push the commit to a branch (e.g. main), wait for CI, then tag it."; exit 1; }
+            elif [ "$1" = completed ]; then
+              [ "$2" = success ] && { echo "CI passed for $GITHUB_SHA: $3"; exit 0; }
+              echo "::error::CI for $GITHUB_SHA finished with '$2' ($3). Fix it, then tag a commit whose CI is green."; exit 1
+            fi
+            echo "waiting for CI on $GITHUB_SHA (${1:-no run yet}) ..."; sleep 30
+          done
+          echo "::error::CI for $GITHUB_SHA did not finish within 45 minutes."; exit 1
 
   windows:
     needs: check

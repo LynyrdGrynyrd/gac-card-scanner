@@ -64,13 +64,13 @@ function newBatch() {
   const name = $("#batchName").value.replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   const norm = x => (x || "").replace(/\s+/g, " ").trim().toLowerCase();
   const all = S.BATCHES || [];
-  const same = name && all.find(b => b.mine && norm(b.batch_label) === norm(name) && b.started > Date.now() / 1000 - 12 * 3600);
-  if (same) { S.B = {id: same.batch, label: same.batch_label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB(); toast(`Added to your existing batch “${name}”.`); return; }
-  let label = name || ("Untitled batch, " + d.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}));
-  if (all.some(b => norm(b.batch_label) === norm(label))) {
-    let k = 2; while (all.some(b => norm(b.batch_label) === norm(`${label} (${k})`))) k++;
-    toast(`A batch called “${label}” already exists, so this one is saved as “${label} (${k})”.`, 7000); label = `${label} (${k})`;
-  }
+  // v0.4.2 #5 (reviewer/newcomer: "(2) (1)"): the name always carries the date and the owner, so it is readable and unique
+  // without a counter: "After Hours · Oct 16 · RR". Your own batch with the same name today is reused.
+  const day = d.toLocaleDateString([], {month: "short", day: "numeric"}), who = (S.ME && (S.ME.initials || S.ME.display)) || "";
+  let label = [name, day, who].filter(Boolean).join(" · ");
+  const same = all.find(b => b.own && norm(b.batch_label) === norm(label) && b.started > Date.now() / 1000 - 12 * 3600);
+  if (same) { S.B = {id: same.batch, label: same.batch_label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB(); toast(`Added to your batch “${label}”.`); return; }
+  if (!name || all.some(b => norm(b.batch_label) === norm(label))) label += " " + d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
   S.B = {id, label, rows: [], t0: Date.now() / 1000, uid: S.ME && S.ME.id}; saveB();
 }
 const isImg = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(f.name) || isPdf(f);
@@ -91,7 +91,9 @@ async function enqueue(files) {
   // coordinator r2 N1: a different name typed in "Name this batch", or a batch left over from hours ago, starts a NEW batch
   const typed = $("#batchName").value.replace(/\s+/g, " ").trim().toLowerCase();
   const fresh = !S.B || S.B.rows.every(r => ["done", "rej", "err", "cancel"].includes(r.state)) && $("#clearBatch").dataset.fresh === "1";
-  const renamed = S.B && !fresh && ((typed && !(S.B.label || "").toLowerCase().startsWith(typed)) || (!typed && S.B.t0 && Date.now() / 1000 - S.B.t0 > 4 * 3600));
+  // v0.4.2 #5: a saved current batch from another day (or another person) is never reused
+  const oldDay = S.B && S.B.t0 && new Date(S.B.t0 * 1000).toDateString() !== new Date().toDateString(), notYou = S.B && S.B.uid && S.ME && S.B.uid !== S.ME.id;
+  const renamed = S.B && !fresh && (oldDay || notYou || (typed && !(S.B.label || "").toLowerCase().startsWith(typed)) || (!typed && S.B.t0 && Date.now() / 1000 - S.B.t0 > 4 * 3600));
   // audit 2026-10 P0-14: photos of the current batch still waiting to upload would be filed under the NEW batch (and no longer
   // tracked); finish (or cancel) this batch's uploads first
   if ((fresh || renamed) && S.B && (upq.length || uploading)) { toast(`Photos of “${S.B.label}” are still uploading. Wait until they are done (or cancel them), then start the new batch.`, 7000); return; }
@@ -134,7 +136,7 @@ function pumpUploads() {
 const ROWB = new WeakMap();   // audit 2026-10 P0-14: row -> the batch it was added to (not whatever batch is current at send time)
 function upload(row, allowDup = false) {
   const bb = ROWB.get(row) || S.B;
-  return new Promise(res => {
+  return new Promise(res => { try {
     const fd = new FormData(); fd.append("image", row.blob, row.file.split("/").pop());
     fd.append("engine", $("#engine").value); fd.append("batch", bb.id); fd.append("batch_label", bb.label);
     if (allowDup) fd.append("allow_duplicate", "1");
@@ -147,6 +149,8 @@ function upload(row, allowDup = false) {
     x.onload = () => {
       delete row.xhr; let j = {}; try { j = JSON.parse(x.responseText); } catch {}
       conn(true);
+      // v0.4.3 #8 (reviewer: Scan showed two batches with one name): Scan shows the name the server stored, " (2)" included
+      if (j.batch_label && j.batch_label !== bb.label && (!j.batch || j.batch === bb.id)) { bb.label = j.batch_label; if (S.B === bb) { saveB(); renderBatch(); } }
       if (x.status === 200 && j.pdf) { row.state = "queued"; row.job = j.job; row.pdf = true; row.pages = j.pages; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 20: a PDF is read page by page in the background
       else if ([200, 409, 422].includes(x.status) && j.jobs && j.jobs.length) splitRow(row, j, bb);   // round 18: a PDF / sheet of cards came back as several cards
       else if (x.status === 200) { row.state = "queued"; row.job = j.job; if (j.batch && j.batch !== bb.id) bb.id = j.batch; }   // round 13: the server may give this batch its own id
@@ -161,16 +165,28 @@ function upload(row, allowDup = false) {
     };
     // round 20: the scanner restarting is not an error: the photo waits and is sent again by itself
     x.onerror = () => { conn(false); row.state = "wait"; row.msg = ""; row.tries = (row.tries || 0) + 1; saveB(); renderBatch(); res();
-      if (!row.stop) setTimeout(() => { if (row.state === "wait" && bb.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
+      row.backoff = true; if (!row.stop) setTimeout(() => { row.backoff = false; if (row.state === "wait" && bb.rows.includes(row)) { upq.push(row); pumpUploads(); } }, Math.min(15000, 2000 * row.tries)); };
+    x.timeout = 180000; x.ontimeout = x.onerror;   // v0.4.2 #12: a request that never answers no longer holds an upload slot forever
     x.send(fd);
-  });
+    // v0.4.2 #12 (newcomer: first upload stuck on "Waiting to upload"): anything thrown before the send left the row waiting
+    // with no request and no retry. Now it says so and offers Retry.
+  } catch (e) { delete row.xhr; row.state = "rej"; row.retry = true; row.msg = "Not sent. Press Retry."; saveB(); renderBatch(); res(); } });
 }
 // round 20 (b): one calm line while the scanner can't be reached; everything retries by itself
 function conn(ok) {
   let el = $("#reconn");
   if (!el) { document.body.insertAdjacentHTML("afterbegin", `<div id="reconn" class="alert" role="status" hidden>Reconnecting… your cards are safe.</div>`); el = $("#reconn"); }
-  el.hidden = !!ok;
+  // v0.4.3 #8 (part-timer): only a REAL disconnect: two failures in a row, 4 s apart, and not while the page is closing
+  if (ok) { conn.f = 0; conn.t = 0; el.hidden = true; return; }
+  if (conn.leaving) return;
+  conn.f = (conn.f || 0) + 1; conn.t = conn.t || Date.now();
+  el.hidden = !(conn.f >= 2 && Date.now() - conn.t >= 4000);
+  // v0.4.4 #7 (data-manager L1: the banner stayed): while it shows, check the server every 3 s and clear it once it answers
+  if (!el.hidden && !conn.watch) conn.watch = setInterval(async () => {
+    try { const r = await fetch("/health"); if (r.ok) { clearInterval(conn.watch); conn.watch = null; conn(true); } } catch {}
+  }, 3000);
 }
+addEventListener("pagehide", () => { conn.leaving = true; });
 function addKids(row, job) {   // round 20: cards of a PDF appear as each page is read
   row.kids = row.kids || 0;
   const dir = row.file.includes("/") ? row.file.slice(0, row.file.lastIndexOf("/") + 1) : "";
@@ -195,8 +211,11 @@ async function poll() {
   if (!S.B || AUTH_PAUSED) return;   // audit 2026-10: resumed by authCheck()
   const live = S.B.rows.filter(r => ["queued", "reading", "splitting"].includes(r.state) && r.job);
   if (!live.length) return;
+  // v0.4.9 #10: "Reconnecting…" only when the request itself failed (a real disconnect), never for a bug in handling the answer
+  let j;
+  try { j = await call("/api/jobs?ids=" + live.map(r => r.job).join(",")); }
+  catch (e) { if (e instanceof TypeError) conn(false); pollT = setTimeout(poll, document.hidden ? 5000 : 1200); return; }
   try {
-    const j = await call("/api/jobs?ids=" + live.map(r => r.job).join(","));
     const byJob = new Map(S.B.rows.filter(x => x.job).map(x => [x.job, x]));   // audit 2026-10: no O(n²) find on big batches
     for (const job of j.jobs) {
       const r = byJob.get(job.id); if (!r) continue;
@@ -222,7 +241,7 @@ async function poll() {
     S.B.avg = fin ? (Date.now() / 1000 - S.B.t0) / fin : (j.avg_seconds ? j.avg_seconds * Math.max(1, S.B.rows.filter(r => r.state === "queued").length) / Math.max(1, S.B.rows.length) : null);
     saveB(); renderBatch();
     if (j.jobs.some(x => x.state === "done" || x.state === "error")) { refreshCounts(); if (!$("#v-queue").hidden && Q.batch && Q.batch === S.B.id) loadQueue(); }   // round 15: newly read cards of the batch shown appear without a reload
-  } catch (e) { if (e instanceof TypeError) conn(false); }   // network error: say "Reconnecting…" and keep trying
+  } catch (e) { console.warn(e); }
   pollT = setTimeout(poll, document.hidden ? 5000 : 1200);   // audit 2026-10: slower while the tab is hidden
 }
 const ST = {splitting: "Reading PDF…", wait: "Waiting to upload", up: "Uploading…", queued: "In line to be read", reading: "Reading card…", done: "Added", rej: "Not added", dup: "Not added", err: "Failed", cancel: "Cancelled"};
@@ -242,6 +261,7 @@ function rowHTML(r) {
 }
 function renderRow(r) { const li = document.querySelector(`li[data-k="${r.key}"]`); if (li) { const h = rowHTML(r); if (li._h !== h) { li.innerHTML = h; li._h = h; } } }
 function renderBatch() {
+  if ($("#batchCur")) $("#batchCur").textContent = S.B && S.B.rows.length ? "Now: " + S.B.label : "";   // v0.4.2 #5: the batch name first, not under More
   if (!S.B || !S.B.rows.length) { $("#batch").hidden = true; return; }
   $("#batch").hidden = false; $("#batchTitle").textContent = "Batch: " + S.B.label;
   // audit 2026-10: the list was rebuilt on every 1.2 s poll (all images, focus lost); now only changed rows are touched
@@ -265,7 +285,7 @@ function renderBatch() {
   const etaS = (left + qa) * (S.B.avg || 0), etaTxt = etaS < 60 ? "less than a minute left" : `about ${Math.round(etaS / 60)} min left`;   // round 15 (part-timer r14): no "1 min left (≈1 s per card)"
   // round 22: when other people's cards are in line, say how many are ahead instead of a time guess
   $("#batchEta").textContent = left && qa ? `Reading… ${qa} ahead of you.` : left && S.B.avg ? `Reading… ${etaTxt}.` : left ? "Reading photos…" : "";
-  $("#batchLegend").hidden = !fin; $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(S.B.id)}&s=pending`;
+  $("#toQueue").hidden = !ok; $("#toQueue").href = `#queue?batch=${encodeURIComponent(S.B.id)}&s=pending`;
   $("#clearBatch").hidden = fin !== n; $("#cancelBatch").hidden = fin === n || !!S.B.stopped;
 }
 $("#batchList").addEventListener("click", e => { if (S.B && !S.B.t0) S.B.t0 = Date.now() / 1000;
@@ -297,8 +317,18 @@ $("#cancelBatch").onclick = async () => {
   const cn = S.B.rows.filter(r => r.state === "cancel").length; S.B.stopMsg = `Stopped. ${ok} kept, ${cn} not scanned.`; saveB(); renderBatch();
   toast(S.B.stopMsg, 4500);
 };
-$("#clearBatch").onclick = () => { if (S.B) S.B.rows.forEach(dropThumb); S.B = null; SS.removeItem("batch"); $("#batchName").value = ""; renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast("Ready for a new batch."); };
-function restoreBatch() { renderBatch(); poll(); refreshBatchCards(); }
+// v0.4.9 #7 (coordinator: typed name, then New batch, then upload -> "Oct 28 · QC 3:06 PM"): a name typed for the NEW batch is
+// kept; only the old batch's own name is cleared
+$("#clearBatch").onclick = () => { const nm_ = $("#batchName").value.replace(/\s+/g, " ").trim().toLowerCase(), old_ = ((S.B && S.B.label) || "").toLowerCase();
+  if (S.B) S.B.rows.forEach(dropThumb); S.B = null; SS.removeItem("batch"); if (!nm_ || (old_ && old_.startsWith(nm_))) $("#batchName").value = "";
+  renderBatch(); $("#clearBatch").dataset.fresh = "1"; toast($("#batchName").value.trim() ? `Ready for a new batch: “${$("#batchName").value.trim()}”.` : "Ready for a new batch."); };
+function restoreBatch() {
+  // v0.4.2 #12: after a reload a photo that was still waiting is no longer in the page (its file is gone): say so, never "Waiting" forever
+  if (S.B) S.B.rows.forEach(r => { if (r.state === "wait" && !r.blob) { r.state = "rej"; r.msg = "Not sent before the page reloaded. Add this photo again."; } });
+  renderBatch(); poll(); refreshBatchCards(); }
+// v0.4.2 #12: a watchdog: a photo waiting with nothing uploading and nothing queued is sent again
+setInterval(() => { if (AUTH_PAUSED || uploading || upq.length || !S.B) return;
+  const w = S.B.rows.filter(r => r.state === "wait" && r.blob && !r.stop && !r.backoff); if (w.length) { upq.push(...w); pumpUploads(); } }, 5000);
 async function refreshBatchCards() {   // reviewer r9: the upload list shows each card's CURRENT state, not the one at scan time
   try { const rows = (S.B.rows || []).filter(r => r.state === "done" && r.card); if (!rows.length) return;
     const by = new Map((await call("/api/cards?batch=" + encodeURIComponent(S.B.id))).map(c => [c.id, c]));   // round 15: only this batch (fast)
@@ -306,4 +336,5 @@ async function refreshBatchCards() {   // reviewer r9: the upload list shows eac
     rows.forEach(r => { const c = by.get(r.card.id); if (!c) return; r.card.att = (c.attention || []).map(a => a.text); r.card.status = c.status; r.card.blocked = !!c.blocked; r.card.name = c.name || r.card.name; });
     if (JSON.stringify(rows.map(r => r.card)) !== before) { saveB(); renderBatch(); } } catch {}
 }
+window.gacBusy = upPending;   // v0.4.2 #2: no idle sign-out while photos are still uploading
 export {authPause, enqueue, refreshBatchCards, restoreBatch, upPending};

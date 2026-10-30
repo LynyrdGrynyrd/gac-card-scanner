@@ -17,6 +17,10 @@ def test_formula_injection_csv_and_xlsx(env):
     assert not [v for v in row if v[:1] in ("=", "+", "@", "-", "\t", "\r")], row
     assert "'=HYPERLINK" in r.text and "o2@strand.io" in row                                  # email2 column
     r = adm.get("/api/export/xlsx?status=approved&batch=fx"); assert r.status_code == 200
+    assert r.json()["nothing"] and "1 to fix first" in r.json()["ready"]["text"]          # v0.4.8 #1: no empty IMPORT-ME file
+    ok = mk(ui, st, first_name="Clean", last_name="Row", company="Fine Co", emails=["clean@row.io"]); ui.set_meta(ok, batch="fx", batch_label="FX Event")
+    st.update(ok, status="approved", reviewer="OLD", note="")
+    r = adm.get("/api/export/xlsx?status=approved&batch=fx"); assert r.status_code == 200
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(r.content)); assert wb.sheetnames == ["Sheet1"]; ws = wb.active   # template only (round 4)
     for row in ws.iter_rows(min_row=2):
@@ -34,13 +38,13 @@ def test_reviewer_export_filters_and_downloads(env):
     assert rev.get(f"/api/exports/{eid}/download").status_code == 200
     assert rev2.get(f"/api/exports/{eid}/download").status_code == 403
     assert adm.get(f"/api/exports/{eid}/download").status_code == 200
-    assert not [e for e in rev2.get("/api/exports").json() if e["id"] == eid][0]["available"]
+    assert not [e for e in rev2.get("/api/exports").json() if e["id"] == eid]   # v0.4.3 #8: not listed for other reviewers
 
 def test_edit_or_merge_into_approved_rechecks(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     a = mk(ui, st, first_name="Zeb", last_name="Q", emails=["zeb@q.io"]); assert _approve(rev, a).status_code == 200
     r = rev.post(f"/api/cards/{a}", json={"fields": {"emails": ["garbage-not-email"], "phones": [{"type": "work", "number": "12"}]}})
-    assert r.status_code == 200 and r.json()["status"] == "pending" and "moved back to pending" in r.json()["notice"]
+    assert r.status_code == 200 and r.json()["status"] == "pending" and "moved back to pending" in r.json()["notice"].lower()
     assert any(h["action"] == "back_to_pending" for h in r.json()["history"])
     t = mk(ui, st, first_name="Mar", last_name="Del", emails=["mar@del.io"], company="Del Co"); assert _approve(rev, t).status_code == 200
     s = mk(ui, st, first_name="Mar", last_name="Del", emails=["no-at-sign", "mar.home@del.io"], phones=[{"type": "work", "number": "9"}], company="Del Co")
@@ -65,12 +69,14 @@ def test_keep_both_per_match_and_true_duplicates(env):
     a = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(a, batch="kb")
     b = mk(ui, st, first_name="James", last_name="Okafor", emails=["james@ok.io"], company="Ok Ltd", phones=PH); ui.set_meta(b, batch="kb")    # same batch, same email
     c = mk(ui, st, first_name="James", last_name="Okafor", emails=["jo@other.org"], company="Ok Ltd", phones=PH); ui.set_meta(c, batch="other")
-    d = rev.get(f"/api/cards/{a}").json()["dupes"]["queue"]
+    d = env["adm"].get(f"/api/cards/{a}").json()["dupes"]["queue"]   # v0.4.7 #1: a reviewer sees only this batch's card in full
     assert {x["card_id"]: x["strong"] for x in d if x["card_id"] in (b, c)} == {b: True, c: False}
+    d = rev.get(f"/api/cards/{a}").json()["dupes"]["queue"]
+    assert {x["card_id"]: x["strong"] for x in d if x.get("card_id") in (b, c)} == {b: True}
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [b]}); assert r.status_code == 409 and r.json()["need"] == "true_duplicate"
     r = rev.post(f"/api/cards/{a}", json={"dup_resolution": "keep_both"}); assert r.status_code == 409          # legacy all-at-once too
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [c]}); assert r.status_code == 200
-    q = {x["card_id"]: x["kept_apart"] for x in r.json()["dupes"]["queue"]}; assert q[c] and not q[b]
+    q = {x["card_id"]: x["kept_apart"] for x in env["adm"].get(f"/api/cards/{a}").json()["dupes"]["queue"]}; assert q[c] and not q[b]
     assert r.json()["dupes"]["unresolved_queue"]
 
     for x in (a, b): rev.post(f"/api/cards/{x}", json={"status": "approved", "crm_action": "create_new"})
@@ -106,7 +112,7 @@ def test_sync_admin_only_and_already_scanned(env):
     b = io.BytesIO(); Image.effect_noise((900, 500), 60).convert("RGB").save(b, "JPEG")
     from app import ui
     ui.set_meta(999999, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest())  # orphan meta has no card: ignored
-    cid = mk(ui, env["store"]); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo", batch="b-expo")
+    cid = mk(ui, env["store"], by=""); ui.set_meta(cid, sha256=__import__("hashlib").sha256(b.getvalue()).hexdigest(), batch_label="Expo", batch="b-expo")
     ui.log(cid, "QN", "scanned", None, "pending", {"file": "x.jpg"})
     r = rev.post("/api/jobs", data={"batch": "b-expo"}, files={"image": ("x.jpg", b.getvalue(), "image/jpeg")}); assert r.status_code == 409
     assert "by QN on" in r.json()["error"] and "Expo" in r.json()["error"]

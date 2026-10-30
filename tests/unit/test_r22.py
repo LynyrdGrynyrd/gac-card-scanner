@@ -39,15 +39,15 @@ def test_confirm_correct_versioned_archived_role_audit(env):
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
     cid = mk(ui, st, first_name="Ann", last_name="Lee", company="Acme Gr0up", emails=["ann@acme.com"])
     v = rev.get(f"/api/cards/{cid}").json()["version"]
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up"}).status_code == 409   # no version
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Group", "version": v}).status_code == 409   # other value
-    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": "x"}).status_code == 409   # stale
-    r = rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": v, "reason": "printed like this"}); assert r.status_code == 200, r.text
-    r2 = rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": r.json()["version"]}); assert r2.json().get("already")
+    assert rev.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up"}).status_code == 403   # no version (admin-only first)
+    assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Group", "version": v, "reason": "x"}) .status_code == 409  # other value
+    assert adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": "x", "reason": "x"}).status_code == 409   # stale
+    r = adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": v, "reason": "printed like this"}); assert r.status_code == 200, r.text
+    r2 = adm.post(f"/api/cards/{cid}/confirm-correct", json={"field": "company", "value": "Acme Gr0up", "version": r.json()["version"]}); assert r2.json().get("already")
     with st.db() as c:
         assert c.execute("SELECT COUNT(*) FROM card_history WHERE card_id=? AND action='hard_check_override'", (cid,)).fetchone()[0] == 1
         assert c.execute("SELECT COUNT(*) FROM auth_log WHERE event LIKE ?", (f"confirmed as correct on card #{cid}:%",)).fetchone()[0] == 0   # round 24: one audit row (card history) per confirm
-    assert U.confirmed_lines(st.get(cid)["fields"]) and "Company confirmed by RR: Acme Gr0up" in U.confirmed_lines(st.get(cid)["fields"])[0]
+    assert U.confirmed_lines(st.get(cid)["fields"]) and "Company confirmed" in U.confirmed_lines(st.get(cid)["fields"])[0] and "Acme Gr0up" in U.confirmed_lines(st.get(cid)["fields"])[0]
     c2 = mk(ui, st, first_name="Bo", last_name="Li", company="Beta Gr0up", emails=["bo@beta.com"]); ui.set_meta(c2, archived=1)
     v2 = rev.get(f"/api/cards/{c2}").json()["version"]
     r = rev.post(f"/api/cards/{c2}/confirm-correct", json={"field": "company", "value": "Beta Gr0up", "version": v2}); assert r.status_code == 409 and r.json()["need"] == "archived"
@@ -56,7 +56,8 @@ def test_readme_totals_match_counts():
     src = "\n".join(open(os.path.join(os.path.dirname(U.__file__), n), encoding="utf-8").read() for n in ("ui.py", "exporting.py", "admin_files.py", "privacy.py", "pages.py", "audit_log.py"))   # audit 2026-10 P2: ui.py was split
     assert "v_ == k_" not in src
     cnt = MX.counts({1: (MX.NEW, ""), 2: (MX.NEW, ""), 3: (MX.REVIEW, ""), 4: (MX.LEFT, "")})
-    assert U.readme_totals(cnt) == "Totals: 2 new · 0 updates · 1 to review · 1 left out."
+    assert U.readme_totals(cnt) == "In the file: 2 new contacts. Not in the file: 1 left out, 1 to decide."   # v0.4.8 #8: plain totals   # v0.4.7 #3: no total that reads like extra cards
+    assert U.readme_totals(cnt, to_check=1, outside=0) == "In the file: 2 new contacts (1 to check). Not in the file: 1 left out."
 
 def test_readme_totals_match_dry_run(env):
     ui, st, adm = env["ui"], env["store"], env["adm"]
@@ -67,7 +68,7 @@ def test_readme_totals_match_dry_run(env):
     _, _, _, comp, summ = ui.build_export("xlsx", sel, {c["id"]: ui.meta(c["id"]) for c in sel}, "approved", "AA", "Tot22", preview=True)
     rd = comp["readme.txt"].decode(); cnt = summ["counts"]
     assert ui.readme_totals(cnt) in rd and cnt[MX.NEW] == 2
-    assert "CROSS-BATCH lines below" not in rd and "Overrides: none." in rd
+    assert "CROSS-BATCH lines below" not in rd and "Overrides" not in rd
 
 def test_domain_checks():
     assert "emails" in H(emails=["bhollis@firestoneparkhardwexample.com"])   # no website: still caught

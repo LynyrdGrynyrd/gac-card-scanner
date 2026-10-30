@@ -77,7 +77,7 @@ def test_bulk_approve_asks_before_cross_batch(env):
     c = mk(ui, store, first_name="Yuri", last_name="Plain", emails=["yuri@plain9.example"]); ui.set_meta(c, batch="r9x-2", batch_label="X2")
     r = rc.post("/api/cards-bulk", json={"ids": [b, c], "status": "approved"})
     assert r.status_code == 409 and r.json()["need"] == "confirm_cross_batch"
-    assert [w["id"] for w in r.json()["lookalikes"]] == [b] and a in r.json()["lookalikes"][0]["others"]
+    assert [w["id"] for w in r.json()["lookalikes"]] == [b] and a not in r.json()["lookalikes"][0]["others"]   # v0.4.7 #1: no other-batch ids for a reviewer
     assert store.get(b)["status"] == "pending" and store.get(c)["status"] == "pending"   # nothing changed yet
     r = rc.post("/api/cards-bulk", json={"ids": [c], "status": "approved"}); assert r.status_code == 200 and r.json()["updated"] == [c]
     r = rc.post("/api/cards-bulk", json={"ids": [b], "status": "approved", "confirm_cross_batch": True})

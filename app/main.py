@@ -1,4 +1,4 @@
-import os, contextlib
+import os, contextlib, time
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from . import store
@@ -12,6 +12,7 @@ async def _lifespan(_app):
     from . import ai_helper as _aih, demo as _demo
     _startup_checks(); _ai_banner(); _aih.autostart()
     if _demo.enabled(): _demo.start()
+    _ui.na_sweep()   # v0.4.8 #6: old 'Needs admin' flags with nothing left to confirm come off
     _ui.start_workers(); _updates.check_in_background()
     yield
     try: _phone.stop_server()   # shutdown: close the phone LAN listener if one is open
@@ -75,11 +76,36 @@ def _ai_up():
     if not (_AI["up"] and time.time() - _AI["t"] < 5):
         _AI.update(t=time.time(), up=_ui.ai_available())
     return _AI["up"]
+_STARTED = time.time()
+def _rss_mb():
+    try:
+        with open("/proc/self/status") as fh: return int(fh.read().split("VmRSS:")[1].split()[0]) // 1024
+    except Exception: return None
+def _mem_watch():
+    """v0.4.5 #1 guard: if the process grows past GAC_MAX_RSS_MB (default 1500), drop the look-alike caches, hand memory
+    back to the system and log it, so a future leak shows up in the log instead of an OOM kill."""
+    lim = int(os.getenv("GAC_MAX_RSS_MB", "1500"))
+    while True:
+        time.sleep(30)
+        r = _rss_mb()
+        if r and r > lim:
+            try:
+                from . import ui as _u
+                with _u._DCL: _u._DC["refs"] = {}; _u._DC["ctx"] = None
+                _u._trim_mem()
+            except Exception: pass
+            print(f"!! memory {r} MB is over {lim} MB: caches dropped (now {_rss_mb()} MB)", flush=True)
+import threading as _th
+_th.Thread(target=_mem_watch, daemon=True, name="mem-watch").start()
+
 @app.get("/health")
 def health():
     up = _ai_up()
     from . import updates as _up
-    return {"ok": True, "version": _up.current_version(), "commit": _up.current_commit(), "ai_checker": "online" if up else "offline",
+    bi = dict(_up.build_info())   # v0.4.6 #8 (part-timer: two commits): ONE commit, the public release's when this folder came from one
+    cm = bi.pop("public_commit", None) or _up.current_commit()
+    return {"ok": True, "version": _up.current_version(), "commit": cm, **bi, "ai_checker": "online" if up else "offline",
+            "uptime_s": int(time.time() - _STARTED), "rss_mb": _rss_mb(),
             **({} if up else {"ai_note": "AI check is off right now. Scanning still works.", "ai_hint": "Start it from Admin > Settings > AI helper (desktop app) or start-ai-checker.command (VLM_URL " + os.getenv("VLM_URL", "http://127.0.0.1:8090") + ")."})}
 
 def _startup_checks():

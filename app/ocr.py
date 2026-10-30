@@ -192,12 +192,19 @@ def _space_fix(t):
     t = re.sub(r"(?<=[A-Za-z]{2})(?=\d)|(?<=\d)(?=[A-Za-z]{2})", " ", t)
     return t
 
+def _box(l, img):
+    """v0.4 tap-to-zoom: where the line sits on the photo, as fractions [x, y, w, h] of the (upright) image."""
+    try:
+        W, H = img.size; x0 = max(0, l["x"]); x1 = min(W, l.get("x1", x0)); y0 = max(0, l["y"]); y1 = min(H, l["y"] + l["h"])
+        return [round(x0 / W, 4), round(y0 / H, 4), round(max(0, x1 - x0) / W, 4), round(max(0, y1 - y0) / H, 4)]
+    except Exception: return None
+
 def _finish(img, lines, engine):
     real = [l for l in lines if not l.get("blank")]
     text = "\n".join(l["text"] for l in lines)
     conf = sum(l["conf"] for l in real) / len(real) / 100 if real else 0.0
     hs = sorted(l["h"] for l in real); hmed = hs[len(hs)//2] if hs else 1
-    meta = [dict(text=l["text"], rel_h=round(l["h"]/hmed, 2), top=round(l["y"]/img.size[1], 2), col=l["col"])
+    meta = [dict(text=l["text"], rel_h=round(l["h"]/hmed, 2), top=round(l["y"]/img.size[1], 2), col=l["col"], box=_box(l, img))
             for l in real]
     return {"engine": engine, "text": text, "lines": meta, "ocr_conf": round(conf, 2)}
 
@@ -244,7 +251,7 @@ def tesseract_ocr(data: bytes):
     text = "\n".join(l["text"] for l in lines)
     conf = sum(l["conf"] for l in real) / len(real) / 100 if real else 0.0
     hs = sorted(l["h"] for l in real); hmed = hs[len(hs)//2] if hs else 1
-    meta = [dict(text=l["text"], rel_h=round(l["h"]/hmed, 2), top=round(l["y"]/img.size[1], 2), col=l["col"])
+    meta = [dict(text=l["text"], rel_h=round(l["h"]/hmed, 2), top=round(l["y"]/img.size[1], 2), col=l["col"], box=_box(l, img))
             for l in real]
     return {"engine": "tesseract-layout", "text": text, "lines": meta, "ocr_conf": round(conf, 2)}
 

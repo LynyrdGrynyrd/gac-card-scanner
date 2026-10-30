@@ -10,7 +10,7 @@ async function busy(btn, label, fn) {
 }
 
 /* ---------- dialog helper ---------- */
-function ask({title, html = "", input = null, buttons, wide = false, check = null}) {
+function ask({title, html = "", input = null, buttons, wide = false, check = null, timeout = 0}) {
   $$('[aria-busy="true"]').forEach(b => { if (b._old !== undefined) { b.innerHTML = b._old; b.removeAttribute("aria-busy"); } });   // no spinner behind a question
   const d = $("#dlg"); d.classList.toggle("wide", !!wide); $("#dlgTitle").textContent = title; $("#dlgBody").innerHTML = html; $("#dlgErr").textContent = "";
   $("#dlgInputWrap").hidden = !input;
@@ -18,7 +18,8 @@ function ask({title, html = "", input = null, buttons, wide = false, check = nul
   $("#dlgBtns").innerHTML = buttons.map((b, i) => `<button type="button" class="btn ${b.cls || ""}${b.focus ? " dfocus" : ""}" data-i="${i}">${esc(b.label)}</button>`).join("");
   if (S.DLG_DONE) S.DLG_DONE({value: null, cancelled: true});   // round 14: a question replaced by another one is answered "cancelled", never left hanging
   return new Promise(res => {
-    const done = v => { S.DLG_DONE = null; d.close(); res(v); };
+    let tm = null; const done = v => { clearTimeout(tm); S.DLG_DONE = null; d.close(); res(v); };
+    if (timeout) tm = setTimeout(() => done({value: null, timedOut: true}), timeout);   // v0.4.2 #2: the idle sign-out question
     S.DLG_DONE = done;
     $$("#dlgBtns button").forEach(el => el.onclick = () => {
       const b = buttons[+el.dataset.i], val = $("#dlgInput").value.trim();

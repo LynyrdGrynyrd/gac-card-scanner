@@ -1,6 +1,6 @@
 """Round-8 regression tests (mctrade-r5, manager-r8, parttimer-r2, newcomer-r8, reviewer-r8)."""
 import io, os, re, sys, json, csv, tarfile, sqlite3, subprocess, itertools
-from test_app import mk
+from test_app import mk, sent
 from openpyxl import Workbook, load_workbook
 from app import mctrade_export as M, crm_source, plausibility, auth
 
@@ -119,9 +119,9 @@ def test_dryrun_audit_counts_and_left_out(env, monkeypatch):
     for c in (a, b): ui.set_meta(c, batch="r8aud", batch_label="R8 audit batch"); _approve(env, c, "")
     assert adm.get("/api/export/dryrun?status=approved&batch=r8aud").status_code == 200
     row = next(x for x in adm.get("/api/admin/audit?q=R8+audit+batch").json() if x["what"].startswith("dry run: ran"))
-    assert "UPDATE 0, CREATE 1, NEEDS REVIEW 1, LEFT OUT 0" in row["what"], row["what"]
+    assert "UPDATE 0, CREATE 1, TO CHECK 1, LEFT OUT 0" in row["what"], row["what"]
     seg = row["what"].split("not in either file")[1].split("; cards checked")[0]   # round 9 (manager-r9 L-r9-1/2)
-    assert f"1 (NEEDS REVIEW + LEFT OUT): #{b}" in seg and f"#{a}" not in seg and f"#{a}" in row["what"].split("cards checked")[1]
+    assert f"1 (TO CHECK in neither file + LEFT OUT): #{b}" in seg and f"#{a}" not in seg and f"#{a}" in row["what"].split("cards checked")[1]
     r = adm.get("/api/export/dryrun?status=approved&batch=r8nope")
     assert r.status_code == 404
     auth.set_setting("mctrade_updates_enabled", "1")
@@ -157,7 +157,7 @@ def test_website_in_export_when_template_has_column(env, tmp_path, monkeypatch):
     monkeypatch.setattr(M, "TEMPLATE_XLSX", str(tmp_path / "mctrade_template.xlsx"))
     open(M.TEMPLATE_XLSX, "wb").write(_tpl(["ProfileID", "IndFirstName", "IndLastName", "IndEmail", "AffCode1"]))
     rd = adm.get("/api/export/xlsx?status=approved&batch=r8web&preview=1&companion=readme.txt").text
-    assert "NO website column" in rd
+    assert "no website column" in rd
 
 def test_merge_prefers_value_that_passes_checks(env):
     ui, st = env["ui"], env["store"]
@@ -267,7 +267,7 @@ def test_note_html_refused_and_note_edit_flags_reexport(env):
     cid = mk(ui, st, first_name="Note", last_name="Check", emails=["note.check@x.example"])
     r = rev.post(f"/api/cards/{cid}", json={"status": "approved", "note": "<img src=x onerror=1>", "confirm_cross_batch": True})
     assert r.status_code == 422, r.text
-    st.update(cid, status="approved", reviewer="RR", note=""); ui.set_meta(cid, exported=1.0)
+    st.update(cid, status="approved", reviewer="RR", note=""); sent(ui, cid)
     r = rev.post(f"/api/cards/{cid}", json={"note": "called back"}); assert r.status_code == 200, r.text
     assert ui.meta(cid).get("reexport")
 

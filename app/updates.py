@@ -34,6 +34,18 @@ def current_commit():
         _COMMIT = _COMMIT or "unknown"
     return _COMMIT
 
+_BUILD = None
+def build_info():
+    """v0.4.2 #10 (part-timer High: live reported a local sync commit, not the release): BUILD-INFO.json, written when the
+    public release is synced into this folder, names the public commit and tag. {} when there is none."""
+    global _BUILD
+    if _BUILD is None:
+        try:
+            d = json.load(open(os.path.join(os.path.dirname(__file__), "..", "BUILD-INFO.json")))
+            _BUILD = {k: str(d[k])[:40] for k in ("public_commit", "tag", "repo") if d.get(k)}
+        except (OSError, ValueError, TypeError): _BUILD = {}
+    return _BUILD
+
 def _parse(v):
     m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-.]?(.*))?$", v or "")
     if not m: return None

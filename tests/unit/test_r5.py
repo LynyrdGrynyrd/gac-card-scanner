@@ -62,6 +62,7 @@ def test_formula_and_html_refused_at_approval(env):
 def test_preview_export_marks_nothing(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
     cid = mk(ui, st, first_name="Pre", last_name="View", emails=["pre@view.io"]); ui.set_meta(cid, batch="r5p", batch_label="R5P")
+    from app import auth; ui.claim_batch("r5p", {"id": auth.db().execute("SELECT id FROM users WHERE username='rev'").fetchone()[0]})
     assert _approve(rev, cid).status_code == 200
     n = len(rev.get("/api/exports").json())
     r = rev.get("/api/export/xlsx?status=approved_new&batch=r5p&preview=1"); assert r.status_code == 200 and r.headers["X-Preview"] == "1"
@@ -74,7 +75,7 @@ def test_csv_guard_dashed_phone_and_handles(env):
 
 def test_short_filenames(env):
     fn = env["ui"]._fname("contacts-for-MC-Trade", "approved_new", "xlsx", "R5 QA newcomer Oct 13 · Oct 13, 8:22 PM · QN")
-    assert len(fn) < 60 and fn.count("Oct-13") == 1, fn
+    assert len(fn) < 75 and fn.count("Oct-13") == 1 and fn.startswith("IMPORT-ME_"), fn   # v0.4.6 #7: IMPORT-ME_ + seconds
 
 # ---- skeptic
 def test_reapprove_keeps_override(env):
@@ -89,7 +90,7 @@ def test_img_nul_is_404(env):
 
 def test_merge_of_approved_needs_confirm_and_note_dropped(env):
     ui, st, rev = env["ui"], env["store"], env["rev"]
-    a = mk(ui, st, first_name="Mo", last_name="One", emails=["mo@one.io"]); b = mk(ui, st, first_name="Pell", last_name="Two", emails=["p@two.io"])
+    a = mk(ui, st, first_name="Mo", last_name="One", emails=["mo@one.io"]); b = mk(ui, st, first_name="Mo", last_name="One", emails=["mo@one.io"])   # v0.4.1: merges need a look-alike
     assert _approve(rev, a).status_code == 200
     r = rev.post(f"/api/cards/{a}", json={"merge_into": b}); assert r.status_code == 409 and r.json()["need"] == "confirm_redecide"
     assert rev.post(f"/api/cards/{a}", json={"merge_into": b, "confirm_redecide": True}).status_code == 200
@@ -100,7 +101,8 @@ def test_merge_of_approved_needs_confirm_and_note_dropped(env):
 def test_privacy_delete_purges_target_snapshots_and_exports(env):
     ui, st, rev, adm = env["ui"], env["store"], env["rev"], env["adm"]
     a = mk(ui, st, first_name="Del", last_name="Me", emails=["delme@x.io"], phones=[{"type": "mobile", "number": "330-555-7777"}])
-    b = mk(ui, st, first_name="Keep", last_name="Target", emails=["keep@t.io"]); ui.set_meta(b, batch="r5d", batch_label="R5D")
+    b = mk(ui, st, first_name="Del", last_name="Me", emails=["keep@t.io"], phones=[{"type": "mobile", "number": "330-555-7777"}]); ui.set_meta(b, batch="r5d", batch_label="R5D")
+    ui.set_meta(a, batch="r5d", batch_label="R5D")   # v0.4.5 #3: same batch
     assert rev.post(f"/api/cards/{a}", json={"merge_into": b}).status_code == 200
     assert rev.post(f"/api/cards/{b}", json={"fields": {"title": "Boss"}}).status_code == 200       # snapshot of b holds delme@x.io
     assert _approve(rev, b).status_code == 200

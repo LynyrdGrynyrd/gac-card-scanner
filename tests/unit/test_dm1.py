@@ -61,10 +61,11 @@ def test_all_batches_block_lists_ok_batches(env):
     if st_["status"] != "approved":
         with st.db() as x: x.execute("UPDATE cards SET status='approved' WHERE id=?", (a,))
     assert _approve(rev, c).status_code == 200
-    allb = rev.get("/api/export/check", params={"status": "approved_new"}).json()
+    assert rev.get("/api/export/check", params={"status": "approved_new"}).status_code == 403   # v0.4.2 #1: all batches is admin-only
+    allb = env["adm"].get("/api/export/check", params={"status": "approved_new"}).json()
     assert any(p["id"] == a and b in p["with"] for p in allb["duplicates"])
     assert any(o["batch"] == "bZ" for o in allb["ok_batches"])
     one = rev.get("/api/export/check", params={"status": "approved_new", "batch": "bX"}).json()
     assert not one["duplicates"] and one["count"] == 1
     r = rev.post(f"/api/cards/{a}", json={"keep_apart": [b]}); assert r.status_code == 200, r.text
-    assert not [p for p in rev.get("/api/export/check", params={"status": "approved_new"}).json()["duplicates"] if p["id"] == a]
+    assert not [p for p in env["adm"].get("/api/export/check", params={"status": "approved_new"}).json()["duplicates"] if p["id"] == a]

@@ -14,41 +14,40 @@
     <a href="#upload" class="brand"><img src="/static/brand/GAC_logo.png" alt="Greater Akron Chamber"><span>Card Scanner</span></a>
     <nav aria-label="Main">
       <a href="#upload" data-nav="upload">Scan cards</a>
-      <a href="#queue" data-nav="queue">Review queue <span id="pendingBadge" class="badge" hidden></span></a>
+      <a href="#queue" data-nav="queue">Review queue <span id="pendingBadge" class="badge" hidden></span> <span id="naBadge" class="badge warn" hidden title="Cards a reviewer flagged for an admin"></span></a>
       <a href="#export" data-nav="export">Export</a>
       <a href="#admin" data-nav="admin" id="navAdmin" hidden>Admin</a>
     </nav>
-    <div class="who"><button type="button" class="btn small ghost" id="undoBtn" hidden title="Undo last action (U)">↶ Undo</button><span id="aiQueue" class="badge" hidden title="AI check"></span> <span id="whoText"></span> <a class="link" href="/static/ui/help.html" target="_blank" rel="noopener" title="Help guide (opens in a new tab)" style="display:inline-flex;align-items:center">Help</a> · <button class="link" id="pwChange">Password</button> · <button class="link" id="logout">Sign out</button></div>
+    <div class="who"><button type="button" class="btn small ghost" id="undoBtn" hidden title="Undo last action (U)">↶ Undo</button><span id="aiQueue" class="badge" hidden title="AI check"></span> <span id="whoText"></span> <button type="button" class="link" id="themeBtn" aria-label="Light or dark" title="Light / dark">&#9680;</button> <a class="link" href="/static/ui/help.html" target="_blank" rel="noopener" title="Help guide (opens in a new tab)" style="display:inline-flex;align-items:center">Help</a> · <button class="link" id="pwChange">Password</button> · <button class="link" id="logout">Sign out</button></div>
   </div>
 </header>
+<div id="youAre" class="wrap youare"></div>
 <div id="updBanner" class="wrap upd" role="status" hidden></div>
 <main id="main" class="wrap" tabindex="-1">
 
 <section id="v-upload" class="view" aria-labelledby="h-up">
   <h1 id="h-up">Scan business cards</h1>
-  <p class="lead">Add card photos. Each card goes to the review queue.</p>
-  <p id="scanWho" class="whoBanner" style="font-size:1.1em;padding:.4em .6em;border:2px solid #36c;border-radius:6px"></p>
+  <p class="lead">Drop photos or a PDF.</p>
+  <p class="bname"><label for="batchName">Batch name <small>(optional)</small></label>
+    <input id="batchName" maxlength="60" placeholder="e.g. After Hours"> <span id="batchCur" class="small muted"></span></p>
   <div id="drop" class="drop">
     <svg aria-hidden="true" viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/></svg>
-    <strong id="dropHead">Drag photos or a whole folder here</strong>
+    <div class="btns"><button type="button" class="btn primary lg" id="bPhotos">Scan</button></div>
+    <strong id="dropHead">or drag files here</strong>
     <span id="dropHelp">JPG, PNG, HEIC or PDF.</span>
-    <div class="btns">
-      <button type="button" class="btn primary" id="bPhotos">Choose photos</button>
-      <button type="button" class="btn" id="bFolder">Choose a folder</button>
-      <button type="button" class="btn mobile-only" id="bCam">Take a photo</button>
-      <button type="button" class="btn" id="bPhone" hidden>📱 Scan with phone</button>
-    </div>
-    <details class="more small"><summary>Tips</summary>Folder button not working? Use "Choose photos" and select all (Ctrl+A / ⌘A), or drag the folder here.</details>
     <input id="fPhotos" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,.pdf,application/pdf" multiple hidden>
     <input id="fFolder" type="file" webkitdirectory directory multiple hidden>
     <input id="fCam" type="file" accept="image/*" capture="environment" hidden>
   </div>
   <div class="opts">
-    <label for="batchName">Batch name <small>(optional)</small></label>
-    <input id="batchName" maxlength="60" placeholder="e.g. Oct 13 After Hours">
-    <label class="small chk"><input type="checkbox" id="skipAi"> Skip AI</label>
-    <details><summary>Advanced</summary>
-      <label for="engine">Reading method</label>
+    <details class="more" id="upMore"><summary>More</summary>
+      <div class="btns">
+        <button type="button" class="btn" id="bFolder" aria-label="Choose a folder">Choose a folder</button>
+        <button type="button" class="btn mobile-only" id="bCam">Take a photo</button>
+        <button type="button" class="btn" id="bPhone" aria-label="Scan with phone" hidden><span aria-hidden="true">📱</span> Scan with phone</button>
+      </div>
+      <label class="small chk"><input type="checkbox" id="skipAi"> Skip the AI double-check (faster at busy events)</label>
+      <label for="engine">Scan quality</label>
       <select id="engine"><option value="auto">Standard (recommended)</option>
 </select>
     </details>
@@ -70,7 +69,6 @@
     <div class="progress" role="progressbar" aria-label="Batch progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="batchBar"><div></div></div>
     <p class="small" id="batchEta"></p>
     <ul id="batchList" class="filelist"></ul>
-    <p class="small" id="batchLegend" hidden><span class="flag low">Needs a look</span> = check the photo · <span class="flag bad">Not added</span> = skipped · <span class="flag bad">Cancelled</span> = stopped</p>
     <div class="btns"><a href="#queue" class="btn primary" id="toQueue" hidden>Review batch →</a>
       <button class="btn" id="clearBatch" hidden>New batch</button>
       <button class="btn" id="cancelBatch" hidden title="Stops cards still waiting. Cards already added stay.">Cancel</button></div>
@@ -92,6 +90,7 @@
     <div class="fbatch"><label for="fBatch" class="inline">Batch</label><input id="fBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="12"><select id="fBatch" disabled><option value="">Loading…</option></select></div>
     <label class="chk"><input type="checkbox" id="fAtt"> Needs attention</label>
     <label class="chk"><input type="checkbox" id="fDup"> Duplicates</label>
+    <label class="chk" id="fNaL" hidden><input type="checkbox" id="fNa"> Needs admin</label>
     <label class="chk"><input type="checkbox" id="fNew"> Not exported</label>
     <label class="sr" for="fText">Search</label><input type="search" id="fText" placeholder="Search name, email, #id">
   </div>
@@ -102,7 +101,7 @@
   <div class="tablewrap">
   <table class="q">
     <caption class="sr">Cards in the review queue</caption>
-    <thead><tr><th scope="col"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th scope="col"><span class="sr">Photo</span></th><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Read quality</th><th scope="col">Needs a look</th><th scope="col">Status</th></tr></thead>
+    <thead><tr><th scope="col"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th scope="col"><span class="sr">Photo</span></th><th scope="col">Name</th><th scope="col">Company</th><th scope="col">Email</th><th scope="col">Scan</th><th scope="col">Needs a look</th><th scope="col">Status</th></tr></thead>
     <tbody id="qBody"></tbody>
   </table>
   </div>
@@ -114,22 +113,20 @@
 <section id="v-review" class="view" aria-labelledby="h-r" hidden>
   <div class="row between">
     <h1 id="h-r">Review card</h1> <span id="rDirty" class="pill dirty" role="status" hidden>Unsaved</span>
-    <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Next: next card (J)" aria-keyshortcuts="j">Next →</button></div>
+    <div class="pager"><a class="btn ghost" href="#queue">↩ Queue</a><button class="btn" id="prev" aria-label="Prev: previous card (K)" aria-keyshortcuts="k">← Prev</button><span id="pos"></span><button class="btn" id="next" aria-label="Skip: next card (J)" aria-keyshortcuts="j">Skip →</button></div>
   </div>
   <div class="review">
-    <figure class="imgbox"><img id="rImg" alt="Photo of the business card"><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank">Open original</a> · <span id="rBatch"></span>
+    <figure class="imgbox"><div class="zwrap" id="rZoom"><img id="rImg" alt="Photo of the business card"><span class="zhint" id="zHint" aria-live="polite">Tap a field to zoom</span></div><figcaption><button type="button" class="link" id="zoom">Enlarge</button> · <a id="rawLink" href="#" target="_blank" aria-label="Open the original photo">Open original</a> · <span id="rBatch"></span>
       <div class="backbox"><a id="backLink" href="#" target="_blank" hidden>Open back</a> <label for="backFile" class="btn small">Add back…</label><input type="file" id="backFile" accept="image/*,.heic,.heif,image/heic,image/heif" capture="environment" class="sr"></div></figcaption>
-      <details><summary>Text read</summary><pre id="rRaw"></pre></details>
-      <details id="rHistWrap"><summary>History</summary><ol id="rHist" class="hist"></ol></details></figure>
+</figure>
     <form id="rForm" class="panel loading" autocomplete="off" novalidate inert>
       <div class="row between"><span id="rStatus" class="pill"></span><span id="rConf"></span></div>
       <div id="rDecided" class="small"></div>
-      <div id="rDupBox" class="alert warn" role="status" hidden><div id="rExported" hidden></div><div id="rDupQ" hidden></div><div id="rDupC" hidden></div></div>
+      <div id="rDupBox" class="alert warn" role="region" aria-label="Same person?" hidden><div id="rExported" hidden></div><div id="rDupQ" hidden></div><div id="rDupC" hidden></div></div>
       <div id="rErr" class="alert bad" role="alert" hidden></div>
       <div id="rRisk" class="alert" role="status" hidden></div>
       <div id="rWarn" class="alert info" hidden></div>
       <div id="rCons" class="alert" role="status" hidden></div>
-      <div id="rAI" class="alert info" hidden></div>
       <div class="grid2" id="fields">
         <div class="f"><label for="first_name">First name <span class="req">*</span></label><input id="first_name" data-c="name" aria-describedby="e_name"></div>
         <div class="f"><label for="last_name">Last name</label><input id="last_name" data-c="name"></div>
@@ -143,17 +140,24 @@
         <div class="f wide" id="addrBox"><label for="address">Address</label><input id="address" data-c="address"></div>
         <div class="f wide"><label for="note">Note <small>(optional)</small></label><input id="note"></div>
       </div>
-      <p class="legend small" id="srcLegend">No tag means read from the printed text. Tags show other sources.</p>
-      <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = hard to read. Check the photo.</p>
+      <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = check the photo.</p>
       <div class="btns actions">
-        <button type="button" class="btn ok" id="bApprove">Approve <kbd>A</kbd></button>
-        <button type="button" class="btn danger" id="bReject">Reject <kbd>R</kbd></button>
-        <button type="button" class="btn" id="bSave">Save</button>
+        <button type="button" class="btn" id="bSkip" aria-keyshortcuts="j">Skip</button>
         <button type="button" class="btn ghost" id="bDiscard" hidden>Discard edits</button>
         <button type="button" class="btn ghost" id="bPending">Reopen (set to pending)</button>
-        <button type="button" class="btn ghost" id="bDelete" hidden>Delete…</button>
+        <button type="button" class="btn" id="bSave">Save</button>
+        <button type="button" class="btn danger" id="bReject" aria-keyshortcuts="r">Reject</button>
+        <button type="button" class="btn ok lg" id="bApprove" aria-keyshortcuts="Enter">Approve</button>
       </div>
-      <details class="more hint"><summary>Keyboard shortcuts</summary><kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>J</kbd> next · <kbd>K</kbd> previous · <kbd>U</kbd> undo · <kbd>Esc</kbd> leave a field. Approve or reject also saves edits.</details>
+      <details class="more" id="rMore"><summary>More</summary>
+        <div class="btns">
+          <button type="button" class="btn ghost" id="bDelete" hidden>Delete…</button>
+        </div>
+        <div id="rAIWrap"><div id="rAI" class="alert info" hidden></div></div>
+        <details><summary>Text read</summary><pre id="rRaw"></pre></details>
+        <details id="rHistWrap"><summary>History</summary><ol id="rHist" class="hist"></ol></details>
+      </details>
+      <p class="keys small" id="rKeys"><span><kbd>↵</kbd> Approve</span><span><kbd>Tab</kbd> Next field</span><span><kbd>←</kbd><kbd>→</kbd> Card</span><span><kbd>⌘Z</kbd> Undo</span></p>
     </form>
   </div>
 </section>
@@ -164,22 +168,24 @@
   <label for="exStatus">Cards</label>
   <select id="exStatus"><option value="approved_new">Ready to export</option><option value="approved">All approved</option><option value="all">All cards</option><option value="pending">Pending only</option><option value="rejected">Rejected only (admin)</option></select>
   <label for="exBatch">Batch</label>
-  <input id="exBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="14"> <select id="exBatch"><option value="">All batches</option></select>
-  <label class="small chk"><input type="checkbox" id="exShowAll"><span> Show everyone's batches</span></label>
+  <input id="exBatchQ" type="search" placeholder="Find a batch…" aria-label="Find a batch by name" size="14"> <select id="exBatch"><option value="__choose__">Loading…</option></select>
+  <label class="small chk" id="exShowAllL"><input type="checkbox" id="exShowAll"><span> Show all my batches</span></label>
   <p id="exInfo" class="muted" aria-live="polite"></p>
   <div id="exDup" class="alert bad" hidden></div>
-  <div class="tiles">
-    <button type="button" class="tile" data-ex="xlsx"><b>MC Trade import (Excel)</b><span>MC Trade file + READ-ME</span></button>
-    <button type="button" class="tile" data-ex="csv"><b>Spreadsheet (CSV)</b><span>For Excel or Google Sheets.</span></button>
-    <button type="button" class="tile" data-ex="vcf"><b>Contacts (vCard)</b><span>For Outlook, Gmail or a phone.</span></button>
-  </div>
-  <p class="small"><button type="button" class="link" id="exPreview" title="Nothing is marked as exported">Preview MC Trade files</button> ·
+  <div class="exgo"><div class="big" id="exBig" aria-hidden="true"></div><p class="muted" id="exBigT">Loading…</p>
+    <button type="button" class="btn primary lg tile" id="exGo" data-ex="xlsx" disabled>Export</button></div>
+  <details class="more small"><summary>Format</summary>
+    <label class="chk"><input type="radio" name="exKind" value="xlsx" checked> MC Trade import (Excel)</label>
+    <label class="chk"><input type="radio" name="exKind" value="csv"> Spreadsheet (CSV)</label>
+    <label class="chk"><input type="radio" name="exKind" value="vcf"> Contacts (vCard)</label></details>
+  <p class="small"><button type="button" class="btn" id="exPreview" title="Nothing is marked as exported">Preview</button>
     <button type="button" class="link" id="exDryrun" title="Match report. Nothing is sent.">Look up in MC Trade</button></p>
-  <details class="more small"><summary>What's in the download?</summary>The import file, a READ-ME and a CSV (plus an UPDATES file when cards update existing contacts). "Look up in MC Trade" shows what each card would do, offline.</details>
+  <p class="small muted" id="exMarks">Export marks these cards as exported. Preview doesn't.</p>
+  <details class="more small"><summary>What's in the download?</summary>The import file, a READ-ME, a summary and a CSV (plus an UPDATES file when cards update existing contacts). "Look up in MC Trade" shows what each card would do, offline.</details>
   <div id="exDone" class="alert ok" role="status" hidden></div>
   <h2 class="mt">Export history</h2>
   <p class="small">Download again while the copy is kept.</p>
-  <p class="small"><label style="display:inline-flex;gap:.4em;align-items:center"><input type="checkbox" id="exHistEveryone" style="width:auto;height:auto"> Show everyone's exports</label></p>
+  <p class="small" id="exHistEveryoneL" hidden><label style="display:inline-flex;gap:.4em;align-items:center"><input type="checkbox" id="exHistEveryone" style="width:auto;height:auto"> Show everyone's exports</label></p>
   <div class="tablewrap"><table class="q plain"><caption class="sr">Export history</caption>
     <thead><tr><th scope="col">When</th><th scope="col">By</th><th scope="col">Format</th><th scope="col">Cards</th><th scope="col">File</th></tr></thead><tbody id="exHist"></tbody></table></div>
   <p class="btns" id="exHistMore" hidden><button type="button" class="btn small" id="exHistMoreBtn">Show more</button><button type="button" class="btn small ghost" id="exHistAllBtn">Show all</button> <span class="small" id="exHistCount"></span></p>
