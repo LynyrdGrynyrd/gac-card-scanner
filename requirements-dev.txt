@@ -23,7 +23,7 @@ markdown-it-py==4.2.0     # via rich
 markupsafe==3.0.4         # via werkzeug
 mdurl==0.1.2              # via markdown-it-py
 pluggy==1.7.0             # via pytest
-pyee==14.0.0              # via playwright
+pyee==16.0.0              # via playwright
 pygments==2.21.0          # via pytest, rich
 pyrate-limiter==4.5.1     # via schemathesis
 requests==2.34.2          # via schemathesis
