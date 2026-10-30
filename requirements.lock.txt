@@ -26,7 +26,7 @@ opentelemetry-api==1.45.1  # via fastapi
 packaging==26.3           # via onnxruntime, pytesseract
 phonenumbers==9.0.41      # via -r requirements.txt
 pillow-heif==1.8.1        # via -r requirements.txt
-pillow==12.3.0            # via pillow-heif, pytesseract, rapidocr-onnxruntime, -r requirements.txt
+pillow==13.0.0            # via pillow-heif, pytesseract, rapidocr-onnxruntime, -r requirements.txt
 protobuf==7.36.2          # via onnxruntime
 pyclipper==1.4.0          # via rapidocr-onnxruntime
 pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'  # via cffi
