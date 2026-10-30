@@ -1,5 +1,5 @@
 """Permanent delete on request, its tombstones, photo/export retention and the memory clean-up. Split out of app/ui.py (audit 2026-10 P2)."""
-import os, json, time, sqlite3
+import os, csv, json, time, sqlite3
 from fastapi import Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 from . import store, auth
@@ -34,6 +34,7 @@ def apply_tombstones():
     return gone
 
 def _hard_delete(cid, user):
+    from . import exporting
     c = store.get(cid)
     if not c: raise HTTPException(404, "Card not found")
     photos = [c.get("image"), U.meta(cid).get("back_image")]
@@ -86,17 +87,28 @@ def _hard_delete(cid, user):
         # undo snapshots: of this card, and of any card its details were merged into (they hold copies of those details)
         for a in x.execute("SELECT id, snapshot FROM actions").fetchall():
             if any(sn["card"]["id"] == cid or sn["card"]["id"] in targets for sn in json.loads(a["snapshot"] or "[]")): x.execute("DELETE FROM actions WHERE id=?", (a["id"],))
-        for e in x.execute("SELECT id, ts, stored, card_ids FROM exports WHERE stored IS NOT NULL").fetchall():
-            ids_ = json.loads(e["card_ids"] or "[]")
+        for e in x.execute("SELECT id, ts, stored, card_ids, listed_ids FROM exports WHERE stored IS NOT NULL").fetchall():
+            ids_ = json.loads(e["card_ids"] or "[]") + json.loads(e["listed_ids"] or "[]")   # v0.4.12 (review F1): left-out cards too
+            if e["listed_ids"] is None and _listed_in_csv(e["stored"], cid): ids_.append(cid)   # exports made before listed_ids
             if cid in ids_ or any(t in ids_ and e["ts"] >= targets[t][0] for t in targets):   # also exports of a merge target made after the merge
                 ep = os.path.join(U.EXP, e["stored"]); export_files += [ep] + [ep + "." + n for n in U.COMPANION]
                 x.execute("UPDATE exports SET stored=NULL WHERE id=?", (e["id"],)); removed_exports += 1
+        # v0.4.12 (review F2): the person's match keys (email, name|company) in the MC Trade export records, and drafts of the card.
+        # A key another card of the same export also has stays (it is that person's too).
+        mine = exporting.card_keys(c)
+        for e in x.execute("SELECT id, card_ids, people FROM exports WHERE people IS NOT NULL").fetchall():
+            ppl = json.loads(e["people"] or "[]")
+            if not mine & set(ppl): continue
+            others = set().union(*[exporting.card_keys(o) for o in (store.get(i) for i in json.loads(e["card_ids"] or "[]") if i != cid) if o])
+            x.execute("UPDATE exports SET people=? WHERE id=?", (json.dumps([k for k in ppl if k not in mine or k in others]), e["id"]))
+        x.execute("DELETE FROM drafts WHERE card_id=?", (cid,))
         # the audit rows are part of the same transaction: no delete without its record, no record without the delete
         x.execute("INSERT INTO card_history(card_id,ts,reviewer,action,from_status,to_status,detail) VALUES(?,?,?,?,?,?,?)",
                   (cid, time.time(), user["initials"], "deleted_on_request", None, None, json.dumps({"export_copies": removed_exports, "merged_removed": removed_merged})))
         x.execute("INSERT INTO auth_log(ts,username,event,ip) VALUES(?,?,?,?)", (time.time(), user["username"],
                   f"deleted card #{cid} on request (photo, details; history kept without personal data; {removed_exports} stored export file(s))", None))
     _add_tombstone(cid, c.get("created"))
+    exporting._IDX_CACHE.update(sig=None, val=None); exporting._PEOPLE_CACHE.clear()   # they held the person's keys
     for ph in photos: U.remove_photo(ph)   # F08: front and back, with their thumbnails
     for q in export_files:
         try: os.remove(q)
@@ -114,6 +126,13 @@ def _hard_delete(cid, user):
         for jid in [k for k, j in U.JOBS.items() if (j.get("card") or {}).get("id") == cid]: U.JOBS.pop(jid, None)
     U.AI_WAIT.pop(cid, None)
     return {"deleted": cid, "export_copies_deleted": removed_exports, "merged_details_removed": removed_merged}
+
+def _listed_in_csv(stored, cid):
+    """Exports before v0.4.12 have no listed_ids: their extra-columns CSV lists every card of the export (ScanCardID first)."""
+    p = os.path.join(U.EXP, stored + ".extra.csv")
+    try:
+        with open(p, encoding="utf-8-sig", newline="") as fh: return any(r and r[0].strip() == str(cid) for r in csv.reader(fh))
+    except OSError: return False
 
 def _redact(action, detail):
     """What is left of a history row's detail after a removal request: no names, contact details, file names or notes."""

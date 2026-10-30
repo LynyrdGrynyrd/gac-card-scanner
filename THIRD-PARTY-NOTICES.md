@@ -13,7 +13,7 @@ GAC Card Scanner is licensed **GPL-3.0-or-later** (see `LICENSE`). It is built o
 | python-multipart | 0.0.32 | Apache-2.0 | github.com/Kludex/python-multipart |
 | pytesseract | 0.3.13 | Apache-2.0 | github.com/madmaze/pytesseract |
 | phonenumbers (port of Google libphonenumber) | 9.0.41 | Apache-2.0 | github.com/daviddrysdale/python-phonenumbers |
-| Pillow | 12.3.0 | MIT-CMU (HPND) | github.com/python-pillow/Pillow |
+| Pillow | 13.0.0 | MIT-CMU (HPND) | github.com/python-pillow/Pillow |
 | openpyxl | 3.1.5 | MIT | foss.heptapod.net/openpyxl/openpyxl |
 | NumPy | 2.5.4 | BSD-3-Clause (+ bundled 0BSD/MIT/Zlib/CC0 parts) | github.com/numpy/numpy |
 | OpenCV (opencv-python-headless) | 5.0.0.93 | Apache-2.0; the wheel bundles third-party libraries listed in `cv2/LICENSE-3RD-PARTY.txt`, including FFmpeg (LGPL-2.1+); the headless build has no Qt | github.com/opencv/opencv-python |

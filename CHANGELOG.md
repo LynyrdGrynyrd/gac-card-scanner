@@ -8,6 +8,17 @@
 - Still fully offline: the models ship inside the app, and the scanner never lets the library download anything (a test checks this).
 - The desktop app is slightly smaller (it now uses the OpenCV build without a GUI toolkit).
 
+## v0.4.12 (2026-10-30)
+
+### Fixes from a review of the 0.4 changes (data and privacy)
+- **Delete on request removes every copy of the person.** Since 0.4.8 an export's record listed only the cards in the import file, but its stored side files (extra-columns CSV, READ-ME, SUMMARY) also list the cards left out of it. Deleting such a card on request left its details in those stored files (downloadable from the export history). Exports now record every card their files list, and older exports are found through their stored CSV.
+- **Delete on request also removes** the person's email and name from the "Sent to MC Trade" record (kept for any other card in the same export that has them too) and any unsaved draft of the card.
+- **An exported card can't be rejected by bulk reject or by merging it into another card** (a single-card reject was already refused since 0.4.4): it is in an MC Trade file, and rejecting it in the app would not take it out.
+- **Edits after moving an exported card back to Pending reach MC Trade:** they mark the card "Edited after export", so the next import file offers it again once it is approved. Before, the changed details silently never went out.
+- **Undo can't slip in during an export:** the "exported after this action?" check now runs again while holding the write lock, so an export that finished while Undo waited counts.
+- **Export sign-off notices changed card settings:** a change to the MC Trade choice, "Different person" or "Needs admin" between the check and the export now asks for the check again, like a changed card already did.
+- Third-party notices list Pillow 13.0.0. Help pages show 0.4.12 (the printable guides still say 0.4.10).
+
 ## v0.4.11 (2026-10-30)
 
 ### Security update
