@@ -16,9 +16,9 @@ GAC Card Scanner is licensed **GPL-3.0-or-later** (see `LICENSE`). It is built o
 | Pillow | 13.0.0 | MIT-CMU (HPND) | github.com/python-pillow/Pillow |
 | openpyxl | 3.1.5 | MIT | foss.heptapod.net/openpyxl/openpyxl |
 | NumPy | 2.5.4 | BSD-3-Clause (+ bundled 0BSD/MIT/Zlib/CC0 parts) | github.com/numpy/numpy |
-| OpenCV (opencv-python) | 5.0.0.93 | Apache-2.0; the wheel bundles third-party libraries listed in `cv2/LICENSE-3RD-PARTY.txt`, including FFmpeg (LGPL-2.1+) and, in the Linux wheel, Qt 5 (LGPL-3.0) | github.com/opencv/opencv-python |
+| OpenCV (opencv-python-headless) | 5.0.0.93 | Apache-2.0; the wheel bundles third-party libraries listed in `cv2/LICENSE-3RD-PARTY.txt`, including FFmpeg (LGPL-2.1+); the headless build has no Qt | github.com/opencv/opencv-python |
 | ONNX Runtime | 1.31.0 | MIT (third-party notices in `onnxruntime/ThirdPartyNotices.txt`) | github.com/microsoft/onnxruntime |
-| RapidOCR (rapidocr-onnxruntime) + bundled PP-OCR ONNX models (PaddleOCR) | 1.2.3 | Apache-2.0 | github.com/RapidAI/RapidOCR, github.com/PaddlePaddle/PaddleOCR |
+| RapidOCR (rapidocr) + bundled PP-OCRv6 small det/rec and PP-OCR mobile angle-classifier ONNX models (PaddleOCR; see `MODEL_LICENSES.md` in the wheel's `rapidocr-*.dist-info/licenses/`) | 3.10.0 | Apache-2.0 (code and models) | github.com/RapidAI/RapidOCR, github.com/PaddlePaddle/PaddleOCR |
 | zxing-cpp | 3.1.1 | Apache-2.0 | github.com/zxing-cpp/zxing-cpp |
 | cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | github.com/pyca/cryptography |
 | RapidFuzz (duplicate matching) | 3.14.6 | MIT | github.com/rapidfuzz/RapidFuzz |
@@ -38,24 +38,31 @@ Generated with `pip-licenses` 5.5.5 from a clean install of `requirements.lock.t
 | annotated-doc | 0.0.5 | MIT | fastapi |
 | annotated-types | 0.8.0 | MIT | pydantic |
 | anyio | 4.15.1 | MIT | starlette |
+| certifi | 2026.7.22 | MPL-2.0 | requests |
 | cffi | 2.1.1 | MIT-0 | cryptography |
+| charset-normalizer | 3.5.2 | MIT | requests |
 | click | 8.5.0 | BSD-3-Clause | uvicorn |
-| colorama (Windows only) | 0.4.6 | BSD-3-Clause | qrcode, click |
+| colorama (Windows only) | 0.4.6 | BSD-3-Clause | qrcode, click, colorlog, tqdm |
+| colorlog | 6.12.0 | MIT | rapidocr |
 | et-xmlfile | 2.0.0 | MIT | openpyxl |
 | flatbuffers | 25.12.19 | Apache-2.0 | onnxruntime |
 | h11 | 0.16.0 | MIT | uvicorn |
-| idna | 3.20 | BSD-3-Clause | anyio |
+| idna | 3.20 | BSD-3-Clause | anyio, requests |
+| omegaconf | 2.4.0 | BSD-3-Clause | rapidocr |
 | opentelemetry-api | 1.45.1 | Apache-2.0 | fastapi |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | onnxruntime, pytesseract |
 | protobuf | 7.36.2 | BSD-3-Clause | onnxruntime |
-| pyclipper | 1.4.0 | MIT (Clipper library: BSL-1.0) | rapidocr-onnxruntime |
+| pyclipper | 1.4.0 | MIT (Clipper library: BSL-1.0) | rapidocr |
 | pycparser | 3.11 | BSD-3-Clause | cffi |
 | pydantic-core | 2.50.1 | MIT | pydantic |
-| PyYAML | 6.0.3 | MIT | rapidocr-onnxruntime |
-| shapely (bundles GEOS, LGPL-2.1) | 2.2.0 | BSD-3-Clause | rapidocr-onnxruntime |
-| six | 1.17.0 | MIT | rapidocr-onnxruntime |
+| PyYAML | 6.0.3 | MIT | rapidocr, omegaconf |
+| shapely (bundles GEOS, LGPL-2.1) | 2.2.0 | BSD-3-Clause | rapidocr |
+| requests | 2.34.2 | Apache-2.0 | rapidocr (never used to download models: app/ocr.py passes the bundled model paths) |
+| six | 1.17.0 | MIT | rapidocr |
+| tqdm | 4.70.1 | MPL-2.0 AND MIT | rapidocr |
 | typing-extensions | 4.16.0 | PSF-2.0 | pydantic, fastapi, ... |
 | typing-inspection | 0.4.4 | MIT | pydantic, fastapi |
+| urllib3 | 2.8.0 | MIT | requests |
 
 ## Desktop installers (Windows .exe, macOS .dmg): also bundled
 | Component | License | Notes |

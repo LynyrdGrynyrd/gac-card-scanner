@@ -113,13 +113,26 @@ def arrange(out, img, reocr=True):
     return res
 
 _RAPID = None
+RAPID_MODELS = ("PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_small.onnx", "ch_ppocr_mobile_v2.0_cls_mobile.onnx")
 def _rapid():
+    """PP-OCR text detection + recognition: RapidOCR 3.x with its bundled PP-OCRv6 small models (OSS-SURVEY.md, re-check
+    2026-10-15; rapidocr-onnxruntime 1.2.x had no release since 2023). The model files are passed by path, so RapidOCR never
+    downloads anything (its default lookup fetches a missing or changed model from the internet). Returns a callable with
+    the 1.2.x shape the callers use: rgb -> ([[quad, text, score], ...], elapse)."""
     global _RAPID
     if _RAPID is None:
-        from rapidocr_onnxruntime import RapidOCR
+        import rapidocr
+        from pathlib import Path
+        md = Path(rapidocr.__file__).parent / "models"
+        det, rec, cls = (str(md / f) for f in RAPID_MODELS)
         n = int(os.getenv("OCR_THREADS", "2"))
-        try: _RAPID = RapidOCR(intra_op_num_threads=n, inter_op_num_threads=1)
-        except TypeError: _RAPID = RapidOCR()
+        eng = rapidocr.RapidOCR(params={"Global.log_level": "warning", "Det.model_path": det, "Rec.model_path": rec, "Cls.model_path": cls,
+                                        "EngineConfig.onnxruntime.intra_op_num_threads": n, "EngineConfig.onnxruntime.inter_op_num_threads": 1})
+        def run(rgb):
+            o = eng(rgb)
+            if o.boxes is None or o.txts is None: return None, None
+            return [[b.tolist(), t, s] for b, t, s in zip(o.boxes, o.txts, o.scores)], o.elapse
+        _RAPID = run
     return _RAPID
 
 def _nospace(t): return re.sub(r"[^a-z0-9@]", "", t.lower())

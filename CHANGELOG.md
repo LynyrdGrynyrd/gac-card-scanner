@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased: new text detector (PP-OCRv6)
+> **Before releasing:** check this on real cards (the 26-card set, or `bench/extract_eval_set.py` on the pilot database):
+> score the same cards with the previous release and with this one. Every number below is from synthetic cards.
+
+- **Card reading uses a newer text detector:** RapidOCR 3.10 with the PP-OCRv6 small models, replacing rapidocr-onnxruntime 1.2.3 (last released in 2023). On synthetic test cards it reads 15-16 more fields out of 480 (93% → 97% on two sets it was not tuned on) and makes fewer confident mistakes, at about 1.7 seconds more per card.
+- Still fully offline: the models ship inside the app, and the scanner never lets the library download anything (a test checks this).
+- The desktop app is slightly smaller (it now uses the OpenCV build without a GUI toolkit).
+
 ## v0.4.12 (2026-10-30)
 
 ### Fixes from a review of the 0.4 changes (data and privacy)
