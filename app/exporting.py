@@ -623,7 +623,9 @@ def export_versions(sel):
     """Round 16 (manager/coordinator r15 H1): what an export sign-off was reviewed against: the template, the contacts file
     and the exact cards (id + version). The page sends these back with the real export; if any changed meanwhile the
     export is refused (409 'stale_review') instead of building a file nobody looked at."""
-    cv = hashlib.sha256(",".join(f"{c['id']}:{U.card_version(c)}" for c in sorted(sel, key=lambda c: c["id"])).encode()).hexdigest()[:12]
+    # v0.4.12 (review F6): plus the card settings that decide which file a row goes to, or whether it is held back
+    ms = U.all_metas(); mv = lambda i: "|".join(str((ms.get(i) or {}).get(k) or "") for k in ("crm_action", "kept_apart", "needs_admin"))
+    cv = hashlib.sha256(",".join(f"{c['id']}:{U.card_version(c)}:{mv(c['id'])}" for c in sorted(sel, key=lambda c: c["id"])).encode()).hexdigest()[:12]
     return {"template": U.template_version(), "contacts": U.contacts_version(), "cards": cv}
 SUSPECT_WEB = re.compile(r"phish|login|verify|secure-?|account|update-?info|signin|wallet|bit\.ly|tinyurl|xn--|^\d+\.\d+\.\d+\.\d+$", re.I)
 def _wdom(w):
@@ -839,9 +841,12 @@ def _do_export_real(kind, request, status, batch, sel, metas, user, seen=None):
             return _stale_export(kind, batch, user, sel, [k for k in built_v if not now_v or now_v[k] != built_v[k]], now_v, "while the file was being built")
         curm = U.all_metas(); tv = U.template_version()
         with U.db() as c:
-            eid = c.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label,people) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            # v0.4.12 (review F1): card_ids = the cards IN the import file; listed_ids = every card the export's files mention
+            # (the extra-columns CSV, READ-ME and SUMMARY also list the left-out ones), so delete-on-request finds every copy
+            eid = c.execute("INSERT INTO exports(ts,username,initials,kind,filter,count,filename,card_ids,stored,batch_label,people,listed_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                             (now, user["username"], user["initials"], kind, status, len(msel), fn, json.dumps([x["id"] for x in msel]), stored, blabel if batch else "",
-                             json.dumps(people_) if kind == "xlsx" and len(res) > 4 else None)).lastrowid
+                             json.dumps(people_) if kind == "xlsx" and len(res) > 4 else None,
+                             json.dumps(sorted({x["id"] for x in sel} | {x["id"] for x in msel})))).lastrowid
             for x in msel:   # v0.4.8 #1: only the cards really in the file are marked exported
                 m = curm.get(x["id"]) or {}
                 c.execute("INSERT INTO card_meta(card_id) VALUES(?) ON CONFLICT(card_id) DO NOTHING", (x["id"],))
