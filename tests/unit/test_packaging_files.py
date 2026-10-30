@@ -70,6 +70,17 @@ def test_release_permissions_version_check_and_pins():
     assert "sign.ps1" in text and "sign_notarize.sh" in text
 
 
+def test_release_waits_for_green_ci():
+    """v0.4.11: 0.4.5-0.4.10 were released while CI was red (pip-audit). Every build job needs `check`, and `check` only
+    passes a tag whose commit has a successful ci.yml run."""
+    text, wf = _workflow("release.yml")
+    chk = wf["jobs"]["check"]
+    assert chk["permissions"] == {"contents": "read", "actions": "read"}
+    gate = next(st for st in chk["steps"] if st.get("name") == "CI is green for the tagged commit")
+    assert gate["if"] == "github.ref_type == 'tag'" and "workflows/ci.yml/runs?head_sha=$GITHUB_SHA" in gate["run"] and '= success' in gate["run"]
+    for name in ("windows", "macos"): assert wf["jobs"][name]["needs"] == "check"
+
+
 def test_docker_images_use_the_lock_and_ship_what_the_app_reads():
     for df in ("Dockerfile", "Dockerfile.space"):
         t = code(read(df))

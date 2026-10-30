@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.11 (2026-10-30)
+
+### Security update
+- **Pillow 12.3.0 → 13.0.0.** Pillow opens every card photo (uploads, phone mode, PDF and HEIC pages). 12.3.0 has published vulnerabilities in its image decoders (the 2026-10 Pillow advisories, all fixed in 13.0.0). Versions 0.4.5 to 0.4.10 shipped with 12.3.0 because the release build did not wait for the CI security check; that is fixed too (a release now needs a green CI run for its commit).
+- Test tools: certifi 2026.10.23 (advisory fixed in 2026.10.18).
+- No other changes from 0.4.10; the help pages show 0.4.11 (the printable guides still say 0.4.10).
+
 ## v0.4.10 (2026-10-28)
 
 ### Windows fix
