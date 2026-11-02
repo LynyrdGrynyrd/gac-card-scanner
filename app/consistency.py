@@ -2,7 +2,7 @@
 that disagree lower it and get a plain-language flag the reviewer sees. Never changes field values.
   - email domain  vs website domain     (same -> both more trustworthy; near-identical -> probably an OCR typo)
   - email domain  vs company name       (company words in the domain -> company more trustworthy)
-  - email local part vs person's name   (jane.doe@ vs "Jane Doe")
+  - email local part vs person's name   (jane.doe@ vs "Jane Doe"; one letter off -> probably an OCR misread of the email)
   - phone area code vs address state    (330 = Ohio vs "Akron, OH 44308")"""
 import re, functools
 from difflib import SequenceMatcher
@@ -34,6 +34,11 @@ def lost_dot(ed, web):
 def _core(d): return d.rsplit(".", 1)[0] if "." in d else d       # acme-widgets.com -> acme-widgets
 def _alpha(s): return re.sub(r"[^a-z]", "", (s or "").lower())
 def _sim(a, b): return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+def _one_swap(a, b):
+    """Same length and one letter replaced or two neighbours swapped (an inserted middle initial is not a misread)."""
+    if len(a) != len(b) or a == b: return False
+    d = [i for i in range(len(a)) if a[i] != b[i]]
+    return len(d) == 1 or (len(d) == 2 and d[1] == d[0] + 1 and a[d[0]] == b[d[1]] and a[d[1]] == b[d[0]])
 
 def address_state(addr):
     if not addr: return None
@@ -91,15 +96,25 @@ def check(f):
     # 3. email local part vs name
     fn, ln = _alpha(f.get("first_name")), _alpha(f.get("last_name"))
     if emails and (fn or ln):
-        hits = 0; personal = 0
+        hits = 0; personal = 0; near = None
+        # v0.4.13 (real cards): one letter off a full name pattern ("jsmlth@" for John Smith) is the classic OCR misread of
+        # the email, so it lowers the email instead of counting as a match (the 0.8 similarity below passed it at 0.97). Same
+        # test as plausibility's email_name hint; skipped when the name has digits (then the name is the misread part).
+        full = {fn + ln, fn[:1] + ln, ln + fn[:1], ln + fn} if fn and ln and not re.search(r"\d", f"{f.get('first_name') or ''}{f.get('last_name') or ''}") else set()
         for e in emails:
             lp = e.split("@", 1)[0].lower(); la = _alpha(lp)
             if la in GENERIC or not la: continue
             personal += 1
+            if la not in full | {fn, ln, fn + ln[:1]} and any(len(p) >= 5 and _one_swap(la, p) for p in full):
+                near = near or e; continue
             if (len(ln) >= 3 and ln in la) or (len(fn) >= 3 and fn in la) or (fn and ln and la in (fn[0] + ln, fn + ln[0], ln + fn[0])) \
                or max(_sim(la, fn + ln), _sim(la, fn[:1] + ln), _sim(la, ln)) >= 0.8:
                 hits += 1
-        if hits:
+        if near:
+            if conf.get("emails") is not None: conf["emails"] = min(conf["emails"], 0.45)
+            flags.append({"code": "email_name_typo", "fields": ["emails"], "text": f"Email “{near}” is one letter off the name “{f.get('first_name','')} {f.get('last_name','')}”: one may be misread"})
+            notes["email_name"] = "near"
+        elif hits:
             _adj(conf, "name", +0.1); _adj(conf, "emails", +0.05); notes["email_name"] = "match"
         elif personal and re.search(r"[a-z]{2,}[._-][a-z]{2,}", emails[0].split("@")[0].lower()):
             # looks like firstname.lastname@ but matches neither name -> name or email is probably misread
