@@ -56,8 +56,9 @@ In Claude Code cloud sessions `.claude/hooks/session-start.sh` installs Tesserac
   `bench/extract_eval_set.py --data-dir <data folder>` (read-only; writes to the app's corrections folder, covered by
   retention) and score it with `bench/eval_bench.py <out>/gt.json <out> --show`.
 - `OSS-SURVEY.md` lists what was tried and rejected (PP-OCRv5, docTR, usaddress, probablepeople, rembg, Splink, GLiNER)
-  with numbers. Its 2026-10-15 re-check found RapidOCR 3.x + PP-OCRv6 small clearly better on synthetic cards (not yet
-  adopted: needs a real-card check and the opencv-headless conflict solved).
+  with numbers. Its 2026-10-15 re-check led to RapidOCR 3.x + PP-OCRv6 small (adopted: `app/ocr.py` passes the bundled
+  model paths so it never downloads; only `opencv-python-headless` is installed). Not yet confirmed on real cards: do
+  that before the next release (see CHANGELOG).
 - `tests/synth2` is a development set: the same generator with other seeds scores ~20 fields lower. Check a parser
   change on freshly generated cards too, not only on synth2.
 
