@@ -1,6 +1,6 @@
 # GAC Card Scanner: container image (CPU only, everything local).
 # python:3.12-slim pinned by digest (Dependabot proposes updates); keep in step with Dockerfile.space
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng libglib2.0-0 libgomp1 libgl1 curl \
     && rm -rf /var/lib/apt/lists/*
