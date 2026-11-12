@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### New text detector (PP-OCRv6)
+> **Before releasing:** a 38-card real check found a small, unproven gain (+6 of 380 fields with the AI) and two to three new
+> confident mistakes. Re-run `bench/extract_eval_set.py` + `bench/eval_bench.py` on about 50 more approved pilot cards first:
+> ship only with no new confident mistakes and no loss. Every other number below is from synthetic cards.
+
+- **Card reading uses a newer text detector:** RapidOCR 3.10 with the PP-OCRv6 small models, replacing rapidocr-onnxruntime 1.2.3 (last released in 2023). On synthetic test cards it reads 15-16 more fields out of 480 (93% → 97% on two sets it was not tuned on), at about 1.7 seconds more per card.
+- Still fully offline: the models ship inside the app, and the scanner never lets the library download anything (a test checks this).
+- The desktop app is slightly smaller (it now uses the OpenCV build without a GUI toolkit).
+
 ### Fixes
 - **An email misread by one letter is no longer marked as sure.** On a real card, a "d" before the @ was read as "c" and the email went out at 97 % with no warning: the check against the person's name counted "one letter off" as a match. Now an email one letter off the name (or with two neighbouring letters swapped) is flagged "Check" with "one may be misread", and an email the AI read differently at the same address is no longer marked as sure either. A middle initial in the email is still a match.
 

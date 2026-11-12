@@ -3,7 +3,7 @@ Surveyed 2026-10-13. Stars / last push / license come from the GitHub REST API o
 **Fit** = how well it matches this project (CPU-only, local, Python, small office pilot). **Rec** = adopt / try / skip.
 Benchmark numbers come from `bench/` (26 real cards × 10 fields, plus 48 synth2 cards). Full logs are in ITERATIONS.md, iteration 10.
 
-> **Re-checked 2026-10-15** on `main` after the audit fixes: see [Re-check 2026-10-15](#re-check-2026-10-15) at the end. One recommendation changed: RapidOCR 3.x with its new default **PP-OCRv6 small** models is worth adopting after a real-card check.
+> **Re-checked 2026-10-15** on `main` after the audit fixes: see [Re-check 2026-10-15](#re-check-2026-10-15) at the end. One recommendation changed: RapidOCR 3.x with its new default **PP-OCRv6 small** models. **Adopted** in `app/ocr.py` (rapidocr 3.10, bundled models only); confirm on real cards before the next release.
 
 **License policy (from the user, 2026-10-13):** this is an internal tool, so GPL/AGPL components are acceptable but are flagged ⛔ here and in THIRD-PARTY-NOTICES.md.
 **License key:** ✅ permissive (MIT/Apache/BSD/Unlicense). ⚠️ weak copyleft (LGPL/MPL): OK as an unmodified dependency, but keep notices. ⛔ strong copyleft (GPL/AGPL), no license, or non-commercial model weights: do not bundle.
@@ -162,7 +162,7 @@ against **467** on synth2: the rules are partly tuned to synth2's exact cards. T
 | Candidate | tests/cards | synth2 | synth3 (held-out) | synth4 (held-out) | Time | Decision |
 |---|---|---|---|---|---|---|
 | baseline: rapidocr-onnxruntime 1.2.3 (PP-OCRv4) | 108/108 | 467/480 | 446 | 447 | median 4.4 s/card | — |
-| **rapidocr 3.10.0, default PP-OCRv6 small det+rec** | 108 | **476** (+9) | **464** (+18) | **464** (+17) | median 5.9 s/card | **adopt after a real-card check** |
+| **rapidocr 3.10.0, default PP-OCRv6 small det+rec** | 108 | **476** (+9) | **464** (+18) | **464** (+17) | median 5.9 s/card | **adopted** (confirm on real cards before release) |
 | rapidocr 3.10.0, PP-OCRv6 tiny | — | 464 (−3) | 453 (+7) | 446 (−1) | 3.8 s/card | no (mixed) |
 | rapidocr 3.10.0, PP-OCRv5 mobile (+ EN rec) | — | 453 (−14) / 460 (−7) | — | — | 5.0 s/card | skip (confirms the survey) |
 | usaddress 0.5.16 (trim, city rescue, street rescue) | 0 | 0 | 0 / +4* | 0 | <1 ms | skip (*rule designed on synth3's misses) |
