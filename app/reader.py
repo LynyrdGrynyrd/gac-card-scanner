@@ -78,6 +78,9 @@ def _call(args, data, key=None, mem_mb=None, timeout=None):
         if killed: raise ReaderError(CALM)
         if p.returncode != 0:
             if p.returncode == -9 and key and key in CANCELLED: raise ReaderError("Cancelled.")
+            # v0.4.13: the reader's own error goes to the app log (it is never shown to the user)
+            try: sys.stderr.write(f"[reader] {args[0]} exited {p.returncode}: {(se or '')[-1500:]}\n")
+            except Exception: pass
             raise ReaderError(CALM)
         try:
             if os.path.exists(res_f):
