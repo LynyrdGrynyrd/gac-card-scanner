@@ -1,10 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.4.13 (2026-11-11)
 
-### Fixes
+### Fewer wrong details marked as sure
 - **An email misread by one letter is no longer marked as sure.** On a real card, a "d" before the @ was read as "c" and the email went out at 97 % with no warning: the check against the person's name counted "one letter off" as a match. Now an email one letter off the name (or with two neighbouring letters swapped) is flagged "Check" with "one may be misread", and an email the AI read differently at the same address is no longer marked as sure either. A middle initial in the email is still a match.
 - **A website missing its first word is no longer marked as sure.** On a real card, a web address printed with a space in it ("Northfield College.edu"-style) was read without its first word, and went out at 95 % because the email domain ended with the same letters. Now it is flagged "Check" with "may be missing its start". The same happens when the AI read the longer address, or when a word sits between "http://" or "www." and the address. Nothing is changed for the reviewer to undo.
+
+### Docs
+- Help pages, printable guides and the demo video are remade for 0.4.13. The guides and demo video are attached to this release.
 
 ## v0.4.12 (2026-10-30)
 
