@@ -153,6 +153,11 @@ def merge(f, v, ocr_text):
     if not f.get("website") and re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(/\S*)?", vw) and _n(vw.split("/")[0]) in _n(no_mail) and not P.SOCIAL.search(vw) \
             and _n(ocr_text).count(_n(vw.split("/")[0])) > sum(e.lower().endswith("@" + vw.split("/")[0]) for e in f.get("emails", [])):
         f["website"] = g("website").lower(); src["website"] = "vlm"; conf["website"] = 0.6
+    elif f.get("website") and vw and conf.get("website") is not None:
+        # v0.4.13 (real cards): the AI read a longer address that ends with the rules' one ('northfield.edu' vs
+        # 'field.edu'): the rules' website probably lost its first word, so it is not "sure"
+        from .consistency import cut_front, _dom
+        if cut_front(vw.split("/")[0], _dom(f["website"])): conf["website"] = min(conf["website"], 0.5)
     f["confidence"] = conf; f["vlm_fields"] = src
     vals = [x for x in conf.values() if x is not None]
     f["overall_confidence"] = round(min(sum(vals) / len(vals), min(vals) + 0.25), 2) if vals else 0.0

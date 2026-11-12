@@ -31,6 +31,15 @@ def reg(d):
 def lost_dot(ed, web):
     """Round 22: 'firestoneparkhardwexample.com' is 'firestoneparkhardw.example.com' with a dot lost."""
     return len(web) >= 6 and ed != web and (ed.endswith(web) and not ed.endswith("." + web) or ed.replace(".", "") == web.replace(".", ""))
+def cut_front(ed, web):
+    """v0.4.13 (real cards): website 'field.edu' when the email says 'northfield.edu' lost its first word (the card
+    printed 'North Field.edu' with a space). Not a cut when the email itself looks like a lost dot ('…hardwexample.com',
+    '…comexample.com'): that email is blocked on its own and the website is then the right one."""
+    re_, rw = reg(ed), reg(web)
+    if not rw or re_ == rw or not re_.endswith(rw) or re_.endswith("." + rw): return False
+    pre = re_[:-len(rw)]
+    if "." in pre or len(pre) < 2 or len(rw.split(".")[0]) < 2: return False
+    return not (re.search(r"(com|net|org)$", pre) or (len(pre) >= 8 and not re.search(r"[aeiouy]", pre[-3:])))
 def _core(d): return d.rsplit(".", 1)[0] if "." in d else d       # acme-widgets.com -> acme-widgets
 def _alpha(s): return re.sub(r"[^a-z]", "", (s or "").lower())
 def _sim(a, b): return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
@@ -78,7 +87,12 @@ def check(f):
     if biz and web:
         best = max(biz, key=lambda d: _sim(_core(d), _core(web)))
         s = _sim(_core(best), _core(web))
-        if best == web or best.endswith("." + web) or web.endswith("." + best) or reg(best) == reg(web) or lost_dot(best, web):
+        cut = next((d for d in biz if cut_front(d, web)), None)
+        if cut and not any(d == web or reg(d) == reg(web) for d in biz):
+            if conf.get("website") is not None: conf["website"] = min(conf["website"], 0.45)
+            flags.append({"code": "website_cut", "fields": ["website"], "text": f"Website “{web}” may be missing its start: the email says “{cut}”"})
+            notes["email_web"] = "cut"
+        elif best == web or best.endswith("." + web) or web.endswith("." + best) or reg(best) == reg(web) or lost_dot(best, web):
             _adj(conf, "emails", +0.1); _adj(conf, "website", +0.1); notes["email_web"] = "match"
         elif s >= 0.75:
             _adj(conf, "emails", -1, floor=0.45); conf["emails"] = min(conf.get("emails") or 0.45, 0.45) if conf.get("emails") is not None else None
