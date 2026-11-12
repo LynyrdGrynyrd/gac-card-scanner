@@ -94,6 +94,8 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
             if k in pre and conf.get(k) == x: conf[k] = pre[k]
         consistency.apply(f); plausibility.apply(f)
     mark_read_changes(f, r["text"])
+    if os.getenv("SURE_CHECK", "1") == "1":   # v0.4.15: fields the card does not back up are not "sure" (values untouched)
+        from . import surecheck; surecheck.apply(f, r["text"])
     try:
         from . import boxes; f["boxes"] = boxes.locate(f, lines0)   # v0.4 tap-to-zoom (display only)
     except Exception: f["boxes"] = {}
