@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fewer wrong details marked as sure
+- **Details the card doesn't back up are flagged "Check" instead of marked sure.** In a test on 441 cards (real and made-up), the AI often filled in a department on cards that have none, picked up a person's name on company-only cards, or ran a phone number or directions into the address, and these went out as sure. Now these are flagged "Check":
+  - a department that is part of the title line, starts with a job title, or (on cards with no email or website) is a trade line rather than a department,
+  - a name that is printed only in the email, doesn't look like a person's name, or comes from a company line or a line with two people,
+  - an address that has a phone number, directions ("between ...", "near ...") or two addresses run together,
+  - a company that is a web address or just the person's own name.
+- Nothing is changed or removed: the same details are filled in, only fewer of them are marked sure.
+
 ## v0.4.14 (2026-11-12)
 
 - **The Apple-silicon Mac installer is back.** GitHub retired the Mac build machine it used, and on the new one the built-in text reader (Tesseract) would not start. Tesseract is now built into the app as one program for macOS 14 or newer. Intel Macs need macOS 15. No changes to how cards are read.
