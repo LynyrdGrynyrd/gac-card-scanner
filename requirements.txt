@@ -1,15 +1,15 @@
 # GAC Card Scanner: runtime dependencies (ranges). Install the tested, fully pinned set instead:  pip install -r requirements.lock.txt
 # Regenerate the lock after changing this file:  uv pip compile requirements.txt --universal --python-version 3.12 -o requirements.lock.txt
-fastapi>=0.110
+fastapi>=0.162.2
 uvicorn>=0.29
-python-multipart>=0.0.9
+python-multipart>=0.0.33
 pytesseract>=0.3.10
-phonenumbers>=8.13
+phonenumbers>=9.0.43
 pillow>=13.0           # 13.0 fixes the 2026-10 image-decoder advisories (pip-audit); card photos come from outside
 openpyxl>=3.1
 numpy>=1.26
 opencv-python>=4.8       # NOT the -headless build: rapidocr-onnxruntime depends on opencv-python, and having both installs two packages that overwrite each other's cv2/ folder
-onnxruntime>=1.17
+onnxruntime>=1.31.1
 rapidocr-onnxruntime>=1.2.3
 zxing-cpp>=2.2
 cryptography>=42
@@ -17,4 +17,4 @@ rapidfuzz>=3.0
 qrcode>=7.4              # phone mode pairing QR code (app/phone.py)
 gender-guesser>=0.4.0   # GPL-3.0: first-name lexicon used by app/parser.py (see THIRD-PARTY-NOTICES.md)
 pillow-heif>=0.18     # round 18: HEIC/HEIF input. BSD-3 bindings; binary wheel bundles LGPL-3 libheif/libde265 + GPL-2 x265 (THIRD-PARTY-NOTICES.md)
-pypdfium2>=4.30       # round 18: PDF input (PDFium; Apache-2.0/BSD-3). No JavaScript/forms are run.
+pypdfium2>=5.15.0       # round 18: PDF input (PDFium; Apache-2.0/BSD-3). No JavaScript/forms are run.
