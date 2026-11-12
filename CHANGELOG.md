@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.14 (2026-11-12)
+
+- **The Apple-silicon Mac installer is back.** GitHub retired the Mac build machine it used, and on the new one the built-in text reader (Tesseract) would not start. Tesseract is now built into the app as one program for macOS 14 or newer. Intel Macs need macOS 15. No changes to how cards are read.
+- Help pages, printable guides and the demo video are remade for 0.4.14. The guides and demo video are attached to this release.
+
 ## v0.4.13 (2026-11-11)
 
 ### Fewer wrong details marked as sure

@@ -8,7 +8,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
-**Current version: 0.4.13.** An email one letter off, or a website missing its first word, is now marked "Check" instead of sure. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
+**Current version: 0.4.14.** The Apple-silicon Mac installer is back, with Tesseract built in. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
 
 **Live demo:** a public demo on Hugging Face Spaces (synthetic cards only) is planned; its link will be added here when it is published. Until then you can run the same demo mode locally (see [Public demo](#public-demo)).
 
@@ -45,7 +45,7 @@ To uninstall: Settings → Apps → GAC Card Scanner → Uninstall. Your cards s
 2. The first time only: in Applications, **right-click (Control-click) the app → Open → Open**. (The app isn't notarized by Apple yet.) If macOS only offers *Move to Trash*, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
 3. The scanner opens in its own window. The first time, create the admin account.
 
-Your data lives in `~/Library/Application Support/GAC Card Scanner`. Requires macOS 14 (Sonoma) or newer.
+Your data lives in `~/Library/Application Support/GAC Card Scanner`. Requires macOS 14 (Sonoma) or newer; Intel Macs need macOS 15 (Sequoia).
 
 ### Optional: AI double-check
 In the app: **Admin → Settings → Download AI helper (3 GB)**. It downloads llama.cpp and the Qwen3-VL-4B model (Apache-2.0) from GitHub/Hugging Face, checks their SHA-256 checksums, and runs them locally next to the app (127.0.0.1:8090). Scanning works fine without it; the AI helper re-reads uncertain cards in the background. A computer with 8 GB+ RAM is recommended.
