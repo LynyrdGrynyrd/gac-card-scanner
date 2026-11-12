@@ -8,7 +8,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
-**Current version: 0.4.14.** The Apple-silicon Mac installer is back, with Tesseract built in. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
+**Current version: 0.4.15.** A department, name, address or company the card doesn't clearly show is now marked "Check" instead of sure. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
 
 **Live demo:** a public demo on Hugging Face Spaces (synthetic cards only) is planned; its link will be added here when it is published. Until then you can run the same demo mode locally (see [Public demo](#public-demo)).
 

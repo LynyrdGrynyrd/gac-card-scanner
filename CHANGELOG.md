@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.15 (2026-11-12)
 
 ### Fewer wrong details marked as sure
 - **Details the card doesn't back up are flagged "Check" instead of marked sure.** In a test on 441 cards (real and made-up), the AI often filled in a department on cards that have none, picked up a person's name on company-only cards, or ran a phone number or directions into the address, and these went out as sure. Now these are flagged "Check":
@@ -9,6 +9,10 @@
   - an address that has a phone number, directions ("between ...", "near ...") or two addresses run together,
   - a company that is a web address or just the person's own name.
 - Nothing is changed or removed: the same details are filled in, only fewer of them are marked sure.
+- To turn this off, start the scanner with `SURE_CHECK=0`.
+
+### Docs
+- Help pages, printable guides, training deck, cheat sheet and the demo video are remade for 0.4.15. The guides and demo video are attached to this release.
 
 ## v0.4.14 (2026-11-12)
 
