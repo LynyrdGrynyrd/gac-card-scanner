@@ -14,7 +14,9 @@ datas = [(os.path.join(ROOT, "app", "static"), "app/static"),
 if os.path.isfile(os.path.join(ROOT, "COMMIT")):   # written by the release workflow; app/updates.py reads it (no .git in a bundle)
     datas.append((os.path.join(ROOT, "COMMIT"), "."))
 tess = os.path.join(ROOT, "packaging", "build", "tesseract")
-if os.path.isdir(tess): datas.append((tess, "tesseract"))
+# v0.4.14: on macOS the folder is copied into the finished .app below instead, so PyInstaller never rewrites the binary's
+# library paths (it pointed the Homebrew build at OpenCV's older libtesseract and OCR crashed on Apple silicon)
+if os.path.isdir(tess) and sys.platform != "darwin": datas.append((tess, "tesseract"))
 else: print("WARNING: packaging/build/tesseract missing: the bundle will rely on a system Tesseract")
 for pkg in ("gender_guesser", "rapidocr_onnxruntime", "phonenumbers", "zxingcpp", "webview"):
     try: datas += collect_data_files(pkg)
@@ -41,3 +43,14 @@ if sys.platform == "darwin":
     app = BUNDLE(coll, name=NAME + ".app", icon=icon, bundle_identifier="org.gac.cardscanner",
                  version=os.environ.get("GAC_VERSION", "0.0.0"),
                  info_plist={"LSUIElement": False, "NSHighResolutionCapable": True, "CFBundleShortVersionString": os.environ.get("GAC_VERSION", "0.0.0")})
+    # v0.4.14: Tesseract goes in as is: the binary in Contents/Frameworks/tesseract (next to the app's other code, where the
+    # launcher looks), its language data and licence texts in Contents/Resources/tesseract with links back (PyInstaller's layout)
+    if os.path.isdir(tess):
+        import shutil
+        C = os.path.join(DISTPATH, NAME + ".app", "Contents")
+        fw, rs = os.path.join(C, "Frameworks", "tesseract"), os.path.join(C, "Resources", "tesseract")
+        shutil.rmtree(fw, ignore_errors=True); shutil.rmtree(rs, ignore_errors=True); os.makedirs(fw); os.makedirs(rs)
+        shutil.copy2(os.path.join(tess, "tesseract"), os.path.join(fw, "tesseract"))
+        for sub in ("tessdata", "licenses"):
+            shutil.copytree(os.path.join(tess, sub), os.path.join(rs, sub))
+            os.symlink(os.path.join("..", "..", "Resources", "tesseract", sub), os.path.join(fw, sub))
