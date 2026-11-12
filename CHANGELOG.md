@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- **An email misread by one letter is no longer marked as sure.** On a real card, a "d" before the @ was read as "c" and the email went out at 97 % with no warning: the check against the person's name counted "one letter off" as a match. Now an email one letter off the name (or with two neighbouring letters swapped) is flagged "Check" with "one may be misread", and an email the AI read differently at the same address is no longer marked as sure either. A middle initial in the email is still a match.
+
 ## v0.4.12 (2026-10-30)
 
 ### Fixes from a review of the 0.4 changes (data and privacy)
