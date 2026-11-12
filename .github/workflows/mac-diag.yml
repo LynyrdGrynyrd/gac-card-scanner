@@ -1,0 +1,52 @@
+name: mac-diag (temporary)
+on:
+  push:
+    branches: ["ci/mac-arm-runner"]
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      PYTHON_VERSION: "3.12"
+      PYINSTALLER_VERSION: "6.22.3"
+      PYINSTALLER_HOOKS_VERSION: "2026.8"
+      PYWEBVIEW_VERSION: "6.2.1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: sw_vers; uname -m; xcodebuild -version || true; brew --version
+      - run: echo 0.0.0-diag > VERSION; git rev-parse --short HEAD > COMMIT
+      - run: pip install -r requirements.lock.txt "pyinstaller==$PYINSTALLER_VERSION" "pyinstaller-hooks-contrib==$PYINSTALLER_HOOKS_VERSION" "pywebview==$PYWEBVIEW_VERSION"
+      - run: bash packaging/macos/bundle_tesseract.sh
+      - name: diag before PyInstaller
+        run: |
+          D=packaging/build/tesseract
+          brew info tesseract | head -5
+          for f in "$D/tesseract" "$D"/libs/*.dylib; do echo "== $f"; vtool -show-build "$f" | grep -E "minos|sdk"; done
+          nm -gU "$D/libs/libtesseract.5.dylib" | grep -c GetDetector || true
+          ls -la "$D/libs"
+      - run: pyinstaller packaging/gac.spec --noconfirm
+      - name: diag after PyInstaller
+        if: always()
+        run: |
+          A="dist/GAC Card Scanner.app/Contents"
+          find "$A" -name 'libtesseract*' -exec ls -la {} \;
+          find "$A" -path '*tesseract*' -maxdepth 4 | head -50
+          T=$(find "$A/Frameworks" -name tesseract -type f | head -1); echo "binary: $T"; ls -la "$(dirname "$T")"
+          otool -L "$T"
+          for f in $(find "$A" -name 'libtesseract*'); do echo "== $f"; vtool -show-build "$f" | grep -E "minos|sdk"; nm -gU "$f" | grep -c GetDetector || true; shasum "$f"; done
+          shasum packaging/build/tesseract/libs/libtesseract.5.dylib
+          TESSDATA_PREFIX="$(dirname "$T")/tessdata" DYLD_PRINT_LIBRARIES=1 "$T" --version 2>&1 | head -40 || true
+      - run: codesign --force --deep --sign - "dist/GAC Card Scanner.app"
+      - name: diag after codesign
+        if: always()
+        run: |
+          A="dist/GAC Card Scanner.app/Contents"; T=$(find "$A/Frameworks" -name tesseract -type f | head -1)
+          TESSDATA_PREFIX="$(dirname "$T")/tessdata" "$T" --version 2>&1 | head -10 || true
+      - run: python packaging/smoke_test.py "dist/GAC Card Scanner.app/Contents/MacOS/GAC Card Scanner"
