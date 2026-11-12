@@ -188,6 +188,7 @@ def parse(text: str, meta=None) -> dict:
         for s_ in SOCIAL.findall(l):
             if "@" in s_ and EMAIL.search(l) and not re.search(r":\s*@", l): continue
             f["social"].append(s_.strip()); used.add(i)
+    web_cut = False
     for i, l in enumerate(lines):
         lc = SOCIAL.sub("", EMAIL.sub("", l))
         m = URL.search(lc)
@@ -196,8 +197,10 @@ def parse(text: str, meta=None) -> dict:
                 and not (host.rsplit(".", 1)[-1].islower() or host.isupper()): continue   # audit 2026-10: 'No.Kidding'-style words are not sites
         if m and not f["website"] and (re.match(r"(https?://|www\.)", m.group(0), re.I) or re.search(r"\.(com|org|net|edu|gov|io|co|us|biz|info)\b", m.group(0), re.I) or len(m.group(0).split(".")[0]) >= 4):
             f["website"] = re.sub(r"/$", "", m.group(0).lower()); used.add(i)
+            # v0.4.13 (real cards): 'http://North Field.edu' -> the address starts one word earlier than the match
+            web_cut = bool(re.search(r"(?:https?:\s*//\s*|www\.\s*)[a-z0-9-]+\s+$", lc[:m.start()], re.I)) and not re.match(r"(https?://|www\.)", m.group(0), re.I)
     conf["emails"] = 0.95 if f["emails"] else 0
-    conf["website"] = 0.85 if f["website"] else 0
+    conf["website"] = (0.45 if web_cut else 0.85) if f["website"] else 0
     f["phones"] = _phones(lines, used)
     conf["phones"] = 0.9 if f["phones"] and all(p["valid"] for p in f["phones"]) else (0.5 if f["phones"] else 0)
     # labels. A label sharing its line with the address ("Mailing address: PO Box 12") counts like a label on its own line:
