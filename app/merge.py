@@ -113,6 +113,14 @@ def merge(f, v, ocr_text):
     if not f.get("emails") and ve:
         ok = [e for e in ve if support(e, ocr_text) >= 0.6]
         if ok: f["emails"] = ok; src["emails"] = "vlm"; conf["emails"] = 0.6
+    elif ve and conf.get("emails") is not None:
+        # v0.4.13 (real cards): the rules' email is kept, but when the AI read the same address with a letter or two
+        # different (same domain), one of them misread it: not "sure" (an OCR 'd' read as 'c' went out at 0.97)
+        have_e = {e.lower() for e in f["emails"]}
+        for e in f["emails"]:
+            lp, _, d = e.lower().partition("@")
+            if any(x not in have_e and x.endswith("@" + d) and SequenceMatcher(None, lp, x.split("@")[0]).ratio() >= 0.75 for x in ve):
+                conf["emails"] = min(conf["emails"], 0.5); break
     od = re.sub(r"\D", "", ocr_text)
     have = {re.sub(r"\D", "", p["number"])[-7:] for p in f.get("phones", [])}
     TYPES = {"cell": "mobile", "cellular": "mobile", "mobile": "mobile", "fax": "fax", "home": "home", "work": "work", "office": "work", "phone": "work", "tel": "work"}
