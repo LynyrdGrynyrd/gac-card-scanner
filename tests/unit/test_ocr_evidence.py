@@ -46,6 +46,18 @@ def test_boundary_needs_two_readers_and_retains_original_box():
     assert not unknown["emails"]
 
 
+def test_second_email_requires_separate_printed_address_and_domain():
+    personal = "jane@example.org"
+    role = {"readings": ["infoaexample.org", "info@example.org"]}
+    fields = {"emails": [personal], "confidence": {"emails": 0.95}}
+    email_evidence.apply(fields, [role], [], "example.org")
+    assert fields["emails"] == [personal]
+    fields["confidence"]["emails"] = 0.95
+    email_evidence.apply(fields, [{"readings": [personal, personal]}, role], [], "example.org")
+    assert fields["emails"] == [personal, "info@example.org"]
+    assert fields["confidence"]["emails"] < 0.6
+
+
 def test_disputed_readings_never_replace_vcard(monkeypatch):
     monkeypatch.setattr(ocr, "run_ocr", lambda data, engine: {
         "engine": "test", "text": "Maria Delgado\nmaria@example.org",

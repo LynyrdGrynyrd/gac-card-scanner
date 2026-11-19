@@ -66,7 +66,8 @@ def apply(fields, full, cropped, text):
     domains = {m.group(1).casefold() for line in text.splitlines()
                if (m := DOMAIN_LINE.fullmatch(line.strip()))}
     evidence = []
-    for group in _groups(full or [], cropped or []):
+    groups = _groups(full or [], cropped or [])
+    for group in groups:
         reads = group["reads"]
         sets = [_addresses(t) for t in reads]
         choices = set.union(*sets)
@@ -84,18 +85,24 @@ def apply(fields, full, cropped, text):
                     re.sub(r"\s+", ".", t.casefold().split("@")[0].strip()) == s.split("@")[0] for t in reads if "@" in t)]
                 if len(with_dot) == 1:
                     fields["emails"] = with_dot
-        if not fields.get("emails") or (fields.get("confidence", {}).get("emails") or 0) < 0.6:
-            supported = []
-            for addr in choices:
-                local, domain = addr.rsplit("@", 1)
-                others = [re.sub(r"\s+", "", t).casefold() for t, values in zip(reads, sets, strict=True) if addr not in values]
-                boundary = any(re.fullmatch(re.escape(local) + r"[^@\s]?" + re.escape(domain), t) for t in others)
-                if domain in domains and (sum(addr in values for values in sets) >= 2 or boundary):
-                    supported.append(addr)
-            if len(supported) == 1 and len(fields.get("emails") or []) <= 1:
-                existing = fields.get("emails") or []
-                if not existing or _similar(existing[0], supported[0]) >= 0.72:
-                    fields["emails"] = supported
+        supported = []
+        for addr in choices:
+            local, domain = addr.rsplit("@", 1)
+            others = [re.sub(r"\s+", "", t).casefold() for t, values in zip(reads, sets, strict=True) if addr not in values]
+            boundary = any(re.fullmatch(re.escape(local) + r"[^@\s]?" + re.escape(domain), t) for t in others)
+            if domain in domains and (sum(addr in values for values in sets) >= 2 or boundary):
+                supported.append(addr)
+        if len(supported) == 1 and supported[0] not in (fields.get("emails") or []):
+            addr = supported[0]
+            existing = fields.get("emails") or []
+            # A card can carry both a personal and an office mailbox. Add an address
+            # only if every address we would retain is printed on a separate line.
+            elsewhere = {email for other in groups if other is not group
+                         for read in other["reads"] for email in _addresses(read)}
+            if not existing or (not choices.intersection(existing) and all(e in elsewhere for e in existing)):
+                fields["emails"] = [*existing, addr]
+            elif len(existing) == 1 and (fields.get("confidence", {}).get("emails") or 0) < 0.6 and _similar(existing[0], addr) >= 0.72:
+                fields["emails"] = [addr]
         evidence.append({"readings": list(dict.fromkeys(reads)), "box": group["box"]})
     if evidence:
         fields["email_evidence"] = evidence
