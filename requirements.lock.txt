@@ -22,7 +22,7 @@ numpy==2.5.4              # via onnxruntime, opencv-python, rapidocr-onnxruntime
 onnxruntime==1.31.0       # via rapidocr-onnxruntime, -r requirements.txt
 opencv-python==5.0.0.93   # via rapidocr-onnxruntime, -r requirements.txt
 openpyxl==3.1.5           # via -r requirements.txt
-opentelemetry-api==1.45.1  # via fastapi
+opentelemetry-api==1.45.2  # via fastapi
 packaging==26.3           # via onnxruntime, pytesseract
 phonenumbers==9.0.41      # via -r requirements.txt
 pillow-heif==1.8.1        # via -r requirements.txt
