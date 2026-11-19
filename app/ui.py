@@ -2509,7 +2509,11 @@ def _update(cid, request, body, internal=False):
         changes = dict(changes); changes["note"] = {"from": c.get("note") or "", "to": note or ""}
     if changes: log(cid, rv, "edited", detail=changes)   # every edit has a history row (AI accepts too: from -> to)
     if st and st != c["status"]:
-        log(cid, rv, "decision", c["status"], st, {"override": body.get("override_reason")} if body.get("override_reason") else None)
+        detail = {"override": body["override_reason"]} if body.get("override_reason") else {}
+        review_ms = body.get("review_ms")
+        if not internal and st == "approved" and type(review_ms) is int and 0 < review_ms <= 86_400_000:
+            detail["review_ms"] = review_ms
+        log(cid, rv, "decision", c["status"], st, detail or None)
     if not internal: _ai_settle(cid, saved=True)
     if st in ("approved", "rejected") and meta(cid).get("needs_admin"): set_meta(cid, needs_admin=None)   # v0.4.6 #3: decided = handled
     out = card(cid, None if internal else request.state.user)   # (audit 2026-10 P2: a never-firing "stale after save" check was removed; the check under WRITE_LOCK above is the real one)

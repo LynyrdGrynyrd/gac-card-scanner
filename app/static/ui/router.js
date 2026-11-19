@@ -5,7 +5,7 @@ import {keepDraft} from "./core/store.js";
 import {ask} from "./ui/dialog.js";
 import {restoreBatch} from "./views/upload.js";
 import {Q, applyQueueState, loadQueue} from "./views/queue.js";
-import {openCard} from "./views/review.js";
+import {endReviewVisit, openCard} from "./views/review.js";
 import {exportInfo} from "./views/export.js";
 import {loadAdmin} from "./views/admin.js";
 
@@ -20,6 +20,7 @@ function route() {
   $$("nav a").forEach(a => { if (a.dataset.nav === (view === "review" ? "queue" : view)) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   if (view === "queue") { const before = Q.batch; applyQueueState(q); if (!(Q.loading && Q.loadingFor === (Q.batch ?? before) && before === Q.batch && Q.cardsFor === Q.batch)) loadQueue(); }   // round 15: a re-click of Review queue while this batch is already loading/shown is a no-op
   if (view === "review") openCard(+id);
+  else endReviewVisit();
   if (view === "export") { if (!SS.exportFrom) { const pv = route.prev, fb = pv === "upload" ? (S.B && S.B.id) : pv === "review" ? (S.cur && S.cur.batch) : pv === "queue" ? Q.batch : null; if (fb && fb !== "__none__") SS.exportFrom = fb; } exportInfo.picked = false; exportInfo.more = false; exportInfo(); }   // round 21: export the batch you came from
   if (view === "upload") restoreBatch();
   route.prev = view;

@@ -25,7 +25,8 @@ correction examples (<data folder>/corrections), so the app's photo retention an
 script refuses to write inside the git repository unless the folder is git-ignored (bench/corrections/ and bench/real/ are).
 """
 import argparse, json, os, shutil, sqlite3, subprocess, sys, time
-from collections import Counter
+from collections import Counter, defaultdict
+from statistics import median
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 GT_KEYS = ("first_name", "last_name", "title", "company", "department", "emails", "phones", "website", "address")   # = app/ui.py GT_KEYS
@@ -104,6 +105,11 @@ def card_record(c, m, h):
                                 "corrected_fields": changed, "card_id": c["id"], "saved": time.time()},
            "fields": {k: {"changed": k in changed, "by_ai": k in by_ai, "empty": not norm(k, f.get(k)) and not norm(k, machine.get(k)),
                           "conf": conf.get(CONF_KEY.get(k, k))} for k in GT_KEYS}}
+    if decisions and not decisions[-1].get("bulk"):
+        duration = decisions[-1].get("review_ms")
+        if type(duration) is int and 0 < duration <= 86_400_000:
+            rec["review_ms"] = duration
+            rec["engine"] = c.get("engine") or (f.get("sources") or {}).get("ocr") or "unknown"
     return None, rec
 
 
@@ -113,6 +119,12 @@ def report(recs, skipped, out=None):
     pr(f"Approved cards usable as test examples: {n}   (reviewed {cats['reviewed']}, bulk-approved {cats['bulk']}; "
        f"edited {cats['edited']}, unchanged {cats['unchanged']})")
     for why, k in skipped.most_common(): pr(f"  skipped {k}: {why}")
+    times = defaultdict(list)
+    for rec in recs:
+        if "review_ms" in rec:
+            times[rec["engine"]].append(rec["review_ms"] / 1000)
+    for engine, seconds in sorted(times.items()):
+        pr(f"Visible time on final approval visit ({engine}): median {median(seconds):.1f}s on {len(seconds)} timed cards")
     if not n: return {}
     pr("\nPer field: how often the approved value differs from what the scan produced (cards where the field is non-empty)")
     pr(f"  {'field':12s} {'cards':>5s} {'fixed':>6s} {'by AI':>6s} {'rate':>6s}   low-confidence (<{LOW}) among fixed / among kept")

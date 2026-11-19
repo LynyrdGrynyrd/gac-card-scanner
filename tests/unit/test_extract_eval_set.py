@@ -37,7 +37,7 @@ def test_extracts_edited_unchanged_and_bulk_cards(env, tmp_path, capsys):
     b = "ev-" + uuid.uuid4().hex[:6]
     edited = _card(ui, store, b)
     f = store.get(edited)["fields"] | {"title": "Chief Financial Officer"}
-    assert rev.post(f"/api/cards/{edited}", json={"fields": f, "status": "approved", "crm_action": "create_new"}).status_code == 200
+    assert rev.post(f"/api/cards/{edited}", json={"fields": f, "status": "approved", "crm_action": "create_new", "review_ms": 3200}).status_code == 200
     same = _card(ui, store, b)
     assert rev.post(f"/api/cards/{same}", json={"status": "approved", "crm_action": "create_new"}).status_code == 200
     bulk = _card(ui, store, b)
@@ -58,7 +58,9 @@ def test_extracts_edited_unchanged_and_bulk_cards(env, tmp_path, capsys):
     assert abs(os.path.getmtime(out / k) - os.path.getmtime(src)) < 2, "the copy keeps the photo's date"
     rep = json.load(open(out / "field_report.json"))
     assert rep["cards"] == 3 and rep["fields"]["title"]["fixed"] == 1 and rep["fields"]["title"]["cards"] == 3
-    assert "Approved cards usable as test examples: 3" in capsys.readouterr().out
+    report = capsys.readouterr().out
+    assert "Approved cards usable as test examples: 3" in report
+    assert "median 3.2s on 1 timed cards" in report
     assert pending not in by_id
 
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The scanner reads lines in batches and keeps both parts of a name recovered from a cropped photo.
+- When two OCR readings disagree about an email, the review form shows the readings and the matching part of the original photo when available.
+- A source-only PP-OCRv6 pilot and expanded benchmarks support comparing complete cards, missed warnings, scan speed, memory and time spent reviewing.
+
 ## v0.4.15 (2026-11-12)
 
 ### Fewer wrong details marked as sure

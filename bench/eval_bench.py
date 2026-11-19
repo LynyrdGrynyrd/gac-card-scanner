@@ -6,6 +6,8 @@ digits (a 10-digit US number equals its +1 form; other country codes must match)
 one-to-one, and photos missing from img_dir are counted and reported instead of silently skipped."""
 import argparse, json, os, re, sys, time, unicodedata
 from itertools import permutations
+from math import ceil
+from statistics import median
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 FIELDS = ["first_name","last_name","title","company","department","emails","phones","phone_types","website","address"]
@@ -55,7 +57,11 @@ def main(argv=None):
     ap.add_argument("--vlm", action="store_true"); ap.add_argument("--vlm-live", action="store_true")
     ap.add_argument("--min", action="append", default=[], metavar="FIELD=COUNT", help="fail when FIELD has fewer correct cards")
     ap.add_argument("--min-overall", type=float, metavar="PCT", help="fail when overall accuracy is below PCT percent")
+    ap.add_argument("--reader", action="store_true", help="use the same isolated OCR worker as an upload")
+    ap.add_argument("--require-complete", action="store_true", help="fail if any requested card could not be scored")
     a = ap.parse_args(argv)
+    if a.reader and (a.vlm or a.vlm_live):
+        ap.error("the upload reader uses OCR only")
     mins = {}
     for m in a.min:
         k, _, c = m.partition("=")
@@ -65,6 +71,9 @@ def main(argv=None):
     calib = {"wrong": 0, "wrong_flagged": 0, "right": 0, "right_flagged": 0}
     gt = json.load(open(a.gt)); tot = {f: [0,0] for f in FIELDS}; cats = {}; rows = []; t0 = time.time()
     missing, no_cache = [], []
+    durations, peaks = [], []
+    complete_cards = complete_contacts = false_sure = 0
+    from app.ui import hard_errors, low_fields
     for fn, g in gt.items():
         if a.only and fn not in a.only: continue
         if not os.path.isfile(os.path.join(a.img_dir, fn)): missing.append(fn); continue   # e.g. a correction photo removed by retention
@@ -73,11 +82,28 @@ def main(argv=None):
             cp = os.path.join(os.getenv("VLM_CACHE_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "vlm_cache"), fn + ".json")
             vr = json.load(open(cp)) if os.path.exists(cp) else None
             if vr is None and not a.vlm_live: no_cache.append(fn); continue
-        f = pipeline.scan(open(os.path.join(a.img_dir, fn), "rb").read(), use_vlm=a.vlm_live, vlm_result=vr)["fields"]
+        with open(os.path.join(a.img_dir, fn), "rb") as photo:
+            data = photo.read()
+        started = time.perf_counter()
+        if a.reader:
+            from app import reader
+            profile = {}
+            f = reader.run_ocr(data, profile=profile)["fields"]
+            if profile.get("peak_rss_mib"):
+                peaks.append(profile["peak_rss_mib"])
+        else:
+            f = pipeline.scan(data, use_vlm=a.vlm_live, vlm_result=vr)["fields"]
+        durations.append(time.perf_counter() - started)
         r = compare(f, g); fp = f.get("phones") or []
         cf = f.get("confidence", {})
         ck = {"first_name": "name", "last_name": "name", "phone_types": "phones"}
+        complete_cards += all(r.values())
+        complete_contacts += all(r[k] for k in ("first_name", "last_name", "emails", "phones"))
+        flagged_fields = set(low_fields(f)) | set(hard_errors(f))
         for k, v in r.items():
+            key = ck.get(k, k)
+            if not v and f.get("phones" if k == "phone_types" else k) and key not in flagged_fields and k not in flagged_fields:
+                false_sure += 1
             c = cf.get(ck.get(k, k))
             if c is not None or not v:
                 flagged = c is None or c < 0.6
@@ -96,12 +122,20 @@ def main(argv=None):
     for k, (x, y) in tot.items(): print(f"  {k:12s} {x}/{y} = {x/max(y,1):.0%}"); A += x; B += y
     print(f"OVERALL {A}/{B} = {A/max(B,1):.1%}   ({(time.time()-t0)/max(len(rows),1):.1f}s/card)")
     print(f"Calibration: wrong non-empty fields flagged <0.6: {calib['wrong_flagged']}/{calib['wrong']}; correct fields falsely flagged: {calib['right_flagged']}/{calib['right']}")
+    print(f"Complete cards {complete_cards}/{len(rows)}, complete name/email/phone {complete_contacts}/{len(rows)}")
+    print(f"Wrong nonempty fields without a low-confidence or hard warning: {false_sure}")
+    if durations:
+        print(f"Elapsed per card: median {median(durations):.2f}s, p95 {sorted(durations)[ceil(0.95*len(durations))-1]:.2f}s")
+    if peaks:
+        print(f"Highest sampled reader RSS: {max(peaks):.1f} MiB")
     print("\nPer-category:")
     for c, (x, y) in sorted(cats.items(), key=lambda kv: kv[1][0]/kv[1][1]): print(f"  {c:22s} {x}/{y} = {x/y:.0%}")
     if missing: print(f"\nSKIPPED {len(missing)} card(s): photo missing from {a.img_dir}: {', '.join(missing[:10])}{' …' if len(missing) > 10 else ''}")
     if no_cache: print(f"SKIPPED {len(no_cache)} card(s): no cached AI answer (--vlm): {', '.join(no_cache[:10])}{' …' if len(no_cache) > 10 else ''}")
     fails = [f"{k} {tot[k][0]} < {c}" for k, c in mins.items() if tot[k][0] < c]
     if a.min_overall is not None and 100 * A / max(B, 1) < a.min_overall: fails.append(f"overall {100*A/max(B,1):.1f}% < {a.min_overall}%")
+    if a.require_complete and (missing or no_cache or set(a.only) - gt.keys()):
+        fails.append("requested set incomplete")
     if fails: print("BELOW THRESHOLD: " + "; ".join(fails)); return 1
     if not rows: print("NO CARDS SCORED"); return 2
     return 0
