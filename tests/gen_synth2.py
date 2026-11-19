@@ -1,12 +1,12 @@
 """Richer synthetic benchmark: 48 cards with realistic fonts, layouts and photo effects. Fictional data (Faker, 555 numbers).
 Categories: left/center/right/two-column/vertical/footer-row/logo-band, dark/colored bg, all-caps, script name,
 credentials, extensions, PO boxes, suites, multi phone/email, toll-free, QR vCard, phone-photo (perspective, shadow, glare, blur)."""
-import json, os, random, math
+import argparse, json, os, random, math
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import numpy as np, qrcode
 from faker import Faker
-D = os.path.dirname(os.path.abspath(__file__)); OUT = os.path.join(D, "synth2"); os.makedirs(OUT, exist_ok=True)
-FD = os.path.join(D, "fonts"); fk = Faker("en_US"); Faker.seed(11); random.seed(11); np.random.seed(11)
+D = os.path.dirname(os.path.abspath(__file__)); OUT = os.path.join(D, "synth2")
+FD = os.path.join(D, "fonts"); fk = Faker("en_US")
 SANS = ["Lato-Regular", "Montserrat", "OpenSans", "Raleway", "SourceSans3", "Oswald"]; SERIF = ["PlayfairDisplay", "Cinzel"]; SCRIPT = ["GreatVibes-Regular", "DancingScript"]
 def font(name, size):
     p = os.path.join(FD, name + ".ttf")
@@ -148,6 +148,17 @@ def photo(im, strength):
     bg = Image.fromarray(np.clip(a, 0, 255).astype("uint8")).filter(ImageFilter.GaussianBlur(0.6 + 0.8 * strength))
     return bg.resize((int(bg.width * 0.75), int(bg.height * 0.75)))
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=11)
+    ap.add_argument("--output-dir", help="write a separate set of photo files and gt.json here")
+    args = ap.parse_args()
+    if args.seed != 11 and not args.output_dir:
+        ap.error("choose --output-dir for a held-out seed")
+    OUT = args.output_dir or OUT
+    os.makedirs(OUT, exist_ok=True)
+    Faker.seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     layouts = ["left", "center", "right", "two-column", "footer-row", "vertical", "logo-band"]
     themes = ["light", "light", "dark", "color", "cream"]
     gt = {}
@@ -162,4 +173,7 @@ if __name__ == "__main__":
                (["po-box"] if "Box" in c["address"] else []) + (["suite"] if "Suite" in c["address"] else []) + \
                (["multi-phone"] if len(c["phones"]) > 2 else []) + (["multi-email"] if len(c["emails"]) > 1 else []) + (["department"] if c["department"] else [])
         g = {k: v for k, v in c.items() if k != "cred"}; g["cat"] = cats; gt[fn] = g
-    json.dump(gt, open(os.path.join(D, "synth2_gt.json"), "w"), indent=1); print(len(gt))
+    gt_path = os.path.join(OUT, "gt.json") if args.output_dir else os.path.join(D, "synth2_gt.json")
+    with open(gt_path, "w", encoding="utf-8") as fh:
+        json.dump(gt, fh, indent=1)
+    print(len(gt))

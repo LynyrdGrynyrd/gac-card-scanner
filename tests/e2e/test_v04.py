@@ -43,7 +43,10 @@ def test_enter_approves_only_when_safe(new_page):
     for _ in range(60):
         if card_json(page, ids[0])["status"] == "approved": break
         page.wait_for_timeout(500)
-    assert card_json(page, ids[0])["status"] == "approved"
+    approved = card_json(page, ids[0])
+    assert approved["status"] == "approved"
+    decision = next(h for h in approved["history"] if h["action"] == "decision" and h["to_status"] == "approved")
+    assert decision["detail"]["review_ms"] > 0
 
 
 def test_more_holds_reject_and_theme_toggle(new_page):
@@ -70,3 +73,19 @@ def test_duplicate_side_by_side(new_page, tmp_path):
     box = page.locator("#rDupQ"); expect(box).to_contain_text("Same person?")
     expect(page.locator("#dGrid .mini")).to_have_count(2); expect(page.locator("#dGrid .mini").nth(1)).not_to_contain_text("Loading")
     expect(page.locator("#dSame")).to_have_text("Same")
+
+def test_disputed_email_displays_original_crop(new_page):
+    page = signed_in_admin(new_page)
+    scan(page, "card6_center.jpg", batch="E2E email readings")
+    def evidence(route):
+        response = route.fetch()
+        data = response.json()
+        data["card"]["fields"]["email_evidence"] = [{"readings": ["jane@example.org", "jane@example.com"],
+                                                     "box": [0.15, 0.42, 0.5, 0.1]}]
+        route.fulfill(response=response, json=data)
+    page.route(re.compile(r"/api/cards/\d+$"), evidence)
+    _open_first(page)
+    panel = page.locator("#emailEvidence")
+    expect(panel).to_contain_text("jane@example.org / jane@example.com")
+    expect(panel.locator("canvas")).to_be_visible()
+    assert panel.locator("canvas").evaluate("el => el.getContext('2d').getImageData(0,0,el.width,el.height).data.some(v => v > 0)")

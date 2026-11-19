@@ -16,10 +16,56 @@ const navOrder = id => { const o = order(); if ((S.cur && S.cur.id === id ? S.cu
   return o.filter(x => x === id || (STATUS[x] ?? "pending") === "pending"); };
 function dirtyVals() { const o = {}; dirtyIds.forEach(i => { const el = document.getElementById(i); if (el) o[i] = el.value; }); return o; }
 let openSeq = 0;
+let visitId = null, visibleSince = null, visibleMs = 0;
+function endReviewVisit() {
+  visitId = null; visibleSince = null; visibleMs = 0;
+}
+function syncVisibility() {
+  const now = performance.now();
+  if (visibleSince !== null) visibleMs += now - visibleSince;
+  visibleSince = visitId !== null && !document.hidden ? now : null;
+}
+document.addEventListener("visibilitychange", syncVisibility);
+
+function showEmailEvidence(evidence, image, deleted) {
+  const panel = $("#emailEvidence");
+  panel.replaceChildren();
+  panel.hidden = !evidence?.length;
+  if (panel.hidden) return;
+  const label = document.createElement("strong");
+  label.textContent = "Check the email against the photo";
+  panel.append(label);
+  for (const line of evidence) {
+    const caption = document.createElement("p");
+    caption.textContent = line.readings.join(" / ");
+    panel.append(caption);
+    if (!deleted && line.box?.length === 4) {
+      const crop = document.createElement("canvas");
+      crop.setAttribute("aria-label", "Email line on the original card");
+      crop.setAttribute("role", "img");
+      crop.hidden = true;
+      panel.append(crop);
+      const draw = () => {
+        if (!crop.isConnected || !image.naturalWidth || !image.naturalHeight) return;
+        const [x, y, w, h] = line.box;
+        const width = w * image.naturalWidth, height = h * image.naturalHeight;
+        if (!(width > 0 && height > 0)) return;
+        crop.width = Math.min(1000, Math.max(1, Math.round(width)));
+        crop.height = Math.min(200, Math.max(1, Math.round(height * crop.width / width)));
+        crop.getContext("2d").drawImage(image, x * image.naturalWidth, y * image.naturalHeight,
+                                       width, height, 0, 0, crop.width, crop.height);
+        crop.hidden = false;
+      };
+      if (image.complete) draw();
+      else image.addEventListener("load", draw, {once: true});
+    }
+  }
+}
 // round 15 (part-timer): Save/Approve stay off until the card has finished loading (a blank form must never be saved)
 async function openCard(id, opts = {}) {
   const tok = ++openSeq, switching = !S.cur || S.cur.id !== id;
   if (switching) {   // round 6 (newcomer F1): never show the previous card's values under the new card's number
+    endReviewVisit(); $("#emailEvidence").hidden = true;
     if (S.WAIT_AI && S.WAIT_AI !== id) toast(`Stopped waiting for the AI on card #${S.WAIT_AI}: you opened another card.`, 6000);   // v0.4.9 #10: always a word
     S.CARD_READY = false; S.cur = null; S.WAIT_AI = null; $("#aiWait")?.remove(); $("#rForm").inert = true; $("#rForm").classList.add("loading");
     $$("#rForm input, #rForm textarea").forEach(el => { if (!el.readOnly) { el.readOnly = true; el.dataset.ro16 = "1"; } });   // round 16 (part-timer r15): nothing typed into the empty form while it loads
@@ -37,6 +83,10 @@ async function openCard(id, opts = {}) {
   if (!S.cur || S.cur.id !== d.id) { scrollTo(0, 0); const fm = $("#rForm"); fm.classList.remove("flip"); void fm.offsetWidth; fm.classList.add("flip"); }
   S.cur = d; const c = d.card, f = c.fields, k = f.confidence || {};
   $("#rImg").src = $("#zImg").src = "/img/" + c.image; $("#rawLink").href = "/img/" + c.image;
+  if (visitId !== id && location.hash.split("?")[0] === "#review/" + id) {
+    endReviewVisit(); visitId = id; syncVisibility();
+  }
+  showEmailEvidence(f.email_evidence, $("#rImg"), d.image_deleted);
   $("#rRaw").textContent = c.raw_text || ""; setBoxes(f.boxes); wireZoom();
   $("#rImg").alt = d.image_deleted ? "Photo deleted by the retention policy" : "Photo of the business card";
   $("#rBatch").textContent = [d.batch_label ? "Batch: " + d.batch_label : "", (/ \((page \d+ of \d+|card \d+ of \d+)/.test(d.filename || "") || /\.(hei[cf]|pdf)(\.jpg)?$/i.test(d.filename || "")) ? "From: " + d.filename.replace(/\.jpg$/i, "") : ""].filter(Boolean).join(" · ");   // round 18: which file/page
@@ -617,6 +667,10 @@ async function decide_(status, btn) {
         if (!S.cur || S.cur.id !== sid) { toast(`Not saved: you moved from card #${sid} to another card. Your edits on #${sid} are kept as a draft.`, 7000); return; }
         // round 15 (part-timer): values typed WHILE the save/approve was waiting (dialogs, network) are included, not lost
         const sentNow = formSnap(); body.fields = collect(); body.note = $("#note").value;   // v0.4.7 #10: the baseline is what THIS request sends
+        if (status === "approved" && visitId === sid) {
+          syncVisibility();
+          body.review_ms = Math.round(visibleMs);
+        }
         const saved = await post("/api/cards/" + sid, body);
         if (saved && saved.version && S.cur && S.cur.id === sid) S.cur.version = saved.version;   // round 14: the next quick save uses the new version at once
         if (saved && saved.card) LASTOK[sid] = JSON.stringify([saved.card.fields, saved.card.status, saved.card.note || ""]);
@@ -805,4 +859,4 @@ document.addEventListener("keydown", e => {
   if (k === "a") { ENTER_ARMED = false; decide("approved", $("#bApprove")); } else if (k === "r") decide("rejected", $("#bReject")); else if (k === "j") step(1); else if (k === "k") step(-1); else if (k === "u") doUndo(); else return;
   e.preventDefault();
 });
-export {dirtyVals, openCard};
+export {dirtyVals, endReviewVisit, openCard};

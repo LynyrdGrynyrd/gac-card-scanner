@@ -304,3 +304,7 @@ label.chk{min-height:44px;display:inline-flex;align-items:center;gap:8px}
 .youare{font-size:.95rem;padding:.35em 0;color:var(--ink)}.youare b{font-weight:700}
 .bname{margin:.4em 0}.bname input{max-width:18em}
 .dupdone{padding:.4em 0;color:var(--grey)}
+
+#emailEvidence canvas { display: block; max-width: 100%; height: auto; }
+#emailEvidence canvas[hidden] { display: none; }
+#emailEvidence p { overflow-wrap: anywhere; }

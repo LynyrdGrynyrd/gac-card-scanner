@@ -1,7 +1,7 @@
 """Single entry point: image bytes -> fields. Used by web app (/scan, /api/scan) and benchmarks.
 Stages: QR/vCard decode -> hybrid OCR (PP-OCR det + Tesseract rec) -> rule parser -> optional local VLM merge."""
 import difflib, json, os, re
-from . import ocr, parser, qr
+from . import email_evidence, ocr, parser, qr
 FIX_KEYS = ("title", "company", "emails", "phones", "website", "address")
 
 def postfix_marked(f):
@@ -53,14 +53,22 @@ def mark_read_changes(f, text):
 def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
     r = ocr.run_ocr(data, engine); lines0 = r.get("lines")   # v0.4: full-frame lines (the crop pass has other coordinates)
     f = parser.from_vlm(r["structured"]) if "structured" in r else parser.parse(r["text"], r.get("lines"))
+    crop_lines = []
+    qr_email = None
     # second pass on the perspective-cropped card (phone photos): fill fields the full-frame pass missed
     if r["engine"].startswith("ppocr") and os.getenv("CARD_CROP", "1") == "1":
         r2 = ocr.hybrid_ocr(data, crop=True)
         if r2:
             f2 = parser.parse(r2["text"], r2.get("lines"))
-            for k in ("first_name", "last_name", "title", "company", "department", "emails", "phones", "website", "address", "other_address", "social"):
+            crop_lines = r2.get("lines") or []
+            names = ("first_name", "last_name")
+            if all(not f.get(k) or _sq(f[k]).casefold() == _sq(f2.get(k)).casefold() for k in names):
+                for k in names:
+                    if not f.get(k) and f2.get(k):
+                        f[k] = f2[k]
+                        f.setdefault("confidence", {})["name"] = (f2.get("confidence") or {}).get("name")
+            for k in ("title", "company", "department", "emails", "phones", "website", "address", "other_address", "social"):
                 if not f.get(k) and f2.get(k):
-                    if k in ("first_name", "last_name") and f.get("first_name"): continue
                     f[k] = f2[k]
             seen = {ln.strip().lower() for ln in r["text"].splitlines()}
             extra = [ln for ln in r2["text"].splitlines() if ln.strip() and ln.strip().lower() not in seen]   # don't show the front twice
@@ -70,10 +78,13 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
     for t in qr.decode(data):
         v = qr.parse_vcard(t)
         if v:
+            qr_email = v.get("emails")
             for k, val in v.items():
                 if val: f[k] = val; f.setdefault("confidence", {})[("name" if k in ("first_name", "last_name") else k)] = 0.99
             f["sources"]["qr"] = "vcard"; break
         elif not f["website"] and t.lower().startswith(("http", "www")): f["website"] = t
+    if not qr_email:
+        email_evidence.apply(f, lines0, crop_lines, r["text"])
     cons = os.getenv("CONSISTENCY", "1") == "1"
     if cons:   # first pass: the AI merge below reads these confidences
         from . import consistency, plausibility
@@ -88,6 +99,9 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
         except Exception as e: f["sources"]["vlm_error"] = str(e)[:200]
     if os.getenv("REALCARD_POSTFIX", "1") == "1":
         f = postfix_marked(f)
+    if qr_email:
+        f["emails"] = qr_email
+        f.setdefault("confidence", {})["emails"] = 0.99
     if cons:   # audit 2026-10: flags and suggestions describe the final (merged + post-fixed) values; the first pass's untouched adjustments are undone so they don't stack
         conf = f.setdefault("confidence", {})
         for k, x in post.items():
@@ -96,6 +110,8 @@ def scan(data: bytes, engine=None, use_vlm=None, vlm_result=None):
     mark_read_changes(f, r["text"])
     if os.getenv("SURE_CHECK", "1") == "1":   # v0.4.15: fields the card does not back up are not "sure" (values untouched)
         from . import surecheck; surecheck.apply(f, r["text"])
+    if f.get("email_evidence"):
+        email_evidence.mark_for_review(f)
     try:
         from . import boxes; f["boxes"] = boxes.locate(f, lines0)   # v0.4 tap-to-zoom (display only)
     except Exception: f["boxes"] = {}

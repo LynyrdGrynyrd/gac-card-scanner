@@ -121,6 +121,19 @@ including cards approved unchanged, and prints how often reviewers had to fix ea
 The copies are real people's cards: they go to the same folder as "Keep corrected cards as test examples", so photo retention
 and delete-on-request clean them too. Never commit them (the script refuses a folder git would track).
 
+### Compare OCR engines on the pilot
+
+From a source checkout, run `python bench/install_ocr_trial.py` to install PP-OCRv6 small under `.venv/ocr-v6`. The trial has its own OpenCV installation and verifies the three bundled models locally. The standard app uses PP-OCRv4. For the trial, set `OCR_MODEL=v6` and run the app or benchmark with the trial's Python. On macOS or Linux:
+
+```bash
+.venv/bin/python bench/eval_bench.py --reader --require-complete
+OCR_MODEL=v6 .venv/ocr-v6/bin/python bench/eval_bench.py --reader --require-complete
+```
+
+On Windows use `.venv\ocr-v6\Scripts\python.exe` and set `$env:OCR_MODEL = "v6"` in the trial PowerShell session. Supply the same ground-truth JSON and photo folder to both commands for a real-card comparison. The report includes fully correct cards, wrong fields without a review warning, median and p95 latency, and the reader's highest sampled resident memory. The pilot extraction report also groups visible time on the final individual approval visit by OCR engine. Older approvals and bulk approvals have no timing sample.
+
+For a fresh synthetic set, install Faker in the development environment and run `python tests/gen_synth2.py --seed 32981 --output-dir /tmp/cards-32981`. Pass that directory's `gt.json` and the directory itself to the benchmark.
+
 ## Developer reference
 ### Endpoints
 > Since the /ui release, `/`, `/queue`, `/card/{id}` and `/export.*` redirect to `/ui` and require sign-in. See HANDOFF.md.

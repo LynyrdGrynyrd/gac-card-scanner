@@ -36,7 +36,7 @@ def _limiter(cap_mb):
     return _limit
 
 
-def _call(args, data, key=None, mem_mb=None, timeout=None):
+def _call(args, data, key=None, mem_mb=None, timeout=None, profile=None):
     # audit 2026-10 P1 (C3): the limits are per call; run_ocr used to swap the module globals while other reads ran
     mem_mb = mem_mb or MEM_MB; timeout = timeout or TIMEOUT
     root = os.path.join(os.path.dirname(__file__), "..")
@@ -57,7 +57,10 @@ def _call(args, data, key=None, mem_mb=None, timeout=None):
         def watch():   # memory only; the time budget is enforced by communicate(timeout=...) below
             while p.poll() is None:
                 # audit 2026-10: the hard backstop is enforced here too; macOS ignores RLIMIT_AS and Windows has no RLIMIT
-                if _rss_mb(p.pid) > min(mem_mb, backstop_mb(mem_mb)):
+                rss = _rss_mb(p.pid)
+                if profile is not None:
+                    profile["peak_rss_mib"] = max(profile.get("peak_rss_mib", 0), rss)
+                if rss > min(mem_mb, backstop_mb(mem_mb)):
                     killed.append(1)
                     try: p.kill()
                     except Exception: pass
@@ -162,9 +165,10 @@ def stop(key):
 
 OCR_MEM_MB = int(os.environ.get("OCR_MEM_MB", "1500"))    # OCR child RSS cap (round 22: RSS, not address space)
 OCR_TIMEOUT = float(os.environ.get("OCR_TIMEOUT", "180"))
-def run_ocr(data, engine=None, key=None):
+def run_ocr(data, engine=None, key=None, *, profile=None):
     """Round 21: OCR + parsing run in a capped child process, so the web server's memory stays flat."""
-    return _call(["ocr", engine or ""], data, key, mem_mb=OCR_MEM_MB, timeout=OCR_TIMEOUT)
+    kwargs = {"profile": profile} if profile is not None else {}
+    return _call(["ocr", engine or ""], data, key, mem_mb=OCR_MEM_MB, timeout=OCR_TIMEOUT, **kwargs)
 
 def run_count(data): return _call(["count"], data)["pages"]
 def run_page(data, i, n, fname, key=None): return _call(["page", i, n, os.path.basename(fname or "upload")], data, key)

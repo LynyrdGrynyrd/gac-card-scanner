@@ -2,6 +2,8 @@
 import io, os, re, json, base64, urllib.request
 from PIL import Image, ImageOps, ImageFilter
 import pytesseract
+import subprocess
+from functools import lru_cache
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")   # tesseract: no thread oversubscription (QA P4)
 
 def preprocess(img: Image.Image) -> Image.Image:
@@ -124,15 +126,41 @@ def _rapid():
 
 def _nospace(t): return re.sub(r"[^a-z0-9@]", "", t.lower())
 
-def hybrid_segments(img):
-    """PP-OCR (RapidOCR/ONNX) text DETECTION + per-box Tesseract RECOGNITION (keeps word spaces),
-    falling back to the PP-OCR transcription when Tesseract disagrees badly."""
+@lru_cache(maxsize=1)
+def _trial():
+    from .ocr_trial import load
+    return load()
+
+
+def _model():
+    model = os.getenv("OCR_MODEL", "v4")
+    if model not in ("v4", "v6"):
+        raise ValueError("OCR_MODEL must be v4 or v6")
+    return model
+
+
+def _read_batch(images):
+    # Tesseract puts one form feed between TIFF pages. Splitting before stripping
+    # preserves blank pages. Some older builds omit them, so check the count.
+    if len(images) > 1:
+        try:
+            with io.BytesIO() as buf:
+                images[0].save(buf, format="TIFF", save_all=True, append_images=images[1:])
+                result = subprocess.run(
+                    [pytesseract.pytesseract.tesseract_cmd, "stdin", "stdout", "--psm", "7"],
+                    input=buf.getvalue(), capture_output=True, check=True, timeout=60,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            lines = result.stdout.decode("utf-8").split("\f")
+            if len(lines) == len(images):
+                return [line.strip() for line in lines]
+        except (OSError, UnicodeError, subprocess.SubprocessError):
+            pass
+    return [pytesseract.image_to_string(im, config="--psm 7").strip() for im in images]
+
+
+def _line_crops(rgb, detections):
     import numpy as np, cv2
-    from difflib import SequenceMatcher
-    rgb = np.array(img.convert("RGB"))
-    res, _ = _rapid()(rgb)
-    out = []
-    for quad, txt, conf in (res or []):
+    for quad, txt, conf in detections:
         q = np.array(quad, dtype="float32")
         w = int(max(np.linalg.norm(q[1]-q[0]), np.linalg.norm(q[2]-q[3]))); h = int(max(np.linalg.norm(q[3]-q[0]), np.linalg.norm(q[2]-q[1])))
         if w < 4 or h < 4: continue
@@ -143,13 +171,56 @@ def hybrid_segments(img):
         g = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
         if h < 48: g = cv2.resize(g, None, fx=48/h, fy=48/h, interpolation=cv2.INTER_CUBIC)
         if g.mean() < 127: g = 255 - g
-        t = pytesseract.image_to_string(Image.fromarray(g), config="--psm 7").strip()
-        t = re.sub(r"^[^A-Za-z0-9(+@#]+|[^A-Za-z0-9).]+$", "", t)
-        sim = SequenceMatcher(None, _nospace(t), _nospace(txt)).ratio() if t else 0
-        final = _transfer_spaces(t, txt) if sim >= 0.6 else _space_fix(txt)
         xs, ys = q[:, 0], q[:, 1]
-        out.append(dict(text=final, x=int(xs.min()), x1=int(xs.max()), y=int(ys.min()), h=int(ys.max()-ys.min()),
-                        conf=float(conf)*100, hm=h, ym=int(ys.min()), alt=txt, tess=t, sim=round(sim, 2)))
+        segment = dict(x=int(xs.min()), x1=int(xs.max()), y=int(ys.min()), h=int(ys.max()-ys.min()),
+                       conf=float(conf)*100, hm=h, ym=int(ys.min()), alt=txt)
+        yield segment, Image.fromarray(g)
+
+
+def _email_candidate(line):
+    return bool(re.search(r"@|[a-z0-9][a-z0-9._+-]{4,}\.(?:com|net|org|edu|gov|co|io)\b", line, re.I))
+
+
+def _recognize_lines(batch):
+    from difflib import SequenceMatcher
+    out = []
+    retries = []
+    for (line, image), text in zip(batch, _read_batch([im for _, im in batch]), strict=True):
+        t = re.sub(r"^[^A-Za-z0-9(+@#]+|[^A-Za-z0-9).]+$", "", text)
+        txt = line["alt"]
+        sim = SequenceMatcher(None, _nospace(t), _nospace(txt)).ratio() if t else 0
+        line.update(text=_transfer_spaces(t, txt) if sim >= 0.6 else _space_fix(txt), tess=t, sim=round(sim, 2))
+        if _email_candidate(txt) or _email_candidate(t):
+            if txt.strip().casefold() != t.strip().casefold() or "@" not in txt:
+                # A larger rendering can disambiguate punctuation and the @ boundary.
+                factor = min(2, 4096 / image.width)
+                if factor > 1:
+                    retries.append((line, image.resize((round(image.width*factor), round(image.height*factor)), Image.Resampling.LANCZOS)))
+        out.append(line)
+    if retries:
+        for (line, _), text in zip(retries, _read_batch([im for _, im in retries]), strict=True):
+            line["reread"] = text
+    return out
+
+
+def hybrid_segments(img):
+    import numpy as np
+    rgb = np.array(img.convert("RGB"))
+    if _model() == "v6":
+        detections = _trial()(rgb)
+    else:
+        res, _ = _rapid()(rgb)
+        detections = res or []
+    out, batch, pixels = [], [], 0
+    for line, image in _line_crops(rgb, detections):
+        size = image.width * image.height
+        if batch and (len(batch) >= 16 or pixels + size > 4_000_000):
+            out.extend(_recognize_lines(batch))
+            batch, pixels = [], 0
+        batch.append((line, image))
+        pixels += size
+    if batch:
+        out.extend(_recognize_lines(batch))
     return out
 
 def _transfer_spaces(tess, rapid):
@@ -193,6 +264,10 @@ def _finish(img, lines, engine):
     hs = sorted(l["h"] for l in real); hmed = hs[len(hs)//2] if hs else 1
     meta = [dict(text=l["text"], rel_h=round(l["h"]/hmed, 2), top=round(l["y"]/img.size[1], 2), col=l["col"], box=_box(l, img))
             for l in real]
+    for original, line in zip(real, meta, strict=True):
+        readings = [original[k] for k in ("alt", "tess", "reread") if original.get(k)]
+        if any(_email_candidate(t) for t in readings):
+            line["readings"] = readings
     return {"engine": engine, "text": text, "lines": meta, "ocr_conf": round(conf, 2)}
 
 def crop_card(img):
@@ -229,7 +304,8 @@ def hybrid_ocr(data: bytes, crop=False):
         s = (mp / (img.width * img.height)) ** 0.5; img = img.resize((int(img.width*s), int(img.height*s)), Image.LANCZOS)
     if max(img.size) < T:
         s = T / max(img.size); img = img.resize((int(img.width*s), int(img.height*s)), Image.LANCZOS)
-    return _finish(img, arrange(hybrid_segments(img), img, reocr=False), "ppocr+tesseract")
+    return _finish(img, arrange(hybrid_segments(img), img, reocr=False),
+                   "ppocr-v6+tesseract" if _model() == "v6" else "ppocr+tesseract")
 
 def tesseract_ocr(data: bytes):
     img = preprocess(Image.open(io.BytesIO(data)))
