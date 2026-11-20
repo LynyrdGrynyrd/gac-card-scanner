@@ -14,6 +14,16 @@ const order = () => { try { return JSON.parse(SS.order || "[]"); } catch { retur
 // round 16 (newcomer r15 #6): on a PENDING card, the counter and Prev/Next go through the cards still pending (decided ones are skipped)
 const navOrder = id => { const o = order(); if ((S.cur && S.cur.id === id ? S.cur.status : STATUS[id]) !== "pending") return o;
   return o.filter(x => x === id || (STATUS[x] ?? "pending") === "pending"); };
+// AIFILL: unsaved typing is mirrored to the server shortly after it happens (it used to leave this browser only at an idle
+// sign-out), because the server fills a card from the AI's reading ONLY when nobody has an unsaved draft of it. Cleared again when
+// the typing is gone; a save deletes it on the server.
+let mirrored = null;
+function mirrorDraft(id, retried) {
+  const vals = S.dirty ? dirtyVals() : {}, has = Object.keys(vals).length > 0;
+  if (!has && mirrored !== id) return;
+  post(`/api/cards/${id}/draft`, {vals, version: S.cur.version}).then(() => { mirrored = has ? id : null; })
+    .catch(() => { if (!retried) setTimeout(() => { if (S.cur && S.cur.id === id) mirrorDraft(id, true); }, 2000); });   // a failed mirror, or a failed clear, is tried once more with the values of that moment
+}
 function dirtyVals() { const o = {}; dirtyIds.forEach(i => { const el = document.getElementById(i); if (el) o[i] = el.value; }); return o; }
 let openSeq = 0;
 let visitId = null, visibleSince = null, visibleMs = 0;
@@ -246,7 +256,7 @@ $("#rForm").addEventListener("input", e => {
   { const f_ = e.target.closest && e.target.closest(".f"); if (f_ && f_.querySelector(".fhint")) { f_.querySelectorAll(".fhint").forEach(x => x.remove()); f_.classList.remove("hinted");
       const lab = (f_.querySelector("label")?.getAttribute("for")) || ""; $$("#rRisk li[data-f]").forEach(li => { if (li.dataset.f === lab) li.remove(); });
       const n_ = $$("#rRisk li").length, b_ = $("#rRisk b"); if (!n_) $("#rRisk").hidden = true; else if (b_) b_.textContent = `To check (${n_}):`; } }
-  S.lastInput = Date.now(); recomputeDirty(); clearTimeout(keepDraft.t); { const id_ = S.cur && S.cur.id; keepDraft.t = setTimeout(() => { if (S.cur && S.cur.id === id_) keepDraft(); }, 400); }   // v0.4.7 #10: a draft goes to the card it was typed on
+  S.lastInput = Date.now(); recomputeDirty(); clearTimeout(keepDraft.t); { const id_ = S.cur && S.cur.id; keepDraft.t = setTimeout(() => { if (S.cur && S.cur.id === id_) { keepDraft(); mirrorDraft(id_); } }, 400); }   // v0.4.7 #10: a draft goes to the card it was typed on
   clearTimeout(vT);
   if (S.cur) { const b = $("#rAI .flag.bad"); if (b && !S.dirty) b.remove(); }
   // v0.4.1 #8 (newcomer #7): typing re-checks the form, so "Morg4n" in Last name warns at once (it only re-checked while a problem showed)
@@ -267,6 +277,7 @@ function renderAI(d) {
   const ruleHints = (d.attention || []).filter(a => ["hint", "consistency"].includes(a.code));
   if (s === "checked" && !(x.changed && x.changed.length) && !Object.keys(x.decided || {}).length && ruleHints.length)   // reviewer r8 (Rnbber/Mian)
     h = `<b>AI-checked:</b> no AI changes, but ${plural(ruleHints.length, "thing")} still to check: <ul>${ruleHints.map(a => `<li>${esc(a.text)}</li>`).join("")}</ul>Check those fields against the photo.`;
+  else if (s === "checked" && x.applied) h = x.changed && x.changed.length ? `<b>The AI read this card and filled in the form:</b> ${esc(x.changed.map(k => LABEL[k] || k).join(", "))}. Fields marked “Check” need a look against the photo. To change a value, edit it.` : "<b>The AI read this card</b> and found nothing to change. Fields marked “Check” still need a look.";   // AIFILL: the reading is already in the form
   else if (s === "checked") h = x.changed && x.changed.length ? `<b>AI-checked:</b> corrected ${esc(x.changed.map(k => LABEL[k] || k).join(", "))} . Check the photo.` : (Object.keys(x.decided || {}).length ? "<b>AI-checked:</b> all suggestions decided." : "<b>AI-checked:</b> no changes needed.");
   else if (s === "suggested") h = "<b>AI suggestions</b> (nothing changes until you choose):";
   else if (s === "skipped") h = /skipped at scan/i.test(x.note || "") ? "AI skipped at scan." : "AI skipped: " + esc((x.note || "a person reviewed this card first").replace(/^AI check skipped\s*/i, "")) + ".";   // round 24 (coordinator r23): said "AI check skipped" twice
@@ -275,7 +286,11 @@ function renderAI(d) {
   else if (s === "busy") h = "<b>AI busy:</b> " + esc(x.error || "the AI model didn't answer in time") + "";
   if (canAsk) h += ` <button type="button" class="link" id="aiAsk" title="Checks the saved card">${s === "checked" || s === "suggested" ? "Check again with AI" : "Check with AI"}</button>`;
   const diff = x.diff || {}, dec = x.decided || {}, open = Object.keys(diff).filter(k => !dec[k]);
-  if (open.length && (s === "suggested" || s === "checked")) {
+  if (x.applied && s === "checked" && open.length) {   // AIFILL: the AI filled these in; to change one, edit it. The earlier value is shown as plain text.
+    const v = val => esc(Array.isArray(val) ? val.map(p => typeof p === "object" ? `${p.type}: ${p.number}` : p).join(", ") : (val ?? ""));
+    h += `<table class="aidiff"><thead><tr><th scope="col">Field</th><th scope="col">Earlier value</th><th scope="col">AI value</th></tr></thead><tbody>` +
+      open.map(k => `<tr><th scope="row">${esc(LABEL[k] || k)}</th><td>${v(diff[k].from)}</td><td>${v(diff[k].to)}</td></tr>`).join("") + "</tbody></table>";
+  } else if (open.length && (s === "suggested" || s === "checked")) {
     const v = val => esc(Array.isArray(val) ? val.map(p => typeof p === "object" ? `${p.type}: ${p.number}` : p).join(", ") : (val ?? ""));
     h += `<table class="aidiff"><thead><tr><th scope="col">Field</th><th scope="col">${x.applied ? "Before AI" : "Now"}</th><th scope="col">${x.applied ? "AI changed it to" : "AI suggests"}</th><th scope="col">Choice</th></tr></thead><tbody>` +
       open.map(k => `<tr><th scope="row">${esc(LABEL[k] || k)}</th><td>${v(diff[k].from)}</td><td>${v(diff[k].to)}</td><td><button type="button" class="btn small ok" data-aik="${esc(k)}" data-aic="accept" aria-label="Use AI value for ${esc(LABEL[k] || k)}">${x.applied ? "Keep AI value" : "Use AI value"}</button> <button type="button" class="btn small" data-aik="${esc(k)}" data-aic="reject" aria-label="Keep current ${esc(LABEL[k] || k)}">${x.applied ? "Undo AI change" : "Keep current"}</button></td></tr>`).join("") + "</tbody></table>";
@@ -285,6 +300,7 @@ function renderAI(d) {
   if (h) h += `<p class="small aiNote">AI suggestions can be wrong. Check the photo.</p>`;
   // audit 2026-10: #rAI is no longer a live region (it was replaced every 4 s and re-announced); a state change is announced
   // once by the toast. Unchanged content is not rewritten, so focus on its buttons survives the poll.
+  if (x.applied && open.length && s === "checked" && (box._h !== h || box.dataset.cid !== String(d.id))) $("#rMore").open = true;   // AIFILL: what the AI filled in (before/after) is shown, not left under a closed "More"
   box.hidden = !h; if (box._h !== h || box.dataset.cid !== String(d.id)) { box.innerHTML = h; box._h = h; box.dataset.cid = d.id; }
   box.querySelectorAll("[data-aik]").forEach(b => b.onclick = async () => {
     const k = b.dataset.aik, ch = b.dataset.aic;
@@ -315,7 +331,8 @@ function renderAI(d) {
     const kept = S.dirty, waited = S.WAIT_AI === d.id; await openCard(d.id, {keep: true});
     if (waited) { S.WAIT_AI = null; $("#aiWait")?.remove(); toast("AI check finished. Check it, then Approve.", 6000, true); $("#bApprove").focus(); return; }
     const rh = (n.attention || []).some(a => ["hint", "consistency"].includes(a.code));
-    toast((n.ai_status === "suggested" ? "AI double-check finished: suggestions below." : n.ai_status === "checked" ? (rh ? "AI check done: no changes, but some fields still need a look." : "AI double-check finished: no changes needed.") : "AI double-check: " + n.ai_status) + (kept ? " Your unsaved edits were kept." : ""), 4000);
+    const ad_ = (n.ai_detail || {}), filled_ = ad_.applied && n.ai_status === "checked" ? (ad_.changed || []).map(k => LABEL[k] || k) : null;   // AIFILL
+    toast((filled_ ? (filled_.length ? "The AI read this card and filled in: " + filled_.join(", ") + ". Check it against the photo." : "The AI read this card: nothing to change.") : n.ai_status === "suggested" ? "AI double-check finished: suggestions below." : n.ai_status === "checked" ? (rh ? "AI check done: no changes, but some fields still need a look." : "AI double-check finished: no changes needed.") : "AI double-check: " + n.ai_status) + (kept ? " Your unsaved edits were kept." : ""), 4000);
   }, 4000);
 }
 function setFormField(k, val) {

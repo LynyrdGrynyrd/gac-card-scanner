@@ -165,10 +165,15 @@ def stop(key):
 
 OCR_MEM_MB = int(os.environ.get("OCR_MEM_MB", "1500"))    # OCR child RSS cap (round 22: RSS, not address space)
 OCR_TIMEOUT = float(os.environ.get("OCR_TIMEOUT", "180"))
-def run_ocr(data, engine=None, key=None, *, profile=None):
-    """Round 21: OCR + parsing run in a capped child process, so the web server's memory stays flat."""
+VLM_ARG_MAX = 6000   # chars of the model answer that may travel in the child's argv (a real answer is ~1-2 KB)
+def run_ocr(data, engine=None, key=None, *, profile=None, vlm_result=None):
+    """Round 21: OCR + parsing run in a capped child process, so the web server's memory stays flat.
+    AIFILL: vlm_result (the model's answer) is merged by the child exactly as pipeline.scan(vlm_result=...) does. It goes in argv
+    as ASCII-only JSON (accents and non-Latin text survive Windows argv encoding); a too-long answer is refused, not cut."""
     kwargs = {"profile": profile} if profile is not None else {}
-    return _call(["ocr", engine or ""], data, key, mem_mb=OCR_MEM_MB, timeout=OCR_TIMEOUT, **kwargs)
+    vj = json.dumps(vlm_result, ensure_ascii=True) if vlm_result is not None else ""
+    if len(vj) > VLM_ARG_MAX: raise ReaderError("The AI answer is too long to merge.")
+    return _call(["ocr", engine or "", *([vj] if vj else [])], data, key, mem_mb=OCR_MEM_MB, timeout=OCR_TIMEOUT, **kwargs)
 
 def run_count(data): return _call(["count"], data)["pages"]
 def run_page(data, i, n, fname, key=None): return _call(["page", i, n, os.path.basename(fname or "upload")], data, key)
@@ -196,7 +201,7 @@ def _main(argv):
             return {"parts": res}
         if mode == "ocr":
             from . import pipeline
-            r = pipeline.scan(data, argv[2] or None, use_vlm=False)
+            r = pipeline.scan(data, argv[2] or None, use_vlm=False, vlm_result=json.loads(argv[3]) if len(argv) > 3 else None)
             return {"ocr": {"engine": r["engine"], "text": r["text"], "fields": r["fields"]}}
         if mode == "photo":
             fname, out = argv[2], argv[3]
