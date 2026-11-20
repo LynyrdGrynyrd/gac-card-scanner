@@ -647,7 +647,7 @@ def calibrated_conf(f):
     return c
 
 def low_fields(f, src=None):
-    """Fields the reviewer should double-check: low confidence, or listed in the parser's needs_review.
+    """Fields the reviewer should double-check: low confidence, listed in the parser's needs_review, or set by the AI (source 'ai', until a person edits it).
     A field a person already edited or explicitly confirmed (e.g. 'Keep current' on an AI suggestion) is not listed."""
     done = {k for k, v in (src or {}).items() if str(v).startswith(("edited", "confirmed"))}
     if "first_name" in done or "last_name" in done: done.add("name")
@@ -657,6 +657,9 @@ def low_fields(f, src=None):
         if v is None or v >= 0.6 or n in done: continue
         val = f.get(n) if n != "name" else (f.get("first_name") or f.get("last_name"))
         if (val or n in ("name", "company", "emails")) and n not in out: out.append(n)
+    for k, v in (src or {}).items():   # AIFILL: every field the AI set stays "Check" until a person edits it (the source then becomes edited:*)
+        n = "name" if k in ("first_name", "last_name") else k   # the one "name" flag stays while EITHER part is still the AI's
+        if str(v).startswith("ai") and n != "social" and n not in out: out.append(n)   # social has no Check mark on the screen
     return out
 
 def _low_after_ai(f, src, m):
@@ -665,13 +668,14 @@ def _low_after_ai(f, src, m):
     low = low_fields(f, src)
     try: det = json.loads(m.get("ai_detail") or "{}")
     except Exception: det = {}
-    if m.get("ai_status") == "checked" and not det.get("diff") and det.get("finished"):
+    if m.get("ai_status") == "checked" and not det.get("diff") and det.get("finished") and not det.get("applied"):   # AIFILL: an applied reading keeps its Check flags (rules and model may still disagree)
         try:   # reviewer r8: a rule-based hint (Rnbber, Mian ...) keeps its field flagged whatever the AI said
             from . import plausibility as _pl
             hinted = {x.get("field") for x in _pl.check(json.loads(json.dumps(f)))}
         except Exception: hinted = set()
         if "name" in hinted: hinted |= {"first_name", "last_name"}
-        low = [k for k in low if k in hinted or k not in ("name", "first_name", "last_name", "title", "company", "emails", "phones", "website", "address")]
+        ai_ = {"name" if k in ("first_name", "last_name") else k for k, v in (src or {}).items() if str(v).startswith("ai")}   # a field the AI set stays Check whatever a later reading said
+        low = [k for k in low if k in hinted or k in ai_ or k not in ("name", "first_name", "last_name", "title", "company", "emails", "phones", "website", "address")]
     return low
 
 def _as_row(c):
@@ -1098,7 +1102,7 @@ def enrich(c, cards, metas, full=False, names=None, vis=None, viewer=None):
             _cm = f.get("confirmed_meta") if isinstance(f.get("confirmed_meta"), dict) else {}   # round 23: confirmed values are marked on Review
             out["confirmed"] = {k: {"by": _cm[k].get("by"), "reason": _cm[k].get("reason")} for k in valid_confirmations(f)}
         except Exception: pass
-        out |= {"version": card_version(c), "card": c | {"fields": f | {"confidence": calibrated_conf(f)}}, "dupes": d, "history": scrub_history(history(c["id"]), panel_vis(c, vis)), "errors": validate(f), "low": _low_after_ai(f, src, m), "sources": src}
+        out |= {"version": card_version(c), "card": c | {"fields": f | {"confidence": calibrated_conf(f)}}, "dupes": d, "history": scrub_history(history(c["id"]), panel_vis(c, vis)), "errors": validate(f), "low": _low_after_ai(f, src if c["status"] == "pending" else {k: v for k, v in src.items() if not str(v).startswith("ai")}, m), "sources": src}
         for x in d["queue"]:
             o = store.get(x["card_id"])
             if o: x |= {"name": f"{o['fields'].get('first_name','')} {o['fields'].get('last_name','')}".strip(),
@@ -1117,7 +1121,7 @@ def scan_limited(*a, **k):
     from . import pipeline, reader
     with SCAN_SEM:
         if OCR_CHILD and not k.get("use_vlm") and isinstance(a[0], (bytes, bytearray)):
-            try: return reader.run_ocr(bytes(a[0]), a[1] if len(a) > 1 else k.get("engine"), key=k.pop("key", None))
+            try: return reader.run_ocr(bytes(a[0]), a[1] if len(a) > 1 else k.get("engine"), key=k.pop("key", None), vlm_result=k.get("vlm_result"))
             except reader.ReaderError: raise
         k.pop("key", None)
         return pipeline.scan(*a, **k)
@@ -1640,7 +1644,7 @@ AI_TIMES: list = []                                       # recent run times (s)
 AI_RUNNING: dict = {}
 AI_TURN: dict = {}       # batch -> checks queued so far (round-robin priority)
 AI_RETRIES: dict = {}    # cid -> automatic retries after connection refused
-AI_MAX_WAIT = int(os.environ.get("AI_MAX_WAIT", "1800"))   # background checks waiting longer than this are skipped
+AI_MAX_WAIT = int(os.environ.get("AI_MAX_WAIT", "14400"))   # background checks waiting longer than this are skipped (AIFILL: every card is read, ~3 min each on the office laptop: a 38-card stack needs ~1 h 45 min, so 30 min skipped most of it)
 def _ai_worker():
     """Audit 2026-10 P0-3: one failing card (e.g. 'database is locked') must not end the thread and stop every later check."""
     while True:
@@ -1732,8 +1736,9 @@ def maybe_ai_check(cid, force=False):
     if auth.get_setting("ai_check_enabled") != "1" and not force: return "off"
     c = store.get(cid)
     if not c or c["status"] != "pending" or not c.get("image"): return "skip"
-    why = ai_reason(c["fields"]) if not force else ["requested"]
-    if not why: return "not needed"
+    # AIFILL: every pending card with a photo is read in full (not only the doubted ones); QR cards are exact already
+    if not force and (c["fields"].get("sources") or {}).get("qr"): return "not needed"
+    why = ["requested"] if force else (ai_reason(c["fields"]) or ["read"])
     if not ai_available(): set_meta(cid, ai_status="unavailable"); return "unavailable"
     if meta(cid).get("ai_status") == "checking": return "queued"
     # round 7 (reviewer r7): automatic checks must not starve behind manual ones. Priority = the card's turn in ITS batch
@@ -1754,43 +1759,100 @@ def maybe_ai_check(cid, force=False):
     set_meta(cid, ai_status="queued", ai_detail=json.dumps({"why": why, "queued_at": time.time(), "manual": bool(force)}))
     AI_Q.put((prio, key[1], cid, why)); return "queued"
 
+def _ai_blocker(cid, c, v0):
+    """AIFILL: why may the model's reading NOT be written to the card ("" = it may; else it is only suggested)? Asked twice: before
+    the re-OCR and under WRITE_LOCK. The answer is a short code, never a card value. Only the first, untouched reading applies: a person's edit or confirmation, an unsaved draft, a changed
+    version, a decided/archived/exported card, or anything in the history beyond the scan (a merge from a duplicate, a back
+    photo, an earlier applied reading: pipeline.scan(front photo) would silently drop those details) means suggestions."""
+    m = meta(cid); f = c["fields"]
+    if c["status"] != "pending": return "decided"
+    if m.get("archived"): return "archived"
+    if m.get("exported") or cid in sent_ids(): return "exported"
+    if card_version(c) != v0: return "version"
+    if f.get("confirmed_ok"): return "confirmed"   # confirmed_ok: "This is correct" (confirm_correct) leaves no field_sources mark
+    if any(str(x).startswith(("edited", "confirmed")) for x in sources(cid).values()): return "edited"
+    if db().execute("SELECT 1 FROM drafts WHERE card_id=?", (cid,)).fetchone(): return "draft"
+    for a_, d_ in db().execute("SELECT action, detail FROM card_history WHERE card_id=?", (cid,)):
+        if a_ == "scanned": continue
+        try: applied = bool(json.loads(d_ or "null").get("applied"))
+        except Exception: applied = True
+        if a_ != "ai_checked" or applied: return "history"
+    return ""
+
+_nv = lambda v: None if v is None or (isinstance(v, (str, list)) and not v) else v   # only None, "" and [] are empty (0 and False are values)
+_same = lambda a, b: json.dumps(_nv(a), sort_keys=True, default=str) == json.dumps(_nv(b), sort_keys=True, default=str)   # compared as JSON text: False is not 0
+_AI_META = ("confidence", "overall_confidence", "needs_review", "ocr_conf", "fallback_reason", "sources", "email_evidence", "consistency",
+            "consistency_notes", "suggestions", "vlm_fields", "auto_fixed", "boxes")   # what pipeline.scan computes ABOUT the values
+def _ai_apply(cid, c, r, why, secs):
+    """AIFILL: the card's fields become what pipeline.scan(photo, vlm_result=answer) gave (merge confidences and needs_review
+    included, so fields where rules and model disagree show 'Check'). Each changed field's source is 'ai': low_fields counts
+    only edited*/confirmed*, and lists every 'ai' field as Check, so a person still has to look. Caller holds WRITE_LOCK + tx and has checked _ai_blocker."""
+    f = c["fields"]; g = dict(r["fields"]) if isinstance(r, dict) and isinstance(r.get("fields"), dict) else {}
+    if not all(k in g for k in ("first_name", "last_name", "emails", "phones")) or not isinstance(g["emails"], list) or not isinstance(g["phones"], list): return False   # a re-read without the core keys is not a reading to store: suggestions instead
+    if fields_shape_problem({k: v for k, v in g.items() if k in TEXT_FIELDS + ("emails", "phones", "social")}): return False   # the shape every written value must have
+    for k in ("address", "other_address"):   # a line break in the AI's address is a separator, never glue ('State RdCuyahoga')
+        if isinstance(g.get(k), str): g[k] = re.sub(r"\s*[\r\n]+\s*", ", ", g[k]).strip(" ,")
+    changed = {k: {"from": f.get(k), "to": g.get(k)} for k in QR_KEYS + ("credentials", "other_address") if not _same(f.get(k), g.get(k))}
+    # the whole fields map is replaced, so every VALUE key that differs (also one outside the review form that the re-read drops)
+    # is recorded with its before value in the history row; only scan metadata (confidences, flags, boxes ...) is left out
+    lost = {k: {"from": f.get(k), "to": g.get(k)} for k in (f.keys() | g.keys()) - set(_AI_META) - set(changed) if not _same(f.get(k), g.get(k))}
+    if payload_problems({k: v["to"] for k, v in changed.items() if v["to"]}): return False   # same check as every other write of a value; suggestions instead
+    src = sources(cid)
+    for k in changed: src[k] = "ai"
+    store.update(cid, fields=g)
+    set_meta(cid, field_sources=json.dumps(src), ai_status="checked",
+             ai_detail=json.dumps({"why": why, "diff": changed, "changed": list(changed), "applied": True, "seconds": secs, "finished": time.time()}))
+    log(cid, "AI", "ai_checked", detail={"changed": changed | lost, "applied": True, "seconds": secs})
+    return True
+
 def _ai_run(cid, why):
-    """Runs the vision model and stores the differences as SUGGESTIONS only. The card itself is never changed here:
-    the reviewer accepts or keeps each value in the review screen (so typed, unsaved edits can never be overwritten)."""
+    """Runs the vision model on the whole card (AIFILL: all fields, no hints, so one answer serves both outcomes). If the card
+    is still untouched the reading is APPLIED (_ai_blocker); otherwise the differences are stored as SUGGESTIONS only: the
+    reviewer accepts or keeps each value in the review screen (so typed, unsaved edits can never be overwritten)."""
     from . import vlm, merge
     try:
         started = time.time(); set_meta(cid, ai_status="checking", ai_detail=json.dumps({"why": why, "started": started}))
         c = store.get(cid); p = os.path.join(UP, os.path.basename(c.get("image") or ""))
         if not os.path.isfile(p): set_meta(cid, ai_status="skipped", ai_detail=json.dumps({"why": why, "note": "photo missing"})); return
-        try:
-            from . import plausibility as _pl
-            hints = "; ".join(x.get("text", "") for x in _pl.check(c["fields"]))[:600]
-        except Exception: hints = ""
-        lowf = ", ".join(low_fields(c["fields"], sources(cid)))
-        if lowf: hints = (hints + "; " if hints else "") + "hard to read: " + lowf
-        keys = vlm.keys_for(why, c["fields"]) if os.getenv("VLM_SUBSET", "1") == "1" else None
-        v = vlm.extract(open(p, "rb").read(), c["raw_text"] or "", keys=keys, hints=hints)
-        c = store.get(cid); f = c["fields"]; g = merge.merge(f, v, c["raw_text"] or "")
-        for k in ("address", "other_address"):   # a line break in the AI's address is a separator, never glue ('State RdCuyahoga')
-            if isinstance(g.get(k), str): g[k] = re.sub(r"\s*[\r\n]+\s*", ", ", g[k]).strip(" ,")
-        from . import consistency as _cons, plausibility as _plaus
-        _cons.apply(g); _plaus.apply(g)   # audit 2026-10: flags describe the merged values (merge() is pure: f is untouched)
-        src = sources(cid)
-        edited = {k for k, x in src.items() if str(x).startswith("edited")}
-        if "first_name" in edited or "last_name" in edited: edited.add("name")
-        try: rej = json.loads(meta(cid).get("ai_rejected") or "{}")
-        except Exception: rej = {}
-        # round 7 (reviewer r7): a value the person already declined ("Keep current") is not offered again
-        changed = {k: {"from": f.get(k), "to": g.get(k), "edited_by_person": k in edited}
-                   for k in QR_KEYS + ("credentials", "other_address") if k in g and g.get(k) != f.get(k)
-                   and json.dumps(rej.get(k), sort_keys=True) != json.dumps(g.get(k), sort_keys=True)
-                   and not (k in garbled_errors(dict(f, **{k: g.get(k)})) and k not in garbled_errors(f))}   # round 20: never offer a garbled value over a clean one
+        v0 = card_version(c)   # the card as the read starts: a change meanwhile turns the result into suggestions
+        with open(p, "rb") as fh: data = fh.read()
+        v = vlm.extract(data, c["raw_text"] or "")
+        r = None; why_not = ""   # why_not: a short code (never a card value) for a reading that was NOT applied: kept in ai_detail, the history row and the console
+        if not isinstance(v, dict) or v.get("_error"): why_not = "bad_answer"
+        elif (blk := _ai_blocker(cid, store.get(cid), v0)): why_not = "touched:" + blk   # cheap pre-check: no re-OCR for a card that will only get suggestions
+        else:
+            try: r = scan_limited(data, None, vlm_result=v) or None   # the pipeline's own merge and the steps after it (outside the lock)
+            except Exception as e: print(f"AI apply: re-read failed on card {cid}: {type(e).__name__}: {str(e)[:200]}", flush=True)
+            if r is None: why_not = "reread_failed"
         secs = round(time.time() - started, 1)
-        if meta(cid).get("ai_status") != "checking":   # cancelled meanwhile (the card was approved/rejected during the check)
-            log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": [], "seconds": secs, "cancelled": True}); return
-        set_meta(cid, ai_status="suggested" if changed else "checked", ai_detail=json.dumps(
-            {"why": why, "diff": changed, "changed": [], "applied": False, "seconds": secs, "finished": time.time()}))
-        log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": list(changed), "seconds": secs})
+        with WRITE_LOCK, store.tx():
+            if meta(cid).get("ai_status") != "checking":   # cancelled meanwhile (the card was approved/rejected during the check)
+                log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": [], "seconds": secs, "cancelled": True}); return
+            c = store.get(cid)
+            if r is not None:
+                blocker = _ai_blocker(cid, c, v0)
+                if blocker: why_not = "touched_during:" + blocker
+                elif _ai_apply(cid, c, r, why, secs): AI_RETRIES.pop(cid, None); return
+                else: why_not = "bad_value"
+            if why_not: print(f"AI reading not applied on card {cid}: {why_not}", flush=True)
+            f = c["fields"]; g = merge.merge(f, v, c["raw_text"] or "")
+            for k in ("address", "other_address"):   # a line break in the AI's address is a separator, never glue ('State RdCuyahoga')
+                if isinstance(g.get(k), str): g[k] = re.sub(r"\s*[\r\n]+\s*", ", ", g[k]).strip(" ,")
+            from . import consistency as _cons, plausibility as _plaus
+            _cons.apply(g); _plaus.apply(g)   # audit 2026-10: flags describe the merged values (merge() is pure: f is untouched)
+            src = sources(cid)
+            edited = {k for k, x in src.items() if str(x).startswith("edited")}
+            if "first_name" in edited or "last_name" in edited: edited.add("name")
+            try: rej = json.loads(meta(cid).get("ai_rejected") or "{}")
+            except Exception: rej = {}
+            # round 7 (reviewer r7): a value the person already declined ("Keep current") is not offered again
+            changed = {k: {"from": f.get(k), "to": g.get(k), "edited_by_person": k in edited}
+                       for k in QR_KEYS + ("credentials", "other_address") if k in g and g.get(k) != f.get(k)
+                       and json.dumps(rej.get(k), sort_keys=True) != json.dumps(g.get(k), sort_keys=True)
+                       and not (k in garbled_errors(dict(f, **{k: g.get(k)})) and k not in garbled_errors(f))}   # round 20: never offer a garbled value over a clean one
+            set_meta(cid, ai_status="suggested" if changed else "checked", ai_detail=json.dumps(
+                {"why": why, "diff": changed, "changed": [], "applied": False, "seconds": secs, "finished": time.time()} | ({"not_applied": why_not} if why_not else {})))
+            log(cid, "AI", "ai_checked", detail={"changed": {}, "suggested": list(changed), "seconds": secs} | ({"not_applied": why_not} if why_not else {}))
     except Exception as e:
         slow = isinstance(e, TimeoutError) or "timed out" in str(e).lower()
         refused = "refused" in str(e).lower() or "urlerror" in type(e).__name__.lower() or "connection" in str(e).lower()
@@ -1854,6 +1916,8 @@ def _ai_decide(cid, request, body):
     if vp is not None: return vp
     try: det = json.loads(m.get("ai_detail") or "{}")
     except Exception: det = {}
+    if det.get("applied"):   # the AI filled this card in: there is nothing to decide, a person edits the field to change it
+        return JSONResponse({"error": "The AI already filled this card in: nothing to decide. Edit a field to change it.", "need": "stale_suggestion", "fields": list(ch_)}, 409)
     diff = det.get("diff") or {}; fields = {}; made = {}; stale = []
     for k, choice in (body.get("choices") or {}).items():
         if k not in diff or choice not in ("accept", "reject"): continue

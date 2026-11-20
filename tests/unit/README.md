@@ -9,6 +9,7 @@ Run: `python -m pytest -q tests/unit` (all data goes to a temporary folder, see 
 
 - **Sign-in, sessions, roles, CSRF, security headers:** `test_app.py` (3), `test_audit_p0.py` (3), `test_audit_p1_backend.py` (3), `test_demo.py` (2), `test_r5.py` (2), `test_r6_features.py` (2), `test_r22.py` (1), `test_r23.py` (1)
 - **Uploads, scan jobs, cancel, recovery, PDF/HEIC:** `test_r18.py` (11), `test_r20.py` (9), `test_audit_p1_backend.py` (5), `test_frontend_desktop.py` (3), `test_r21.py` (3), `test_r23.py` (3), `test_app.py` (2), `test_audit_p0.py` (2)
+- **AI reads and fills the review form (AIFILL):** `test_aifill.py` (unit, stubbed model) and `tests/e2e/test_aifill.py` (browser, stub model server)
 - **Recognition: OCR, parser, QR, AI merge:** `test_r15_realcard_rules.py` (16), `test_accuracy_parser.py` (10), `test_r7.py` (10), `test_r10.py` (8), `test_r11.py` (8), `test_r8.py` (8), `test_plausibility.py` (7), `test_r6.py` (7)
 - **Review: validation, misread blocks, confirm-correct:** `test_r23.py` (6), `test_r7.py` (6), `test_r16.py` (4), `test_r21.py` (4), `test_app.py` (3), `test_r11.py` (3), `test_r15ui.py` (3), `test_r20.py` (3)
 - **Duplicates and look-alikes (in queue, CRM):** `test_r15_realcard_rules.py` (11), `test_r11.py` (6), `test_r7.py` (6), `test_r10.py` (4), `test_r14.py` (4), `test_r5.py` (4), `test_r6.py` (4), `test_r13.py` (3)

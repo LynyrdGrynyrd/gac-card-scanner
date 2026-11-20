@@ -1,7 +1,7 @@
 """End-to-end browser tests (Playwright, Chromium): the real app (uvicorn app.main:app, like start.command) on a free
 localhost port in a subprocess, with ALL data in a temp folder. Run: python -m pytest -q tests/e2e
 Needs: pip install -r requirements-dev.txt; python -m playwright install chromium (CI: --with-deps); Tesseract."""
-import glob, os, re, socket, subprocess, sys, tempfile, time, urllib.request
+import contextlib, glob, os, re, socket, subprocess, sys, tempfile, time, urllib.request
 import pytest
 
 try: from playwright import sync_api as pw
@@ -12,11 +12,12 @@ ADMIN = {"username": "erin", "display": "Erin Admin", "initials": "EA", "passwor
 def _free_port():
     with socket.socket() as s: s.bind(("127.0.0.1", 0)); return s.getsockname()[1]
 
-@pytest.fixture(scope="session")
-def server():
+@contextlib.contextmanager
+def serve(**more_env):
+    """The app in a subprocess on a free port with its own temp data folder; more_env overrides the environment (AIFILL: VLM_URL of a stub model)."""
     data = tempfile.mkdtemp(prefix="gac-e2e-"); port = _free_port(); base = f"http://127.0.0.1:{port}"
     env = dict(os.environ, GAC_DATA_DIR=data, GAC_DB=os.path.join(data, "cards.db"), GAC_BACKUP="0", GAC_UPDATE_CHECK="0",
-               VLM_URL="http://127.0.0.1:9", MCTRADE_TEMPLATE=os.path.join(data, "mctrade_template.xlsx"), PYTHONUNBUFFERED="1")
+               VLM_URL="http://127.0.0.1:9", MCTRADE_TEMPLATE=os.path.join(data, "mctrade_template.xlsx"), PYTHONUNBUFFERED="1") | more_env
     log = open(os.path.join(data, "server.log"), "w")
     p = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
                          cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -34,6 +35,10 @@ def server():
         try: p.wait(10)
         except subprocess.TimeoutExpired: p.kill()
         log.close()
+
+@pytest.fixture(scope="session")
+def server():
+    with serve() as s: yield s
 
 def _chromium_fallback():
     """Locally a newer playwright may not find its own browser build; use one already in PLAYWRIGHT_BROWSERS_PATH."""

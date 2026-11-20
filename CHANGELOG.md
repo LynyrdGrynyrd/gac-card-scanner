@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The AI reads every card and fills in the review form
+- **The AI double-check now reads every card in full**, not only the cards the scanner was unsure about (cards read from a QR code are still skipped). On a card nobody has worked on, **its reading fills in the review form**. Fields where the scanner and the AI disagree show **Check**, and so does every field the AI changed, until you edit it. The review screen lists what the AI changed (earlier value and AI value). To change a filled-in value, just edit it. A person still approves every card.
+- If someone already edited, confirmed or started typing into the card, or the card was decided, exported, archived, merged or changed while the AI was reading, nothing on the card changes: the AI's values appear as suggestions, as before.
+- A card you have open updates by itself when the AI finishes. Typing you have not saved is kept (it is now also kept on the server a moment after you type, so the AI does not overwrite it).
+- On a test of 36 real cards this reads 331 of 360 fields correctly, against 274 for the scanner alone and 293 for the earlier AI double-check with every suggestion accepted.
+- The AI line now waits up to 4 hours (it was 30 minutes) before skipping a card, because a stack of 38 cards takes about 1 hour 45 minutes. A card skipped this way keeps its scanned values. Set `AI_MAX_WAIT` (seconds) to change it.
+
 - The scanner reads lines in batches and keeps both parts of a name recovered from a cropped photo.
 - When two OCR readings disagree about an email, the review form shows the readings and the matching part of the original photo when available.
 - A source-only PP-OCRv6 pilot and expanded benchmarks support comparing complete cards, missed warnings, scan speed, memory and time spent reviewing.

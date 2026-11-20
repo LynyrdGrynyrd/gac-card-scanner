@@ -5,7 +5,7 @@ Photograph a pile of business cards after an event, check each one in a clean re
 - **Local and CPU-only.** OCR (Tesseract 5 + RapidOCR/PP-OCR), QR/vCard decoding (zxing-cpp) and a rules parser (phonenumbers, name lexicon) run on one ordinary computer. No cloud calls; card photos and contacts stay on the box.
 - **Human review first.** Every card lands in a review queue with per-field confidence, look-alike/duplicate warnings against the existing CRM and within the batch, plausibility hints and an audit history. Nothing is exported until a reviewer approves it.
 - **Exports:** CSV, vCard, and an MC Trade import Excel (new profiles, separate updates file, one row per person). A *dry-run* sync shows what would be created or updated; there is no live CRM write.
-- **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) re-reads low-confidence cards; scanning works without it.
+- **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) reads every card in full and fills in the review form (fields where it disagrees with the rules show "Check"); a person still approves each card. Scanning works without it.
 - Sign-in with named reviewers and admin roles, CSRF protection, photo/export retention, delete-on-request.
 
 **Current version: 0.4.15.** A department, name, address or company the card doesn't clearly show is now marked "Check" instead of sure. See [CHANGELOG.md](CHANGELOG.md). **[2-minute demo video](https://github.com/LynyrdGrynyrd/gac-card-scanner/releases/latest/download/GAC-Card-Scanner-demo.mp4)**.
@@ -48,7 +48,7 @@ To uninstall: Settings → Apps → GAC Card Scanner → Uninstall. Your cards s
 Your data lives in `~/Library/Application Support/GAC Card Scanner`. Requires macOS 14 (Sonoma) or newer; Intel Macs need macOS 15 (Sequoia).
 
 ### Optional: AI double-check
-In the app: **Admin → Settings → Download AI helper (3 GB)**. It downloads llama.cpp and the Qwen3-VL-4B model (Apache-2.0) from GitHub/Hugging Face, checks their SHA-256 checksums, and runs them locally next to the app (127.0.0.1:8090). Scanning works fine without it; the AI helper re-reads uncertain cards in the background. A computer with 8 GB+ RAM is recommended.
+In the app: **Admin → Settings → Download AI helper (3 GB)**. It downloads llama.cpp and the Qwen3-VL-4B model (Apache-2.0) from GitHub/Hugging Face, checks their SHA-256 checksums, and runs them locally next to the app (127.0.0.1:8090). Scanning works fine without it; the AI helper reads every card in the background and fills in the review form (about 3 minutes a card on a laptop; nobody has to wait for it). A computer with 8 GB+ RAM is recommended.
 
 ### Desktop-app menu
 **File → Open in browser** opens the same scanner in your normal browser (useful for printing or if the window misbehaves); **File → Open data folder** shows where your data is kept.
