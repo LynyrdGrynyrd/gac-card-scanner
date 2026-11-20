@@ -150,3 +150,15 @@ def test_shared_mutable_state_lives_in_one_object():
         assert not re.search(rf"^(let|var|const)\s+{n}\b", js, re.M), n
     assert "window.gac = Object.freeze({toast, enqueue})" in js
     d = _src(os.path.join(UI, "desktop.js")); assert "window.gac.toast" in d and "window.gac.enqueue" in d and "typeof toast" not in d
+
+
+def test_card_field_inputs_mirror_the_server_length_limit():
+    """Fuzz 2026-11: the server refuses a card value over ui.FIELD_MAX characters; the one-value inputs stop the reviewer at the
+    same length. Emails, phones and social hold several values in one box, so only the server limits those (per value)."""
+    from app import ui
+    html, js = _src(os.path.join(UI, "index.html")), _page_js()
+    for i in ("first_name", "last_name", "title", "company", "website", "address"):
+        assert re.search(rf'<(?:input|textarea) id="{i}" maxlength="{ui.FIELD_MAX}"', html), i
+    for i in ("emails", "phones", "social"):
+        assert not re.search(rf'<(?:input|textarea) id="{i}"[^>]*maxlength', html), i
+    assert f'data-extra="${{esc(key)}}" maxlength="{ui.FIELD_MAX}"' in js

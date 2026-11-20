@@ -5,6 +5,8 @@
 - The scanner reads lines in batches and keeps both parts of a name recovered from a cropped photo.
 - When two OCR readings disagree about an email, the review form shows the readings and the matching part of the original photo when available.
 - A source-only PP-OCRv6 pilot and expanded benchmarks support comparing complete cards, missed warnings, scan speed, memory and time spent reviewing.
+- Large phone photos scan faster. The scanner now looks only for QR codes on the photo instead of every kind of barcode; on a 12-megapixel photo with no code that search took longer than reading the text. Other 2D codes (Data Matrix, Aztec, PDF417) are no longer read.
+- A card detail longer than 1,000 characters is refused with a message. Before, one extremely long word pasted into a field (tens of thousands of letters) could keep the scanner busy for more than 10 seconds.
 
 ## v0.4.15 (2026-11-12)
 

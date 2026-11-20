@@ -59,7 +59,9 @@ In Claude Code cloud sessions `.claude/hooks/session-start.sh` installs Tesserac
   with numbers. Its 2026-10-15 re-check found RapidOCR 3.x + PP-OCRv6 small clearly better on synthetic cards (not yet
   adopted: needs a real-card check and the opencv-headless conflict solved).
 - `tests/synth2` is a development set: the same generator with other seeds scores ~20 fields lower. Check a parser
-  change on freshly generated cards too, not only on synth2.
+  change on freshly generated cards too, not only on synth2. The generator needs `faker`, which is not a pinned test tool:
+  `uv run --no-project --with faker --with qrcode --with pillow --with numpy python tests/gen_synth2.py --seed 2027 --output-dir <folder outside the repo>`,
+  then `.venv/bin/python bench/eval_bench.py <folder>/gt.json <folder>`.
 
 ## Tests and style
 - Every fix gets a test. Unit tests use the session-scoped `env` fixture (shared DB): give your cards a unique batch

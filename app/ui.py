@@ -359,19 +359,28 @@ def clean_reason(r):
     return r, None
 
 TEXT_FIELDS = ("first_name", "last_name", "credentials", "title", "company", "department", "website", "address", "other_address")
+FIELD_MAX = 1000   # fuzz 2026-11: no printed card value comes near this; a 65,000-letter company kept /api/validate busy for more than 10 s (the email pattern is quadratic on one long word)
 def fields_shape_problem(fields):
     """Fuzz 2026-10: 'fields' must be what the review page sends (text values; emails/social lists of text; phones a list of
     {type, number}). fields: [...], phones: true or phones: [null] crashed the save/validate code with a 500."""
     if fields is None: return None
     if not isinstance(fields, dict): return "fields must be an object of card values."
-    for k in TEXT_FIELDS:
-        if fields.get(k) is not None and not isinstance(fields[k], str): return f"{LABEL.get(k, k.replace('_', ' ').capitalize())} must be text."
+    for k in TEXT_FIELDS + ("x_department", "x_credentials", "x_other_address"):   # review 2026-11: the aliases _apply_fields takes, too (a dict there was saved as its str() form)
+        n = k.removeprefix("x_")
+        if fields.get(k) is not None and not isinstance(fields[k], str): return f"{LABEL.get(n, n.replace('_', ' ').capitalize())} must be text."
     for k in ("emails", "social"):
         v = fields.get(k)
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)): return f"{LABEL.get(k, k)} must be a list of text values."
     v = fields.get("phones")
     if v is not None and not (isinstance(v, list) and all(isinstance(p, dict) and all(isinstance(p.get(x, ""), str) for x in ("type", "number")) for p in v)):
         return "Phone numbers must be a list of {type, number} with text values."
+    def _texts(k, v):   # exactly what _apply_fields can turn into card text (the shapes were checked above); anything else it ignores
+        if isinstance(v, str): return [v]   # under any key: it also takes x_department and any text value the card already has
+        if k in ("emails", "social"): return v or []
+        return [p.get(x, "") for p in v or [] for x in ("type", "number")] if k == "phones" else []
+    for k, v in fields.items():
+        n = k.removeprefix("x_")
+        if any(len(x) > FIELD_MAX for x in _texts(k, v)): return f"{LABEL.get(n, n.replace('_', ' ').capitalize())} is too long (at most {FIELD_MAX} characters)."
     return None
 
 def payload_problems(fields):
@@ -2258,6 +2267,7 @@ def _apply_fields(f, body_fields):
             old = [{"type": p.get("type"), "number": p.get("number"), "valid": phone_ok(p.get("number"))} for p in f.get("phones", [])]
             if old == v: continue
         elif k in f and isinstance(f[k], str) or k in ("first_name", "last_name", "title", "company", "website", "address", "department", "credentials", "other_address"):
+            if v is not None and not isinstance(v, str): continue   # review 2026-11: a number or dict is never a text value (its str() form also got past FIELD_MAX)
             v = str(v or "").strip()
         else: continue
         if f.get(k) != v: changed[k] = {"from": f.get(k), "to": v}; f[k] = v

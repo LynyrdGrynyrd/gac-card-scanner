@@ -59,3 +59,22 @@ def test_fn_fallback_keeps_compound_surname():
 def test_mecard_unescape():
     f = qr.parse_vcard("MECARD:N:Smith,John;ORG:Smith\\; Sons;TEL:3305550101;EMAIL:j@s.com;;")
     assert (f["first_name"], f["last_name"]) == ("John", "Smith") and f["company"] == "Smith; Sons"
+
+
+def _qr_photo(text):
+    import io, qrcode
+    b = io.BytesIO(); qrcode.make(text).save(b, "PNG"); return b.getvalue()
+
+
+def test_decode_reads_a_qr_code_from_a_photo():
+    text = "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Doe;Jane\r\nEMAIL:jane@example.com\r\nEND:VCARD"
+    assert qr.decode(_qr_photo(text)) == [text]
+
+
+def test_decode_searches_for_qr_codes_only(monkeypatch):
+    """2026-11: with every barcode type on, the search took longer than the OCR on a phone photo that has no code."""
+    import zxingcpp
+    seen, real = [], zxingcpp.read_barcodes
+    monkeypatch.setattr(zxingcpp, "read_barcodes", lambda im, **kw: seen.append(kw.get("formats")) or real(im, **kw))
+    assert qr.decode(_qr_photo("https://example.com")) == ["https://example.com"]
+    assert seen and all(f == zxingcpp.barcode_formats_from_str("QRCode,MicroQRCode,RMQRCode") for f in seen)

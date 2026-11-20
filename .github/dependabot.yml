@@ -21,3 +21,8 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # The images stay on Python 3.12, the version requirements.lock.txt is compiled for (test_packaging_files checks the
+      # FROM line). Digest updates of 3.12-slim still arrive; a Python bump is done by hand together with the lock.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

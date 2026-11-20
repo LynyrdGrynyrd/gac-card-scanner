@@ -128,16 +128,16 @@
       <div id="rWarn" class="alert info" hidden></div>
       <div id="rCons" class="alert" role="status" hidden></div>
       <div class="grid2" id="fields">
-        <div class="f"><label for="first_name">First name <span class="req">*</span></label><input id="first_name" data-c="name" aria-describedby="e_name"></div>
-        <div class="f"><label for="last_name">Last name</label><input id="last_name" data-c="name"></div>
+        <div class="f"><label for="first_name">First name <span class="req">*</span></label><input id="first_name" maxlength="1000" data-c="name" aria-describedby="e_name"></div>
+        <div class="f"><label for="last_name">Last name</label><input id="last_name" maxlength="1000" data-c="name"></div>
         <p class="ferr wide" id="e_name"></p>
-        <div class="f"><label for="title">Job title</label><input id="title" data-c="title"></div>
-        <div class="f"><label for="company">Company</label><input id="company" data-c="company"></div>
+        <div class="f"><label for="title">Job title</label><input id="title" maxlength="1000" data-c="title"></div>
+        <div class="f"><label for="company">Company</label><input id="company" maxlength="1000" data-c="company"></div>
         <div class="f wide"><label for="emails">Email <small>commas between</small></label><input id="emails" placeholder="name@company.com" type="text" inputmode="email" data-c="emails" aria-describedby="e_emails"><p class="ferr" id="e_emails"></p><div id="emailEvidence" hidden></div></div>
         <div class="f wide"><label for="phones">Phone <small>one per line</small></label><textarea id="phones" rows="3" placeholder="One per line, e.g. mobile: 330-555-0100" data-c="phones" aria-describedby="e_phones"></textarea><p class="ferr" id="e_phones"></p></div>
-        <div class="f"><label for="website">Website</label><input id="website" data-c="website"></div>
+        <div class="f"><label for="website">Website</label><input id="website" maxlength="1000" data-c="website"></div>
         <div class="f"><label for="social">Social links <small>spaces between</small></label><input id="social" ></div>
-        <div class="f wide" id="addrBox"><label for="address">Address</label><input id="address" data-c="address"></div>
+        <div class="f wide" id="addrBox"><label for="address">Address</label><input id="address" maxlength="1000" data-c="address"></div>
         <div class="f wide"><label for="note">Note <small>(optional)</small></label><input id="note"></div>
       </div>
       <p class="legend" id="legend" hidden><span class="lowkey"></span> Yellow = check the photo.</p>

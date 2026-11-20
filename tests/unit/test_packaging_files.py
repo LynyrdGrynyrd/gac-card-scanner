@@ -111,3 +111,10 @@ def test_installer_and_signing_scripts():
     for f in ("start-ai-checker.command",):
         assert '[ -n "$SRV" ]' in read(f)   # no 'exec "./"' when no llama-server was found
     assert 'if not exist "%SRV%"' in read("start-ai-checker.bat")
+
+
+def test_dependabot_does_not_propose_python_image_upgrades():
+    """2026-11: the images stay on the Python the lock is compiled for (the FROM check above), so a Dependabot PR that bumps
+    the image tag can only fail this suite. Digest updates of the same tag still come."""
+    docker = read(".github", "dependabot.yml").split("package-ecosystem: docker", 1)[1]
+    assert re.search(r'ignore:\n(?:\s*#.*\n)*\s*- dependency-name: python\n\s*update-types: \["version-update:semver-major", "version-update:semver-minor"\]', docker)
