@@ -1,6 +1,8 @@
 """Optional local vision-LLM extractor (default Qwen3-VL-4B-Instruct GGUF, Apache-2.0; fallback Qwen2.5-VL-3B, research license; via llama.cpp llama-server, OpenAI-compatible API).
-Runs fully local. Enable with VLM_URL (default http://127.0.0.1:8090). Never sends data off-box."""
-import base64, io, json, os, re, urllib.request
+Runs fully local. Enable with VLM_URL (default http://127.0.0.1:8090). Sends nothing off this computer, UNLESS an admin switched
+"Where cards are read" to "Cloud service" (app/cloud.py): then the same prompt and the cropped card image go to that service.
+The key and the on/off rule live in app/cloud.py; this file only builds the request."""
+import base64, io, json, os, re, urllib.error, urllib.request
 from PIL import Image, ImageOps
 URL = os.getenv("VLM_URL", "http://127.0.0.1:8090")
 PROMPT = """You are reading a business card photo. OCR text (may contain errors) is given as a hint:
@@ -10,6 +12,7 @@ PROMPT = """You are reading a business card photo. OCR text (may contain errors)
 Return ONLY a JSON object with keys:
 first_name, last_name, title, company, department, emails (list), phones (list of {{"type": "work|mobile|fax|home", "number": "..."}}), website, address.
 Rules: company is the organization (often the logo text). Copy text exactly as printed on the card; use "" or [] when absent. Do not invent anything.
+first_name is the given name only: leave out a middle name or middle initial.
 The OCR often glues or swaps letters (e.g. "Rnbber CityRobotics" for "Rubber City Robotics", "rn" for "m"): read each word from the IMAGE,
 and check company and job title as carefully as names. Keep each address line separated by ", ".
 title = job role only; department/division/section lines -> department. company = full printed org name, not just the logo word.
@@ -26,6 +29,7 @@ SCHEMA = {"type": "object", "additionalProperties": False,
 # Compact instruction (round 6 speed work): same keys/rules, ~45% fewer prompt tokens. VLM_PROMPT=long restores the old one.
 PROMPT_SHORT = """Business card photo. Return JSON: first_name, last_name, title, company, department, emails, phones (type work|mobile|fax|home + number), website, address.
 Copy text exactly as printed; company = organization (often the logo). Use "" or [] when absent; never invent.
+first_name = given name only, no middle name or initial.
 OCR hint (may have errors):
 {ocr}"""
 PROMPT_RULES_LONG = """
@@ -54,6 +58,8 @@ def _headers():
     return h
 
 def available(timeout=1.5):
+    from . import cloud
+    if cloud.selected(): return cloud.active()   # cloud reading: on and a key is set; no request to the provider per card
     try: return json.loads(urllib.request.urlopen(URL + "/health", timeout=timeout).read()).get("status") == "ok"
     except Exception: return False
 
@@ -97,6 +103,18 @@ def _prompt_for(keys, ocr_text, hints=""):
     want = ", ".join("phones (type work|mobile|fax|home + number)" if k == "phones" else k for k in keys)
     return PROMPT_SHORT.replace("first_name, last_name, title, company, department, emails, phones (type work|mobile|fax|home + number), website, address", want).format(ocr=ocr_text[:OCR_CHARS]) + _hint_text(hints)
 
+CLOUD_TIMEOUT = 60
+CLOUD_MAX_TOKENS = 4000   # a model that thinks spends tokens before the answer
+from .cloud import CloudError   # (a short calm message only: never the provider's text, never the key)
+def _cloud_post(body):
+    from . import cloud
+    cfg = cloud.config()
+    if not cfg: raise CloudError("cloud reading is not set up")   # off, demo mode, no key, or an address that is not https
+    base, model, key = cfg
+    b = {k: v for k, v in body.items() if k != "cache_prompt"}   # llama.cpp-only field
+    b.update(model=model, max_tokens=CLOUD_MAX_TOKENS, reasoning_effort="low")
+    return cloud.post(base, "/chat/completions", b, key, CLOUD_TIMEOUT)   # never follows a redirect, never via a proxy on loopback
+
 def extract(data: bytes, ocr_text: str = "", max_side=None, timeout=int(os.getenv("VLM_TIMEOUT", "240")), keys=None, hints=""):
     LAST.clear()
     img = _prep(data, max_side or MAX_SIDE, os.getenv("VLM_CROP", "1") == "1")   # audit 2026-10: card crop by default (VLM_CROP=0: whole photo)
@@ -107,8 +125,12 @@ def extract(data: bytes, ocr_text: str = "", max_side=None, timeout=int(os.geten
                 {"type": "text", "text": prompt}]}],
             "temperature": 0, "max_tokens": MAX_TOKENS, "cache_prompt": True, "response_format": ({"type": "json_schema", "json_schema": {"name": "card", "strict": True, "schema": schema}}
                                 if STRICT else {"type": "json_object"})}
-    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), _headers())
-    resp = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    from . import cloud
+    if cloud.selected():   # an admin chose the cloud service: same prompt and image, a different address
+        resp = _cloud_post(body)
+    else:
+        req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), _headers())
+        resp = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     LAST.clear(); LAST.update(resp.get("timings") or {}); LAST["img"] = img.size
     out = resp["choices"][0]["message"]["content"]
     m = re.search(r"\{.*\}", out, re.S)
