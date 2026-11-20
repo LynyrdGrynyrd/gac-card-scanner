@@ -19,7 +19,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 KEEP = int(os.environ.get("BACKUP_KEEP", "7"))
 # audit 2026-10 P0-9: never back up the AI helper (~3 GB model), the desktop window's browser profile (holds the session
 # cookie), caches, logs or lock/instance files: only the cards database, photos, stored exports and admin uploads matter
-SKIP_DIRS = {"thumbs", "inbox", "jobs_done", "__pycache__", "ai-helper", "webview", ".ruff_cache"}
+SKIP_DIRS = {"thumbs", "inbox", "jobs_done", "__pycache__", "ai-helper", "webview", ".ruff_cache", "cloud"}   # cloud: the cloud reading API key (AICLOUD) must not end up in a backup; an admin enters it again after a restore
 SKIP_FILES = {"app.log", "app.log.1", "instance.json"}
 def _skip(name): return (name.startswith("mctrade_contacts.") or name.startswith(".workers") or name in SKIP_FILES
                          or name.endswith((".db-wal", ".db-shm", ".db-journal", ".part", ".tmp")))

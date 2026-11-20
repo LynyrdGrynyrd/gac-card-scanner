@@ -9,7 +9,7 @@ When staff scan a business card, the scanner keeps:
 It also records which staff member scanned, edited, approved or exported each card, and when (the audit log). It records staff sign-ins, including the computer's network address.
 
 ## Where it lives
-Everything stays **on the one office computer that runs the scanner**, in its `data` folder. Nothing goes to the internet: no cloud service, no outside AI company, and nothing is sent to MC Trade automatically. The optional "AI double-check" runs on the same computer.
+Everything stays **on the one office computer that runs the scanner**, in its `data` folder. Nothing goes to the internet unless an admin switches it on: by default there is no cloud service and no outside AI company, and nothing is sent to MC Trade automatically. The optional "AI double-check" runs on the same computer. An admin can instead choose **Cloud service** under Admin → Settings → AI check → "Where cards are read" (off by default; it needs an API key and a ticked consent box). Then card photos and the text read from them are sent to that provider. Use a key whose project has billing switched on: on Google's free tier, what you send is used to improve Google's products and may be read by reviewers, and Google's terms say not to send personal information there. Your organisation is responsible for having permission to send the cards. The key is kept in the data folder, owner-only, and is never shown again.
 
 ## Who can see it
 Only Chamber staff with their own scanner login:

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Optional cloud reading (off by default)
+- **Admin → Settings → AI check → "Where cards are read":** "On this computer" (the default) or "Cloud service". With the cloud service an admin enters a web address (preset: Google's Gemini), a model name (preset: gemini-3.8-flash) and an API key, and ticks a box confirming that card photos and the text read from them are sent to that provider. Nothing leaves the computer unless an admin switches this on and enters a key. It is never available in the public demo.
+- The key is kept in an owner-only file in the data folder, is never shown again (the page only says that one is saved) and is never written to the logs or the audit log. Switching on or off, or changing the address, the model or the key, is recorded in the audit log.
+- Saving the cloud settings makes one small text-only test request and says whether the key and model work, whether the service refused the key, or whether it could not be reached. The settings are saved either way.
+- The AI is now told to give the given name only in "first name" (no middle name or initial), also with the local model.
+- On 36 real cards in one plain call each, Gemini 3.8 Flash read 352 of 360 fields correctly, Gemini 4 Hydrogen 349, the local model 332.
+
 ### The AI reads every card and fills in the review form
 - **The AI double-check now reads every card in full**, not only the cards the scanner was unsure about (cards read from a QR code are still skipped). On a card nobody has worked on, **its reading fills in the review form**. Fields where the scanner and the AI disagree show **Check**, and so does every field the AI changed, until you edit it. The review screen lists what the AI changed (earlier value and AI value). To change a filled-in value, just edit it. A person still approves every card.
 - If someone already edited, confirmed or started typing into the card, or the card was decided, exported, archived, merged or changed while the AI was reading, nothing on the card changes: the AI's values appear as suggestions, as before.

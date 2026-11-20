@@ -218,6 +218,19 @@
       <label class="chk"><input type="checkbox" id="sAI"> <b>AI check on</b></label>
       <p class="small">Reads every card and fills in the form; fields where it disagrees with the scan show Check. A person still approves each card. Turn off for busy events. <span id="sAIStatus"></span></p>
       <p><button type="button" class="btn small" id="sAISkip">Skip AI check for waiting cards</button> <span class="small">Busy event: the waiting cards go on without it.</span></p>
+      <div id="cloudBox" class="small">
+        <label for="sSrc"><b>Where cards are read</b></label>
+        <select id="sSrc"><option value="local">On this computer</option><option value="cloud">Cloud service</option></select>
+        <div id="cloudFields" hidden>
+          <p class="alert warn" id="cloudNotice"><b>Card photos and the text read from them are sent to this service.</b> Use a key whose project has billing switched on: on Google's free tier, what you send is used to improve Google's products and may be read by reviewers, and Google's terms say not to send personal information there. Your organisation is responsible for having permission to send the cards.</p>
+          <label for="sCBase">Service address</label> <input id="sCBase" size="48" maxlength="300" autocomplete="off" spellcheck="false" aria-describedby="sCBaseHint"> <span id="sCBaseHint">The address must not contain your key.</span>
+          <label for="sCModel">Model</label> <input id="sCModel" size="24" maxlength="100" autocomplete="off" spellcheck="false">
+          <label for="sCKey">API key</label> <input id="sCKey" type="password" size="32" maxlength="512" autocomplete="off" spellcheck="false">
+          <span id="sCKeyNote"></span> <button type="button" class="btn small" id="sCKeyClear" hidden>Remove saved key</button>
+          <label class="chk"><input type="checkbox" id="sCConsent"> <span>I have read this notice. Send card photos and the text read from them to this service.</span></label>
+          <p id="sCNote" role="status"></p>
+        </div>
+      </div>
       <div id="aiHelper" class="small" hidden>
         <p id="aiHelperMsg"></p>
         <progress id="aiHelperBar" max="100" value="0" hidden style="width:100%"></progress>
@@ -226,7 +239,7 @@
            <button type="button" class="btn" id="aiHelperStop" hidden>Stop AI helper</button>
            <button type="button" class="btn" id="aiHelperRm" hidden>Remove AI helper</button></p>
       </div>
-      <details class="more small"><summary>More</summary>The AI reads each card and fills in the form while nobody has worked on it; if someone already edited the card it only suggests. It can be wrong, so always compare with the photo. It is slow (one card at a time). For events, run it on a separate computer (Help guide, section 7.4).</details>
+      <details class="more small"><summary>More</summary>The AI (on this computer, or the cloud service if an admin chose it above) reads each card and fills in the form while nobody has worked on it; if someone already edited the card it only suggests. It can be wrong, so always compare with the photo. It is slow (one card at a time). For events, run it on a separate computer (Help guide, section 7.4).</details>
     </div>
     <div class="panel scard">
       <h2>MC Trade files</h2>
@@ -293,7 +306,7 @@
   </form>
 </dialog>
 <div id="toast" role="status" aria-live="polite"></div>
-<footer class="foot"><div class="wrap">Card Scanner <strong>Pilot</strong> · Data stays on this computer · <a href="/privacy">Privacy</a> · <span id="appVer"></span></div></footer>
+<footer class="foot"><div class="wrap">Card Scanner <strong>Pilot</strong> · Data stays on this computer unless an admin switches on cloud reading · <a href="/privacy">Privacy</a> · <span id="appVer"></span></div></footer>
 <script type="module" src="/static/ui/main.js?v=8"></script>
 <script src="/static/ui/desktop.js?v=4"></script>
 </body>

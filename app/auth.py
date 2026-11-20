@@ -1,9 +1,10 @@
 """Local logins for the pilot: named reviewers, PBKDF2-hashed passwords, admin role, cookie sessions.
 No external identity provider; everything lives in the same SQLite DB (tables users, sessions, settings, auth_log)."""
 import os, re, time, hmac, hashlib, secrets, threading
+from urllib.parse import urlsplit
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
-from . import store, demo
+from . import store, demo, cloud
 
 router = APIRouter()
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -28,7 +29,8 @@ def db():
     return c
 
 # ---------------- settings
-DEFAULTS = {"image_retention_days": "30", "export_retention_days": "30", "retention_enabled": "1", "ai_check_enabled": "1", "corrections_enabled": "0", "mctrade_affcode": "CardScan-Pilot", "phone_format": "gac", "mctrade_updates_enabled": "0", "phone_mode_allowed": "1", "update_check_enabled": "1"}
+DEFAULTS = {"image_retention_days": "30", "export_retention_days": "30", "retention_enabled": "1", "ai_check_enabled": "1", "corrections_enabled": "0", "mctrade_affcode": "CardScan-Pilot", "phone_format": "gac", "mctrade_updates_enabled": "0", "phone_mode_allowed": "1", "update_check_enabled": "1",
+            "read_source": "local", "cloud_base_url": cloud.DEFAULT_BASE, "cloud_model": cloud.DEFAULT_MODEL}   # AICLOUD: "local" until an admin switches the cloud service on
 def get_setting(k):
     r = db().execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone()
     return r[0] if r else DEFAULTS.get(k)
@@ -392,7 +394,7 @@ def edit_user(uid: int, request: Request, body: dict = Body(...)):
     return {"ok": True}
 
 @router.get("/api/admin/settings")
-def get_settings(): return {k: get_setting(k) for k in DEFAULTS}
+def get_settings(): return {k: get_setting(k) for k in DEFAULTS} | {"cloud_key_set": cloud.key_set()}   # the key itself is never returned, only whether one is set
 
 @router.get("/api/admin/backup-status")
 def backup_status():
@@ -403,8 +405,12 @@ def backup_status():
 SETTING_NAMES = {"image_retention_days": "Delete photos after (days)", "export_retention_days": "Delete stored exports after (days)",
                  "retention_enabled": "Automatic deletion", "ai_check_enabled": "AI double-check", "corrections_enabled": "Keep corrected cards as test examples", "mctrade_updates_enabled": "Allow 'update existing MC Trade contact'",
                  "mctrade_affcode": "MC Trade code (AffCode1)", "phone_format": "Phone format",
-                 "phone_mode_allowed": "Scan with phone", "update_check_enabled": "Check for updates"}
-def _sv(k, v): return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled", "_allowed")) else (v or "(empty)")
+                 "phone_mode_allowed": "Scan with phone", "update_check_enabled": "Check for updates",
+                 "read_source": "Where cards are read", "cloud_base_url": "Cloud service address", "cloud_model": "Cloud model"}
+def _sv(k, v):
+    if k == "cloud_base_url": return urlsplit(v).netloc or "(empty)"   # the audit names only the host, never a path
+    if k == "read_source": return {"local": "On this computer", "cloud": "Cloud service"}.get(v, v)
+    return {"1": "on", "0": "off"}.get(v, v) if k.endswith(("_enabled", "_allowed")) else (v or "(empty)")
 
 @router.post("/api/admin/settings")
 def save_settings(request: Request, body: dict = Body(...)):
@@ -443,7 +449,28 @@ def _save_settings(request, body):
             if k == "mctrade_affcode" and not re.fullmatch(r"[A-Za-z0-9 _.-]{0,40}", v): return JSONResponse({"error": "MC Trade code: letters, digits, space, - _ . only (max 40)."}, 422)
             if k == "phone_format" and v not in ("gac", "e164"): return JSONResponse({"error": "Choose a phone format from the list."}, 422)
             if k in ("phone_mode_allowed", "update_check_enabled") and v not in ("0", "1"): return JSONResponse({"error": f"{SETTING_NAMES.get(k, k)} must be on or off."}, 422)
+            if k == "read_source" and v not in ("local", "cloud"): return JSONResponse({"error": "Choose where cards are read from the list."}, 422)
+            if k == "read_source" and v == "cloud" and demo.enabled(): return JSONResponse({"error": "Cloud reading is not available in the public demo."}, 403)
+            if k == "cloud_base_url":
+                if not cloud.safe_base(v): return JSONResponse({"error": "Cloud service address: enter an https:// address with no password, no ? and no # in it."}, 422)
+                v = cloud.safe_base(v)
+            if k == "cloud_model" and not cloud.MODEL_RE.fullmatch(v): return JSONResponse({"error": "Cloud model: letters, digits and . _ : / - only."}, 422)
             new[k] = v
+    # AICLOUD: switching the cloud service on, or pointing it at another address, needs the consent box ticked in THIS request
+    # (the page sends cloud_consent only from its tick box); nothing leaves the computer otherwise
+    src_after, url_after = new.get("read_source", before["read_source"]), new.get("cloud_base_url", before["cloud_base_url"])
+    if ((src_after == "cloud" and before["read_source"] != "cloud") or url_after != before["cloud_base_url"]) and body.get("cloud_consent") is not True:   # ANY new address needs the tick, cloud on or not
+        return JSONResponse({"error": "Tick the box to confirm that card photos and the text read from them may be sent to the cloud service. Nothing was saved.", "need": "cloud_consent"}, 422)
+    key_in = body.get("cloud_api_key"); key_event = None
+    if isinstance(key_in, str) and key_in.strip():
+        if not re.fullmatch(r"[A-Za-z0-9._~+/=-]{8,512}", key_in.strip()): return JSONResponse({"error": "That doesn't look like an API key (letters, digits and . _ ~ + / = - only, 8 to 512 characters). Nothing was saved."}, 422)
+        key_event = "replaced" if cloud.key_set() else "set"
+    elif body.get("cloud_clear_key") is True and cloud.key_set(): key_event = "removed"
+    try:   # the key file FIRST: if it fails nothing else is saved and nothing is audited
+        if key_event in ("set", "replaced"): cloud.set_key(key_in)
+        elif key_event == "removed": cloud.clear_key()
+    except OSError:
+        return JSONResponse({"error": "The API key could not be saved on this computer (is the data folder writable?). Nothing was saved."}, 500)
     with db() as c:
         for k, v in new.items(): c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, v))
     if get_setting("phone_mode_allowed") != "1":
@@ -451,4 +478,11 @@ def _save_settings(request, body):
     after = get_settings(); diff = [k for k in DEFAULTS if before[k] != after[k]]
     if diff:   # only real changes are logged, in words; a save with no change logs nothing
         alog(request.state.user["username"], "settings changed: " + "; ".join(f"{SETTING_NAMES.get(k, k)}: {_sv(k, before[k])} → {_sv(k, after[k])}" for k in diff), _client(request))
-    return get_settings() | {"_changed": diff}
+    host = (cloud.safe_base(after["cloud_base_url"]) or "").split("//")[-1].split("/")[0]
+    if "read_source" in diff and after["read_source"] == "cloud":
+        alog(request.state.user["username"], f"cloud reading switched ON (consent box ticked): card photos and the text read from them now go to {host}", _client(request))
+    if key_event: alog(request.state.user["username"], f"cloud service API key {key_event} (the key itself is not recorded)", _client(request))
+    out = get_settings() | {"_changed": diff}
+    if after["read_source"] == "cloud" and (key_event or any(k in diff for k in ("read_source", "cloud_base_url", "cloud_model"))):
+        out["cloud_check"] = cloud.check()   # ONE small text-only request; the settings above are saved whatever it says
+    return out

@@ -2,7 +2,7 @@
 
 Photograph a pile of business cards after an event, check each one in a clean review screen, and export a contact list ready to import into a CRM. Built for the **Greater Akron Chamber** (GAC) data team as a pilot; it produces import files in the layout of **MC Trade** (MemberClicks), the Chamber's member database.
 
-- **Local and CPU-only.** OCR (Tesseract 5 + RapidOCR/PP-OCR), QR/vCard decoding (zxing-cpp) and a rules parser (phonenumbers, name lexicon) run on one ordinary computer. No cloud calls; card photos and contacts stay on the box.
+- **Local and CPU-only.** OCR (Tesseract 5 + RapidOCR/PP-OCR), QR/vCard decoding (zxing-cpp) and a rules parser (phonenumbers, name lexicon) run on one ordinary computer. No cloud calls unless an admin switches on the optional cloud reading service (off by default); card photos and contacts stay on the box.
 - **Human review first.** Every card lands in a review queue with per-field confidence, look-alike/duplicate warnings against the existing CRM and within the batch, plausibility hints and an audit history. Nothing is exported until a reviewer approves it.
 - **Exports:** CSV, vCard, and an MC Trade import Excel (new profiles, separate updates file, one row per person). A *dry-run* sync shows what would be created or updated; there is no live CRM write.
 - **Optional AI double-check:** a local vision model (Qwen3-VL-4B-Instruct GGUF via llama.cpp) reads every card in full and fills in the review form (fields where it disagrees with the rules show "Check"); a person still approves each card. Scanning works without it.
@@ -96,7 +96,7 @@ HTTPS: mount a certificate at `/srv/gac/certs/cert.pem` + `key.pem` (see HANDOFF
 The Space image (`Dockerfile.space`, `space/start.sh`, `space/README.md`) runs on the free CPU tier, downloads Qwen3-VL-4B-Instruct GGUF (Apache-2.0) from Hugging Face at start and runs `llama-server` with 2 threads; if the download or the server fails, the demo runs rules-only. `GAC_RULES_ONLY=1` skips the model. How to publish: [PUBLISH.md](PUBLISH.md).
 
 ## Privacy
-Business cards carry personal data. In a real install everything stays on the computer running the scanner: no telemetry, no cloud OCR, no CRM writes. Photos and stored exports are purged after a retention period (admin setting), a card can be deleted on request, and the review history keeps no personal data after deletion. See [PRIVACY-NOTE.md](PRIVACY-NOTE.md).
+Business cards carry personal data. In a real install everything stays on the computer running the scanner unless an admin switches on the optional cloud reading service (Admin → Settings → AI check; off by default, needs a key and a consent tick, then card photos and the text read from them go to that provider): no telemetry, no cloud OCR, no CRM writes. Photos and stored exports are purged after a retention period (admin setting), a card can be deleted on request, and the review history keeps no personal data after deletion. See [PRIVACY-NOTE.md](PRIVACY-NOTE.md).
 
 **This repository contains no real personal data.** All test, demo and screenshot cards are generated (`tests/gen_cards.py`, `tests/gen_hard.py`, `tests/gen_synth2.py`) with fictional people and 555 numbers; `data/existing_contacts.csv` is a fake CRM sample. The pilot's real-card benchmark, QA screenshots, logins, database and exports were left out. **Don't upload real cards to the public demo.**
 
