@@ -41,6 +41,7 @@ flowchart LR
 - Reviewer identity = signed-in user's initials (client-supplied reviewer is ignored).
 - Approve requires `validate()` to pass or an `override_reason`; re-deciding needs `confirm_redecide`; approve is refused if an approved card is the same person (unless keep_both) or a CRM match has no `crm_action`.
 - Exports return 409 while the export set contains unresolved in-set duplicates.
+- A card value sent to save, validate or merge is at most 1,000 characters (`ui.FIELD_MAX`, checked in `fields_shape_problem`); longer gets a 422. The one-value form inputs carry the same `maxlength`; emails, phones and social hold several values in one box, so only the server limits those.
 - Legacy URLs: `/`, `/queue`, `/card/{id}`, `/export.*` redirect to `/ui`; `POST /card/{id}` returns 410; `POST /scan` → /ui.
 
 ## Run

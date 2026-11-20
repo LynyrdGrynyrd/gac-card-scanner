@@ -76,3 +76,40 @@ def test_huge_user_id_is_404(env):
 def test_archive_batch_must_be_a_name(env, batch):
     r = env["adm"].post("/api/batches/archive", json={"batch": batch, "confirm": None})
     assert r.status_code == 422 and "batch" in r.json()["error"]
+
+
+@pytest.mark.parametrize("fields", [{"company": "a" * 65000}, {"emails": ["a" * 65000]}, {"phones": [{"type": "work", "number": "1" * 65000}]},
+                                    {"x_department": "a" * 65000}, {"note": "a" * 65000}])
+def test_validate_overlong_value_is_422(env, fields):
+    """Fuzz 2026-11 (schemathesis 4.33): a 65,000-letter company kept /api/validate busy for more than 10 s; text values had no length limit."""
+    r = env["rev"].post("/api/validate", json={"card_id": None, "fields": fields, "note": None})
+    assert r.status_code == 422 and "too long" in r.json()["error"]
+    ok = env["rev"].post("/api/validate", json={"card_id": None, "fields": {"company": "a" * 1000, "overall_confidence": 0.9, "confidence": {"name": 0.9}}, "note": None})
+    assert ok.status_code == 200
+
+
+@pytest.mark.parametrize("fields", [{"x_department": {"v": "a" * 2000}}, {"x_credentials": [["a" * 2000]]}, {"x_other_address": 5}])
+def test_alias_fields_must_be_text_too(env, fields):
+    """Review 2026-11 (Codex + Gemini): a dict under x_department passed the shape check and became its str() form, any length."""
+    r = env["rev"].post("/api/validate", json={"card_id": None, "fields": fields, "note": None})
+    assert r.status_code == 422 and "must be text" in r.json()["error"] and r.json()["need"] == "fix", r.text
+
+
+def test_apply_fields_never_turns_a_container_into_text(env):
+    f = {"note": "keep", "department": ""}
+    assert env["ui"]._apply_fields(f, {"note": {"v": "a" * 2000}, "x_department": ["a" * 2000]}) == {} and f == {"note": "keep", "department": ""}
+
+
+def test_save_and_merge_preview_refuse_an_overlong_value(env):
+    a, b = _card(env), _card(env); before = env["store"].get(a)["fields"]
+    r = env["rev"].post(f"/api/cards/{a}", json={"fields": {"company": "a" * 1001}})
+    assert r.status_code == 422 and "too long" in r.json()["error"] and r.json()["need"] == "fix" and env["store"].get(a)["fields"] == before
+    r = env["rev"].post(f"/api/cards/{a}/merge-preview", json={"into": b, "fields": {"x_department": "a" * 1001}})
+    assert r.status_code == 422 and "too long" in r.json()["error"] and r.json()["need"] == "fix"
+
+
+def test_length_limit_ignores_what_can_never_become_card_text(env):
+    """Review 2026-11 (Codex): a long string inside a list under a key the server ignores, or under an unused phone key, must not refuse the edit."""
+    fields = {"company": "Acme", "unused": ["x" * 1001], "boxes": {"company": ["x" * 1001]}, "phones": [{"type": "work", "number": "330-555-0100", "label": "x" * 1001}]}
+    r = env["rev"].post("/api/validate", json={"card_id": None, "fields": fields, "note": None})
+    assert r.status_code == 200, r.text

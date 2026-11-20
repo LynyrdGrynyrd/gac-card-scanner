@@ -10,8 +10,11 @@ def decode(data: bytes):
     out = []
     g = ImageOps.autocontrast(ImageOps.grayscale(img))
     big = g.resize((g.width * 2, g.height * 2), Image.LANCZOS)
+    # 2026-11: the QR family only (QR, Micro QR, rMQR). With every barcode type on, a 12 MP photo with no code spent 0.8-2.8 s here (more than the OCR).
+    # shortcut: Data Matrix / Aztec / PDF417 and 1D codes are not read, add a format here if a real card carries one.
+    fmts = zxingcpp.barcode_formats_from_str("QRCode,MicroQRCode,RMQRCode")   # rMQR by name: zxing-cpp 2.x does not count it under QRCode
     for im in (img, g, big, big.point(lambda v: 255 if v > 140 else 0), big.point(lambda v: 255 if v > 100 else 0)):
-        for r in zxingcpp.read_barcodes(im):
+        for r in zxingcpp.read_barcodes(im, formats=fmts):
             if r.text and r.text not in out: out.append(r.text)
         if out: break
     return out
